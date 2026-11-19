@@ -36,12 +36,13 @@ export const RISK_CHECK_REQUIRED_GUIDANCE =
   `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
   `Risk in this session has reached the level that requires a structured safety assessment, ` +
   `and no assessment ladder has been logged yet. On this turn, begin the ladder: ask ONE gentle, ` +
-  `direct question (start with ideation — whether they are having thoughts of ending their life), ` +
+  `direct question (start with ideation — ask whether they are having thoughts of suicide, and use the word "suicide" when you ask), ` +
   `then call the run_risk_check tool with that step, the participant's answer in their own words, ` +
   `and your clinical risk_band. Continue one rung at a time on later turns ` +
   `(ideation, plan, means, timeframe, intent), logging each with run_risk_check, ` +
   `and record protective_factors when they surface. Stay warm and validating between questions — ` +
-  `this is an assessment, not an interrogation.`;
+  `this is an assessment, not an interrogation. ` +
+  `Ask the question plainly. Do not say or imply that the participant told you something they did not say, and do not describe their feelings for them.`;
 
 /** Default trigger score: the moderate/medium entry boundary the stage-2 risk
  *  assessor already uses (40-60 = medium/passive ideation in its rubric).
@@ -236,7 +237,7 @@ export const CHAT_SAFETY_PROTOCOL_GUIDANCE =
   `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
   `A high-severity safety concern has been detected and the research team's monitoring systems have been alerted. ` +
   `Shift fully into safety assessment, gently and without alarm. One question at a time, in this order, adapting to their answers: ` +
-  `(1) ask directly whether they are having thoughts of ending their life right now; ` +
+  `(1) ask directly whether they are having thoughts of suicide right now, and use the word "suicide" when you ask; ` +
   `(2) if yes, ask whether they have thought about how; ` +
   `(3) whether they have access to that method; ` +
   `(4) whether they have a timeframe in mind. ` +
@@ -569,7 +570,16 @@ export async function executeGraduatedResponse(
    *  self-harm risk (someone else's crisis, or thoughts of harming another
    *  person); the page, the alert and the steer say so. `thirdParty: true` is
    *  the same as subject 'third_party'. */
-  options: { thirdParty?: boolean; subject?: CrisisSubject | null } = {},
+  options: {
+    thirdParty?: boolean;
+    subject?: CrisisSubject | null;
+    /** What the turn says is happening ('plan_or_time' | 'attempt'): the page
+     *  says it in words and is not folded into a page that did not. */
+    escalation?: 'plan_or_time' | 'attempt' | null;
+    /** The turn is handled as the participant's own risk and ALSO concerned
+     *  someone else; the page mentions it. */
+    alsoSubject?: CrisisSubject | null;
+  } = {},
 ): Promise<void> {
   try {
     if (severity === 'high') {
@@ -577,6 +587,7 @@ export async function executeGraduatedResponse(
         sessionId,
         riskScore,
         options.subject ?? (options.thirdParty === true ? 'third_party' : null),
+        { escalation: options.escalation ?? null, alsoSubject: options.alsoSubject ?? null },
       );
     }
   } catch (error) {
@@ -595,7 +606,7 @@ export const SAFETY_PROTOCOL_GUIDANCE =
   `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
   `A high-severity safety concern has been detected and the research team's monitoring systems have been alerted. ` +
   `Shift fully into safety assessment, gently and without alarm. One question at a time, in this order, adapting to their answers: ` +
-  `(1) ask directly whether they are having thoughts of ending their life right now; ` +
+  `(1) ask directly whether they are having thoughts of suicide right now, and use the word "suicide" when you ask; ` +
   `(2) if yes, ask whether they have thought about how; ` +
   `(3) whether they have access to that method; ` +
   `(4) whether they have a timeframe in mind. ` +
@@ -629,8 +640,14 @@ async function executeHighRiskResponse(
   sessionId: string,
   riskScore: number,
   subject: CrisisSubject | null = null,
+  extra: { escalation?: 'plan_or_time' | 'attempt' | null; alsoSubject?: CrisisSubject | null } = {},
 ): Promise<void> {
   const subjectDetail = subject ? { subject } : {};
+  const pageFacts = {
+    ...subjectDetail,
+    ...(extra.escalation ? { escalation: extra.escalation } : {}),
+    ...(extra.alsoSubject ? { alsoSubject: extra.alsoSubject } : {}),
+  };
   try {
     // Crisis resources to the participant FIRST, before anything that can
     // stall (ai-therapist-293): on GPT-Live the vendor's filter can close the
@@ -647,7 +664,7 @@ async function executeHighRiskResponse(
     await logInterventionAction(sessionId, 'high_risk_emergency', {
       riskScore,
       emergencyProtocol: 'activated',
-      ...subjectDetail,
+      ...pageFacts,
     });
 
     // Page a human: the dashboard socket alert only works if someone is
@@ -658,7 +675,7 @@ async function executeHighRiskResponse(
     // who is at risk, and a page about someone else never absorbs one about
     // the participant (or the reverse).
     import('./crisisPaging.service.js')
-      .then((m) => m.pageHighRisk(sessionId, riskScore, subject ? { subject } : {}))
+      .then((m) => m.pageHighRisk(sessionId, riskScore, pageFacts))
       .catch((err) => console.error('Error sending crisis SMS:', err));
 
     // Steer the live model into a structured safety assessment, or, when the

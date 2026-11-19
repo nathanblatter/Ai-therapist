@@ -481,11 +481,13 @@ describe('review fix: a periodic sweep that only repeats the session level gets 
 
   it('a keyword turn in a risk-bearing session keeps the bonus, as before', async () => {
     sessionIs({ ...FLAGGED_MEDIUM, trajectory: [50, 50, 50] });
-    createMock.mockResolvedValue(verdict(60));
+    // 65: at the page line already, so the whole bonus applies (a turn below
+    // the line is held under it, ai-therapist-357).
+    createMock.mockResolvedValue(verdict(65));
     const text = 'I feel so hopeless';
     expect(detectCrisisKeywords(text).keywordScore).toBeGreaterThan(0);
     const r = await analyzeMessageRisk(turn(text), [{ role: 'user', content: text }]);
-    expect(r.riskScore).toBe(75);
+    expect(r.riskScore).toBe(80);
   });
 });
 
@@ -521,20 +523,30 @@ describe('review of PR #46: a stitched voice sentence is not its own run-up', ()
 
   it('leaves the earlier part of the sentence out of the trajectory', async () => {
     historyIs();
+    // Assessed at 66 so the bonus is not held under the page line (a turn
+    // below 65 is capped at 64 whatever the bonus, ai-therapist-357, which
+    // would hide the difference this pair of tests is about).
+    createMock.mockResolvedValue(verdict(66));
+    const r = await analyzeMessageRisk({ ...turn(sentence), stitched_message_ids: ['8'] }, []);
+    // The sentence's own earlier part adds no spike: only the +15 from the
+    // genuine run-up.
+    expect(r.riskScore).toBe(81);
+    expect(r.severity).toBe('high');
+  });
+
+  it('at the measured score (55) the stitched sentence stays medium: no page from the run-up alone', async () => {
+    historyIs();
     createMock.mockResolvedValue(verdict(55));
     const r = await analyzeMessageRisk({ ...turn(sentence), stitched_message_ids: ['8'] }, []);
-    // The score is what this test pins: the sentence's own earlier part adds
-    // no spike. 70 was medium when high began at 75; since the cutoff moved to
-    // 65 (2026-11-18) the remaining +15 from the genuine run-up makes it high.
-    expect(r.riskScore).toBe(70);
-    expect(r.severity).toBe('high');
+    expect(r.riskScore).toBe(64);
+    expect(r.severity).toBe('medium');
   });
 
   it('an ordinary turn after the same history keeps the spike bonus, as before', async () => {
     historyIs();
-    createMock.mockResolvedValue(verdict(55));
+    createMock.mockResolvedValue(verdict(66));
     const r = await analyzeMessageRisk(turn(sentence), []);
-    expect(r.riskScore).toBe(75);
+    expect(r.riskScore).toBe(86);
     expect(r.severity).toBe('high');
   });
 });

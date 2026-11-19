@@ -66,7 +66,15 @@ export interface ParticipantFlagRow {
   session_id: string;
   severity: string | null;
   risk_score: number | null;
+  /** Who the flag or the scored turn was about: 'third_party' or
+   *  'harm_to_others' when the detector labelled it so, otherwise null (the
+   *  participant's own risk, and every row written before the label existed). */
+  subject?: string | null;
 }
+
+/** crisis_events.risk_factors labels (crisisDetection THIRD_PARTY_FACTOR / HARM_TO_OTHERS_FACTOR). */
+const THIRD_PARTY_FACTOR_JSON = '["third party at risk (reported by participant)"]';
+const HARM_TO_OTHERS_FACTOR_JSON = '["risk to others (thoughts of harming another person)"]';
 
 /**
  * Crisis flags that came from what the participant said (or from a person or
@@ -84,7 +92,10 @@ export async function getParticipantFlagEvents(
   since: Date,
 ): Promise<ParticipantFlagRow[]> {
   const result = await pool.query<ParticipantFlagRow>(
-    `SELECT ce.session_id, ce.severity, ce.risk_score
+    `SELECT ce.session_id, ce.severity, ce.risk_score,
+            CASE WHEN ce.risk_factors @> '${THIRD_PARTY_FACTOR_JSON}'::jsonb THEN 'third_party'
+                 WHEN ce.risk_factors @> '${HARM_TO_OTHERS_FACTOR_JSON}'::jsonb THEN 'harm_to_others'
+                 ELSE NULL END AS subject
        FROM crisis_events ce
        JOIN therapy_sessions ts ON ts.session_id = ce.session_id
       WHERE ce.event_type = 'flagged'
@@ -116,20 +127,28 @@ export async function getParticipantAssessedRisk(
   userId: number | null,
   since: Date,
 ): Promise<ParticipantFlagRow[]> {
-  const result = await pool.query<{ severity: string | null; risk_score: number | string | null }>(
-    `SELECT h.severity, MAX(h.risk_score) AS risk_score
+  const result = await pool.query<{
+    severity: string | null;
+    risk_score: number | string | null;
+    subject: string | null;
+  }>(
+    `SELECT h.severity, MAX(h.risk_score) AS risk_score,
+            CASE WHEN h.score_factors->>'third_party' = 'true' THEN 'third_party'
+                 WHEN h.score_factors->>'harm_to_others' = 'true' THEN 'harm_to_others'
+                 ELSE NULL END AS subject
        FROM risk_score_history h
        JOIN therapy_sessions ts ON ts.session_id = h.session_id
       WHERE h.severity IN ('medium', 'high')
         AND (h.session_id = $1
              OR ($2::int IS NOT NULL AND ts.user_id = $2::int AND h.calculated_at >= $3))
-      GROUP BY h.severity`,
+      GROUP BY h.severity, 3`,
     [sessionId, userId, since],
   );
   return result.rows.map((row) => ({
     session_id: sessionId,
     severity: row.severity,
     risk_score: row.risk_score === null ? null : Number(row.risk_score),
+    subject: row.subject ?? null,
   }));
 }
 

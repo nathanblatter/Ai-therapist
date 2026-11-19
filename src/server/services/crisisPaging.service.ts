@@ -83,6 +83,48 @@ export const INCIDENT_LOOKBACK_MS = 2 * 60 * 60 * 1000;
 export const CRITICAL_RISK_SCORE = 90;
 
 /**
+ * OWNER'S CLINICAL CALL, NOT YET MADE (ai-therapist-353). When a participant
+ * the on-call was paged about minutes ago goes from ideation to a stated time
+ * or plan ("tonight", "I have what I need") and the score stays below
+ * CRITICAL_RISK_SCORE (it is typically 85), does that turn page again inside
+ * the 15-minute window?
+ *
+ *   true  (the default: fail toward paging) a page that says what changed.
+ *   false the turn is still flagged and recorded as an escalation, and is
+ *         folded into the earlier page; only an attempt in progress or a
+ *         score of 90 or more pages again.
+ *
+ * An attempt in progress always pages again; that is not behind this switch.
+ */
+export const REPAGE_ON_STATED_TIME_OR_PLAN = true;
+
+/** What a high turn says is happening (crisisDetection `acute`). */
+export type PageEscalation = 'plan_or_time' | 'attempt';
+
+function asEscalation(value: unknown): PageEscalation | null {
+  return value === 'attempt' || value === 'plan_or_time' ? value : null;
+}
+
+/**
+ * How far along a risk page says things are: 0 ideation or unspecified, 1 a
+ * stated time or plan, 2 an attempt in progress. A page covers a later one
+ * only when it was at least as far along, so "stated intent tonight" is not
+ * swallowed by the page about ideation ten minutes earlier, and an attempt is
+ * never swallowed by anything short of a page about an attempt.
+ */
+export function pageStage(escalation: PageEscalation | null | undefined): 0 | 1 | 2 {
+  if (escalation === 'attempt') return 2;
+  if (escalation === 'plan_or_time') return REPAGE_ON_STATED_TIME_OR_PLAN ? 1 : 0;
+  return 0;
+}
+
+/** The page's own words for what changed. No participant text, no PHI. */
+export const ESCALATION_WORDS: Record<PageEscalation, string> = {
+  plan_or_time: 'STATED INTENT WITH A TIME OR PLAN (for example "tonight", or the means at hand)',
+  attempt: 'ATTEMPT IN PROGRESS, or an act already taken',
+};
+
+/**
  * After a content-filter cut that was not paged (no risk signal), how long
  * the participant has to say something, in any session, before the on-call is
  * paged after all. In the 2026-11-18 stage test the participant spoke 12 s
@@ -178,9 +220,12 @@ interface PriorPage {
   level: PageLevel;
   kinds: PageKind[];
   riskScore: number | null;
-  /** Who a 'risk' page was about; 'own' for vendor pages and for rows written
-   *  before the subject was recorded. */
+  /** Who a page was about: for a 'risk' page the person the flag concerned,
+   *  for a vendor page the person the session's peak risk concerned. 'own'
+   *  for rows written before the subject was recorded. */
   subject: PageSubject;
+  /** pageStage of a risk page; 0 for vendor pages and older rows. */
+  stage: 0 | 1 | 2;
 }
 
 interface LedgerEntry extends PriorPage {
@@ -197,8 +242,10 @@ interface PageRequest {
   kind: PageKind;
   level: PageLevel;
   riskScore: number | null;
-  /** Who a 'risk' page is about. Vendor pages are always 'own'. */
+  /** Who the page is about (see PriorPage.subject). */
   subject?: PageSubject;
+  /** What a risk turn says is happening, when it says so. */
+  escalation?: PageEscalation | null;
   /** Free-form facts for the audit row (peak severity, cause, ...). */
   facts: Record<string, unknown>;
   /** One line for the admin dashboards and the audit row. No PHI. */
@@ -293,6 +340,7 @@ export function priorPageFromRow(row: PagingRecordRow): PriorPage | null {
     kinds,
     riskScore: typeof score === 'number' ? score : null,
     subject: asPageSubject(paging['subject']),
+    stage: paging['stage'] === 2 ? 2 : paging['stage'] === 1 ? 1 : 0,
   };
 }
 
@@ -306,14 +354,17 @@ export function priorPageFromRow(row: PagingRecordRow): PriorPage | null {
  * high flag, because it already says the participant is at high risk.
  */
 export function pageCovers(
-  prior: Pick<PriorPage, 'at' | 'level' | 'kinds'> & { subject?: PageSubject },
-  request: { kind: PageKind; level: PageLevel; subject?: PageSubject },
+  prior: Pick<PriorPage, 'at' | 'level' | 'kinds'> & { subject?: PageSubject; stage?: 0 | 1 | 2 },
+  request: { kind: PageKind; level: PageLevel; subject?: PageSubject; escalation?: PageEscalation | null },
   now: number,
 ): boolean {
   const age = now - prior.at;
   if (age < 0 || age >= PAGE_FOLD_WINDOW_MS) return false;
   if (prior.level < request.level) return false;
   if (request.kind !== 'risk') return prior.kinds.includes(request.kind);
+  // A page that did not say "a time or plan" / "an attempt" has not told the
+  // on-call that (ai-therapist-353).
+  if ((prior.stage ?? 0) < pageStage(request.escalation)) return false;
   // A risk page is covered only by a page about the same person. A page that
   // said "third party, not their own" (or "risk to others, not self-harm")
   // has told the on-call nothing about the participant's own risk, and the
@@ -322,12 +373,23 @@ export function pageCovers(
   return (prior.subject ?? 'own') === (request.subject ?? 'own');
 }
 
-/** Page level of a high-severity risk flag. */
-export function riskPageLevel(riskScore: number): PageLevel {
-  return riskScore >= CRITICAL_RISK_SCORE ? PAGE_LEVEL.critical : PAGE_LEVEL.high;
+/** Page level of a high-severity risk flag: critical at 90 and up, and for an
+ *  attempt in progress whatever the number. */
+export function riskPageLevel(riskScore: number, escalation: PageEscalation | null = null): PageLevel {
+  return riskScore >= CRITICAL_RISK_SCORE || escalation === 'attempt' ? PAGE_LEVEL.critical : PAGE_LEVEL.high;
 }
 
 export type PeakSeverity = 'none' | 'medium' | 'high' | 'unknown';
+
+/** The peak risk of an incident and whom it concerned (resolveIncidentPeak). */
+export interface IncidentPeak {
+  severity: PeakSeverity;
+  riskScore: number | null;
+  /** Whom the peak was about. Absent or 'own': the participant. */
+  subject?: PageSubject;
+  /** The participant's OWN peak, when the overall peak was about someone else. */
+  ownSeverity?: PeakSeverity;
+}
 
 /**
  * What a content-filter termination becomes, from the participant's peak risk
@@ -389,8 +451,10 @@ export function buildRiskPageMessage(
   riskScore: number,
   ctx: Pick<MessageContext, 'previousPage' | 'unpagedCut' | 'now'>,
   subject: PageSubject = 'own',
+  extra: { escalation?: PageEscalation | null; alsoSubject?: PageSubject | null } = {},
 ): string {
-  const critical = riskScore >= CRITICAL_RISK_SCORE;
+  const escalation = extra.escalation ?? null;
+  const critical = riskScore >= CRITICAL_RISK_SCORE || escalation === 'attempt';
   const previous = ctx.previousPage;
   // "Escalated" and "up from n" compare like with like: a third party's 95
   // after the participant's own 75 is a different person, not an escalation.
@@ -400,6 +464,18 @@ export function buildRiskPageMessage(
   return lines(
     `URGENT: AI-Therapist HIGH crisis flag${who}${critical && sameSubject ? ' (ESCALATED)' : ''}`,
     PAGE_SUBJECT_LABEL[subject],
+    // What changed, in words: the numbers alone do not say "tonight" or "an
+    // attempt is under way" (ai-therapist-353).
+    escalation
+      ? `${sameSubject ? 'WHAT CHANGED' : 'WHAT IT SAYS'}: ${ESCALATION_WORDS[escalation]}` +
+          (subject === 'third_party' ? ', for the person the participant is reporting on.' : '.')
+      : null,
+    // Own risk and someone else in the same message (handled as own risk).
+    subject === 'own' && extra.alsoSubject === 'harm_to_others'
+      ? 'ALSO: the same message describes thoughts of harming another person.'
+      : subject === 'own' && extra.alsoSubject === 'third_party'
+        ? "ALSO: the same message reports someone else's crisis."
+        : null,
     // The earlier page was about someone else: say that this one is not.
     subject === 'own' && previous && !sameSubject && previous.kinds.includes('risk')
       ? "PARTICIPANT'S OWN RISK: the earlier page was about someone else; this one is about the participant."
@@ -421,15 +497,17 @@ export function buildRiskPageMessage(
 /** The vendor's content filter ended a voice session. */
 export function buildVendorCutMessage(
   sessionId: string,
-  peak: { severity: PeakSeverity; riskScore: number | null },
+  peak: IncidentPeak,
   ctx: Pick<MessageContext, 'previousPage' | 'now'>,
 ): string {
   const score = peak.riskScore === null ? '' : ` (${peak.riskScore}/100)`;
   if (peak.severity === 'high') {
+    const subject = peak.subject ?? 'own';
     return lines(
-      'URGENT: AI-Therapist voice session ENDED BY THE VENDOR FILTER during a HIGH crisis flag',
+      'URGENT: AI-Therapist voice session ENDED BY THE VENDOR FILTER during a HIGH crisis flag' +
+        (subject === 'third_party' ? ' (third party)' : subject === 'harm_to_others' ? ' (risk to others)' : ''),
       `Why: VENDOR CUT, not a new risk score. The participant lost the assistant mid-conversation; ` +
-        `their risk before the cut was HIGH${score}.`,
+        whoseRiskBeforeCut(peak, score),
       `Session ${shortId(sessionId)}. The app tries to reconnect them under a new session id; ` +
         'further cuts in the next 15 minutes are recorded, not paged.',
       followUpLine(ctx),
@@ -451,6 +529,25 @@ export function buildVendorCutMessage(
 }
 
 /**
+ * Whose risk was high when the vendor cut the session. "Their risk before the
+ * cut was HIGH" is false, and sends the on-call to the wrong problem, when the
+ * high flag was about someone the participant was reporting on or might harm.
+ */
+function whoseRiskBeforeCut(peak: IncidentPeak, score: string): string {
+  const own =
+    peak.ownSeverity === 'high' || peak.ownSeverity === 'medium'
+      ? `The participant's own assessed risk was ${peak.ownSeverity.toUpperCase()}.`
+      : "No risk of the participant's own was flagged.";
+  if (peak.subject === 'third_party') {
+    return `the HIGH flag${score} was about SOMEONE ELSE the participant was reporting on (third party at risk), not the participant. ${own}`;
+  }
+  if (peak.subject === 'harm_to_others') {
+    return `the HIGH flag${score} was about thoughts of HARMING ANOTHER PERSON (risk to others), not self-harm. ${own}`;
+  }
+  return `the participant's own risk before the cut was HIGH${score}.`;
+}
+
+/**
  * A cut that was not paged at the time, and the participant has been silent
  * since. `peak` is their risk as it stands NOW, not at the cut: the turn the
  * filter cut on can be scored a second or two after the cut, so "nothing was
@@ -461,15 +558,21 @@ export function buildVendorCutSilenceMessage(
   sessionId: string,
   silentForMs: number,
   ctx: Pick<MessageContext, 'previousPage' | 'now'>,
-  peak: { severity: PeakSeverity; riskScore: number | null } = { severity: 'none', riskScore: null },
+  peak: IncidentPeak = { severity: 'none', riskScore: null },
 ): string {
   const minutes = Math.max(1, Math.round(silentForMs / 60_000));
   const score = peak.riskScore === null ? '' : ` (${peak.riskScore}/100)`;
   if (peak.severity === 'high') {
+    const subject = peak.subject ?? 'own';
     return lines(
-      'URGENT: AI-Therapist voice session ENDED BY THE VENDOR FILTER at HIGH risk, and the participant has NOT come back',
-      `Why: VENDOR CUT, then ${minutes} min of silence. Their risk is HIGH${score}; they have not spoken in any ` +
-        'session since the cut.',
+      'URGENT: AI-Therapist voice session ENDED BY THE VENDOR FILTER at HIGH risk' +
+        (subject === 'third_party' ? ' (third party)' : subject === 'harm_to_others' ? ' (risk to others)' : '') +
+        ', and the participant has NOT come back',
+      `Why: VENDOR CUT, then ${minutes} min of silence. ` +
+        (subject === 'own'
+          ? `Their risk is HIGH${score}; `
+          : `${whoseRiskBeforeCut(peak, score).replace(/\.$/, '')}; `) +
+        'they have not spoken in any session since the cut.',
       `Session ${shortId(sessionId)}`,
       followUpLine(ctx),
       'Review the transcript and reach out.',
@@ -655,7 +758,7 @@ async function fold(request: PageRequest, cover: PriorPage, now: number): Promis
         kinds: [kind],
         delivered: false,
         riskScore: request.riskScore,
-        ...(request.kind === 'risk' ? { subject: request.subject ?? 'own' } : {}),
+        ...subjectAndStage(request),
         foldedIntoActionId: coverActionId,
         foldedIntoSessionId: cover.sessionId,
         foldedIntoLevel: cover.level,
@@ -723,6 +826,7 @@ async function send(
     kinds,
     riskScore: request.riskScore,
     subject: request.subject ?? 'own',
+    stage: request.kind === 'risk' ? pageStage(request.escalation) : 0,
     settled: false,
     delivered: false,
     delivery: new Promise<boolean>((resolve) => (resolveDelivery = resolve)),
@@ -757,7 +861,7 @@ async function send(
         kinds,
         delivered: ok,
         riskScore: request.riskScore,
-        ...(kind === 'risk' ? { subject: request.subject ?? 'own' } : {}),
+        ...subjectAndStage(request),
         followsActionId: previousPage?.actionId ?? null,
         ...request.facts,
         summary: `${ok ? 'Paged on-call' : 'Page attempted, not delivered'}: ${request.summary}`,
@@ -774,6 +878,17 @@ async function send(
   return decision;
 }
 
+/** What a stored paging row records about whom and how far along. */
+function subjectAndStage(request: PageRequest): Record<string, unknown> {
+  const subject = request.subject ?? 'own';
+  if (request.kind !== 'risk') return subject === 'own' ? {} : { subject };
+  return {
+    subject,
+    stage: pageStage(request.escalation),
+    ...(request.escalation ? { escalation: request.escalation } : {}),
+  };
+}
+
 // ---- entry points ----------------------------------------------------------
 
 /**
@@ -788,10 +903,13 @@ export async function pageHighRisk(
    *  facts for the audit row. */
   facts: Record<string, unknown> = {},
 ): Promise<PageDecision> {
-  const level = riskPageLevel(riskScore);
+  const escalation = asEscalation(facts['escalation']);
+  const level = riskPageLevel(riskScore, escalation);
   const subject = asPageSubject(facts['subject']);
+  const alsoSubject = facts['alsoSubject'] === undefined ? null : asPageSubject(facts['alsoSubject']);
   const about =
     subject === 'third_party' ? ' (third party at risk)' : subject === 'harm_to_others' ? ' (risk to others)' : '';
+  const extra = { escalation, alsoSubject };
   try {
     return await dispatchPage({
       sessionId,
@@ -799,9 +917,12 @@ export async function pageHighRisk(
       level,
       riskScore,
       subject,
+      escalation,
       facts: { severity: 'high', ...facts },
-      summary: `high risk flag${about}, score ${riskScore}/100.`,
-      buildMessage: (ctx) => buildRiskPageMessage(sessionId, riskScore, ctx, subject),
+      summary:
+        `high risk flag${about}, score ${riskScore}/100` +
+        (escalation ? `; ${ESCALATION_WORDS[escalation].toLowerCase()}.` : '.'),
+      buildMessage: (ctx) => buildRiskPageMessage(sessionId, riskScore, ctx, subject, extra),
     });
   } catch (err) {
     // dispatchPage is written not to throw; if it does, the page still goes.
@@ -810,7 +931,7 @@ export async function pageHighRisk(
       sessionId,
       'risk',
       level,
-      buildRiskPageMessage(sessionId, riskScore, bareContext(), subject),
+      buildRiskPageMessage(sessionId, riskScore, bareContext(), subject, extra),
     );
   }
 }
@@ -846,7 +967,8 @@ export async function pageHighTurnWithoutReflag(
   // took the pills" 95, "yes they are right here" 90. Whether it becomes an
   // SMS is still the folding rule's decision: a critical page delivered in
   // the last 15 minutes absorbs it, a high one does not.
-  const critical = riskPageLevel(riskScore) === PAGE_LEVEL.critical;
+  const escalation = asEscalation(facts['escalation']);
+  const critical = riskPageLevel(riskScore, escalation) === PAGE_LEVEL.critical;
   let stampOnly = true;
   try {
     stampOnly = (await withTimeout(highFlagIsContinuationStampOnly(sessionId), 'continuation stamp check')) !== false;
@@ -860,8 +982,16 @@ export async function pageHighTurnWithoutReflag(
   if (stampOnly) {
     return await pageHighRisk(sessionId, riskScore, { ...facts, trigger: 'high_turn_in_recovery_session' });
   }
-  if (!critical) return null;
-  return await pageHighRisk(sessionId, riskScore, { ...facts, trigger: 'critical_turn_without_reflag' });
+  if (critical) {
+    return await pageHighRisk(sessionId, riskScore, { ...facts, trigger: 'critical_turn_without_reflag' });
+  }
+  // A stated time or plan the pipeline did not re-flag (it does, the first
+  // time; this is the second mention, or a lookup that failed): ask, and let
+  // the stage rule decide. A page that already said so absorbs it.
+  if (escalation === 'plan_or_time' && REPAGE_ON_STATED_TIME_OR_PLAN) {
+    return await pageHighRisk(sessionId, riskScore, { ...facts, trigger: 'stated_plan_without_reflag' });
+  }
+  return null;
 }
 
 function bareContext(): MessageContext {
@@ -927,11 +1057,16 @@ export async function runVendorCutSilenceCheck(sessionId: string, cutAt: number)
       kind: 'vendor_cut',
       level: vendorCutLevel(peak.severity) ?? PAGE_LEVEL.mediumVendorCut,
       riskScore: peak.riskScore,
-      facts: { cause: 'content_filter', peakSeverity: peak.severity, trigger: 'participant_silent_after_cut' },
+      subject: peak.subject ?? 'own',
+      facts: {
+        cause: 'content_filter',
+        peakSeverity: peak.severity,
+        trigger: 'participant_silent_after_cut',
+        ...(peak.subject && peak.subject !== 'own' ? { ownSeverity: peak.ownSeverity ?? 'none' } : {}),
+      },
       summary:
         'the vendor content filter ended this voice session and the participant has not spoken in any session ' +
-        `for ${Math.round(silentForMs / 1000)} s since; participant risk now: ${peak.severity}` +
-        `${peak.riskScore === null ? '' : ` (${peak.riskScore}/100)`}.`,
+        `for ${Math.round(silentForMs / 1000)} s since; ${peakWords(peak, 'now')}.`,
       buildMessage: (ctx) => buildVendorCutSilenceMessage(sessionId, silentForMs, ctx, peak),
     });
   } catch (err) {
@@ -941,6 +1076,19 @@ export async function runVendorCutSilenceCheck(sessionId: string, cutAt: number)
 }
 
 const SEVERITY_ORDER: Record<string, number> = { none: 0, low: 0, medium: 1, high: 2 };
+
+/** "participant risk before the cut: high (90/100)", or whose risk it was. */
+function peakWords(peak: IncidentPeak, when: string): string {
+  const score = peak.riskScore === null ? '' : ` (${peak.riskScore}/100)`;
+  if (peak.subject === 'third_party' || peak.subject === 'harm_to_others') {
+    return (
+      `risk ${when}: ${peak.severity}${score}, about ` +
+      (peak.subject === 'third_party' ? 'a third party the participant was reporting on' : 'harm to another person') +
+      `; the participant's own risk: ${peak.ownSeverity ?? 'none'}`
+    );
+  }
+  return `participant risk ${when}: ${peak.severity}${score}`;
+}
 
 /**
  * The participant's peak risk in this incident: the highest crisis flag, or
@@ -959,7 +1107,7 @@ const SEVERITY_ORDER: Record<string, number> = { none: 0, low: 0, medium: 1, hig
 export async function resolveIncidentPeak(
   sessionId: string,
   sessionRow: { flagged: boolean; severity: string | null },
-): Promise<{ severity: PeakSeverity; riskScore: number | null }> {
+): Promise<IncidentPeak> {
   const rowSeverity: PeakSeverity = !sessionRow.flagged
     ? 'none'
     : sessionRow.severity === 'high'
@@ -980,22 +1128,37 @@ export async function resolveIncidentPeak(
       })(),
       'incident risk lookup',
     );
-    let severity: PeakSeverity = 'none';
-    let riskScore: number | null = null;
+    // Peak per person the risk concerned. The participant's own risk decides
+    // when it is at least as high as anyone else's: a page must never read
+    // "about someone else" while the participant is at the same level.
+    const peaks = new Map<PageSubject, { severity: PeakSeverity; riskScore: number | null }>();
     for (const event of events) {
       const rank = SEVERITY_ORDER[event.severity ?? 'none'] ?? 0;
       if (rank === 0) continue;
-      if (rank > SEVERITY_ORDER[severity]) {
-        severity = rank === 2 ? 'high' : 'medium';
-        riskScore = event.risk_score ?? null;
-      } else if (rank === SEVERITY_ORDER[severity] && (event.risk_score ?? -1) > (riskScore ?? -1)) {
-        riskScore = event.risk_score ?? null;
+      const who = asPageSubject(event.subject);
+      const best = peaks.get(who) ?? { severity: 'none' as PeakSeverity, riskScore: null };
+      if (rank > SEVERITY_ORDER[best.severity]) {
+        peaks.set(who, { severity: rank === 2 ? 'high' : 'medium', riskScore: event.risk_score ?? null });
+      } else if (rank === SEVERITY_ORDER[best.severity] && (event.risk_score ?? -1) > (best.riskScore ?? -1)) {
+        peaks.set(who, { severity: best.severity, riskScore: event.risk_score ?? null });
       }
     }
-    if (userId === null && SEVERITY_ORDER[rowSeverity] > SEVERITY_ORDER[severity]) {
+    const own = peaks.get('own') ?? { severity: 'none' as PeakSeverity, riskScore: null };
+    let subject: PageSubject = 'own';
+    let top = own;
+    for (const who of ['third_party', 'harm_to_others'] as const) {
+      const other = peaks.get(who);
+      if (other && SEVERITY_ORDER[other.severity] > SEVERITY_ORDER[top.severity]) {
+        top = other;
+        subject = who;
+      }
+    }
+    if (userId === null && SEVERITY_ORDER[rowSeverity] > SEVERITY_ORDER[top.severity]) {
       return { severity: rowSeverity, riskScore: null };
     }
-    return { severity, riskScore };
+    return subject === 'own'
+      ? { severity: top.severity, riskScore: top.riskScore }
+      : { severity: top.severity, riskScore: top.riskScore, subject, ownSeverity: own.severity };
   } catch (err) {
     log.error({ err }, `[paging] could not read the incident's risk for ${sessionId.substring(0, 12)}...`);
     return { severity: rowSeverity === 'none' ? 'unknown' : rowSeverity, riskScore: null };
@@ -1093,10 +1256,13 @@ export async function pageVendorTermination(input: {
       kind: 'vendor_cut',
       level,
       riskScore: peak.riskScore,
-      facts: { cause, peakSeverity: peak.severity },
-      summary:
-        `the vendor content filter ended this voice session; participant risk before the cut: ${peak.severity}` +
-        `${peak.riskScore === null ? '' : ` (${peak.riskScore}/100)`}.`,
+      subject: peak.subject ?? 'own',
+      facts: {
+        cause,
+        peakSeverity: peak.severity,
+        ...(peak.subject && peak.subject !== 'own' ? { ownSeverity: peak.ownSeverity ?? 'none' } : {}),
+      },
+      summary: `the vendor content filter ended this voice session; ${peakWords(peak, 'before the cut')}.`,
       buildMessage: (ctx) => buildVendorCutMessage(sessionId, peak, ctx),
     });
   } catch (err) {

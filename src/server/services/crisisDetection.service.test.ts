@@ -296,7 +296,10 @@ describe('analyzeMessageRisk (two-stage pipeline)', () => {
       { content: "I can't go on like this", session_id: 'sess-traj', message_id: 1 },
       [],
     );
-    expect(r.riskScore).toBe(70); // 55 + 15 deteriorating-trend bonus
+    // 55 + 15 would be 70, which is over the page line (65): the bonus is
+    // applied but may not carry a turn across it by itself (ai-therapist-357).
+    expect(r.riskScore).toBe(64);
+    expect(r.severity).toBe('medium');
     expect(r.factors).toContain('trajectory: deteriorating');
     expect(r.breakdown.trajectory).toBe(15);
   });

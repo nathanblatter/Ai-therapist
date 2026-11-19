@@ -210,7 +210,7 @@ describe("ai-therapist-326: someone else's active crisis", () => {
   it('the rubric no longer caps a third-party crisis at 20 and still keeps worry and bereavement low', () => {
     expect(RISK_ASSESSMENT_PROMPT).not.toMatch(/someone ELSE's crisis or loss → score 0-20/);
     expect(RISK_ASSESSMENT_PROMPT).toMatch(/ACTIVE or IMMINENT and unresolved → 80-100, high/);
-    expect(RISK_ASSESSMENT_PROMPT).toMatch(/Ordinary worry, a past crisis that has resolved,[^\n]*→ 0-20, none\/low/);
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/Ordinary worry, a past crisis that has resolved,[^\n]*→ 0-24, none/);
     // The help-seeking reminder that keeps "I'm going to do it, I'll text my
     // sister tonight" from being read as intent (it flipped to a page without it).
     expect(RISK_ASSESSMENT_PROMPT).toMatch(/read the latest message once more for help-seeking/);
@@ -483,7 +483,9 @@ describe('ai-therapist-330: thoughts of harming another person', () => {
   it('the rubric separates idiom from credible intent and offers the context label', () => {
     expect(RISK_ASSESSMENT_PROMPT).toMatch(/Harm to others\./);
     expect(RISK_ASSESSMENT_PROMPT).toMatch(/Idiom, exaggeration and ordinary anger → 0-10, none/);
-    expect(RISK_ASSESSMENT_PROMPT).toMatch(/Credible intent or planning → 75-100, high, context "harm_to_others"/);
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(
+      /Credible intent or planning → 65-100, high \([^)]*\), context "harm_to_others"/,
+    );
     expect(RISK_ASSESSMENT_PROMPT).toContain('"unclear" | "harm_to_others"');
   });
 });
@@ -500,7 +502,7 @@ describe('the rubric agrees with the cutoff (owner decision 2026-11-18: 65 and u
     for (const m of RISK_ASSESSMENT_PROMPT.matchAll(/(\d+)-(\d+), medium/g)) {
       expect(Number(m[2]), m[0]).toBeLessThan(RISK_BANDS.high);
     }
-    expect(RISK_ASSESSMENT_PROMPT).toMatch(/active ideation without plan → 65-75, high, ALWAYS at least 65/);
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/active ideation without plan → 65-79, high, ALWAYS at least 65/);
     expect(RISK_ASSESSMENT_PROMPT).not.toMatch(/60-75, high/);
   });
 

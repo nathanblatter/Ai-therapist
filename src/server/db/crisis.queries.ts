@@ -178,6 +178,28 @@ export async function getSessionHighFlagSubjects(sessionId: string): Promise<Arr
   return result.rows.map((row) => row.subject ?? null);
 }
 
+/**
+ * What this session's automatic high flags have already said was happening:
+ * the `escalation` recorded on each 'auto_flag' row ('plan_or_time' or
+ * 'attempt'), with the subject it concerned (null: the participant). Lets the
+ * pipeline write ONE flag event the first time a session reaches each stage,
+ * instead of none (the score rule) or one per turn.
+ */
+export async function getSessionFlagEscalations(
+  sessionId: string,
+): Promise<Array<{ escalation: string; subject: string | null }>> {
+  const result = await pool.query<{ escalation: string; subject: string | null }>(
+    `SELECT action_details->>'escalation' AS escalation, action_details->>'subject' AS subject
+       FROM intervention_actions
+      WHERE session_id = $1
+        AND action_type = 'auto_flag'
+        AND action_details->>'severity' = 'high'
+        AND action_details->>'escalation' IS NOT NULL`,
+    [sessionId],
+  );
+  return result.rows;
+}
+
 export interface AllCrisisData {
   clinicalReviews: Record<string, unknown>[];
   crisisEvents: Record<string, unknown>[];

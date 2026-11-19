@@ -32,6 +32,7 @@ import {
   getSessionCheckin,
   getSessionCrisisState,
   getSessionHighFlagSubjects,
+  getSessionFlagEscalations,
   type SessionCheckin,
 } from '../db/index.js';
 import { sessionSuppressesSafetyPipeline } from './suppression.js';
@@ -356,7 +357,31 @@ export async function runCrisisPipeline(
         !flagByLevel && severity === 'high' && alreadyHigh
           ? await isFirstHighFlagAbout(turn.sessionId, subject)
           : { first: false, earlier: [] as FlagSubject[] };
-      const shouldFlag = flagByLevel || flagBySubject.first;
+      // An escalation INSIDE the high band (ai-therapist-353). The level rule
+      // re-flags only when a score is more than 10 above the stored one, so a
+      // participant could go from ideation (75) to "tonight" (85) to "I already
+      // took the pills" (95) with one flag event and one text: 85 is not more
+      // than 75 + 10, and 95 is not more than 85 + 10. Two facts flag whatever
+      // the stored score is:
+      //  - the assessor's literal observation that the latest message states a
+      //    time or plan, or an attempt in progress (`acute`), the first time
+      //    the session reaches that stage for that person;
+      //  - the score crossing into the critical range (90 and up) from below,
+      //    in case the observation is missing.
+      // The flag event, the dashboard alert and the page then say WHAT changed.
+      const acute = severity === 'high' ? (risk.acute ?? null) : null;
+      const crossedCritical = severity === 'high' && alreadyHigh && risk.riskScore >= 90 && currentScore < 90;
+      const flagByEscalation =
+        !flagByLevel && !flagBySubject.first && severity === 'high' && alreadyHigh && acute !== null
+          ? await isFirstFlagAtStage(turn.sessionId, acute, subject)
+          : false;
+      const shouldFlag = flagByLevel || flagBySubject.first || flagByEscalation || crossedCritical;
+      const escalationNote = acute
+        ? `What changed: ${ESCALATION_NOTE[acute]}`
+        : crossedCritical && !flagByLevel
+          ? 'What changed: the risk score rose into the critical range (90 or more)'
+          : null;
+      const alsoSubject = risk.alsoSubject ?? null;
       const subjectChangeNote = flagBySubject.first
         ? `${FLAG_SUBJECT_NAME[subject ?? 'own']} now; the earlier high flag in this session was about ` +
           `${flagBySubject.earlier.map((s) => FLAG_SUBJECT_NAME[s]).join(' and ') || 'someone else'}`
@@ -374,6 +399,8 @@ export async function runCrisisPipeline(
           `Risk score: ${risk.riskScore} - ` +
             (label ? `${label} - ` : '') +
             (subjectChangeNote ? `${subjectChangeNote} - ` : '') +
+            (escalationNote ? `${escalationNote} - ` : '') +
+            (alsoSubject ? `Also in the same message: ${FLAG_SUBJECT_NAME[alsoSubject]} - ` : '') +
             (fromCheckin ? 'Source: pre-session check-in text - ' : '') +
             `Factors: ${risk.factors.join(', ')}`,
         );
@@ -386,6 +413,14 @@ export async function runCrisisPipeline(
           ...subjectDetail,
           ...(fromCheckin ? { source: 'checkin' } : {}),
           ...(flagBySubject.first ? { trigger: 'new_subject', earlierSubjects: flagBySubject.earlier } : {}),
+          // Recorded on every high flag that states it, so the next turn can
+          // tell whether this stage has already been flagged.
+          ...(acute ? { escalation: acute } : {}),
+          ...(flagByEscalation ? { trigger: 'escalation' } : {}),
+          ...(crossedCritical && !flagByLevel && !flagByEscalation && !flagBySubject.first
+            ? { trigger: 'crossed_critical' }
+            : {}),
+          ...(alsoSubject ? { alsoSubject } : {}),
         });
 
         if (global.io) {
@@ -403,8 +438,10 @@ export async function runCrisisPipeline(
                 `${severity.toUpperCase()} risk detected (score: ${risk.riskScore})` +
                 (label ? ` - ${label}` : '') +
                 (subjectChangeNote ? ` - ${subjectChangeNote}` : '') +
+                (escalationNote ? ` - ${escalationNote}` : '') +
                 (fromCheckin ? ' - from the pre-session check-in' : ''),
               ...subjectDetail,
+              ...(acute ? { escalation: acute } : {}),
               ...(channel === 'chat' ? { sessionType: 'chat' } : {}),
             },
             turn.sessionId,
@@ -428,10 +465,15 @@ export async function runCrisisPipeline(
           );
         }
 
-        if (subject === 'third_party') {
-          await executeGraduatedResponse(turn.sessionId, severity, risk.riskScore, { thirdParty: true });
-        } else if (subject) {
-          await executeGraduatedResponse(turn.sessionId, severity, risk.riskScore, { subject });
+        // The options only exist when there is something to say; an ordinary
+        // high flag makes the call it always made.
+        const responseOptions = {
+          ...(subject === 'third_party' ? { thirdParty: true } : subject ? { subject } : {}),
+          ...(acute ? { escalation: acute } : {}),
+          ...(alsoSubject ? { alsoSubject } : {}),
+        };
+        if (Object.keys(responseOptions).length > 0) {
+          await executeGraduatedResponse(turn.sessionId, severity, risk.riskScore, responseOptions);
         } else {
           await executeGraduatedResponse(turn.sessionId, severity, risk.riskScore);
         }
@@ -487,7 +529,12 @@ export async function runCrisisPipeline(
         // like the page in executeHighRiskResponse; no flag, no second
         // adverse-event draft, no steering change.
         import('./crisisPaging.service.js')
-          .then((m) => m.pageHighTurnWithoutReflag(turn.sessionId, risk.riskScore, subject ? { subject } : {}))
+          .then((m) =>
+            m.pageHighTurnWithoutReflag(turn.sessionId, risk.riskScore, {
+              ...(subject ? { subject } : {}),
+              ...(acute ? { escalation: acute } : {}),
+            }),
+          )
           .catch((err) => console.error('[CrisisPipeline] page for a high turn without re-flag failed:', err));
       }
     }
@@ -543,6 +590,33 @@ async function isFirstHighFlagAbout(
   } catch (err) {
     console.error('[CrisisPipeline] could not read who the earlier high flag was about; flagging this turn:', err);
     return { first: true, earlier: [] };
+  }
+}
+
+/** The flag event's words for what a high turn says is happening. */
+const ESCALATION_NOTE: Record<'plan_or_time' | 'attempt', string> = {
+  plan_or_time: 'stated intent with a time, a plan or the means at hand',
+  attempt: 'ATTEMPT IN PROGRESS, or an act already taken',
+};
+
+/**
+ * Has this session not yet been flagged at this stage ('plan_or_time' or
+ * 'attempt') for this person? An attempt also counts as having stated a plan,
+ * so "tonight" after "I already did it" does not flag again. A lookup that
+ * fails flags: an attempt in progress is not something to stay silent about
+ * because a read failed. Never throws.
+ */
+async function isFirstFlagAtStage(
+  sessionId: string,
+  stage: 'plan_or_time' | 'attempt',
+  subject: 'third_party' | 'harm_to_others' | null,
+): Promise<boolean> {
+  try {
+    const seen = (await getSessionFlagEscalations(sessionId)).filter((row) => (row.subject ?? null) === subject);
+    return !seen.some((row) => row.escalation === stage || row.escalation === 'attempt');
+  } catch (err) {
+    console.error('[CrisisPipeline] could not read earlier escalation flags; flagging this turn:', err);
+    return true;
   }
 }
 

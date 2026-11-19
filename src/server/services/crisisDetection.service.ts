@@ -15,7 +15,7 @@ import {
   type OpenAIErrorInfo,
 } from '../utils/openaiErrors.js';
 import { assessorIncidentOpen, noteAssessorSuccess, noteAssessorFailure } from './riskAssessorHealth.service.js';
-import { riskSeverityForScore } from '../../shared/riskBands.js';
+import { RISK_BANDS, riskSeverityForScore } from '../../shared/riskBands.js';
 
 const log = createLogger('crisisDetection');
 
@@ -453,7 +453,7 @@ const CONTEXT_SIGNAL_PATTERNS: Array<{ kind: ContextSignalKind; label: string; s
     label: 'will not be around',
     strong: false,
     pattern:
-      /\bwon't (?:be (?:here|around|a (?:burden|problem|bother))|have to (?:worry about|listen to|deal with|put up with) me)\b|\bnot going to be (?:here|around)\b/,
+      /\bwon't (?:be (?:here|around|a (?:burden|problem|bother))|have to (?:worry about|listen to|deal with|put up with) me)\b|\bnot going to be (?:here|around)\b|\b(?:don't|do not) (?:plan|intend|expect) (?:on being|to be) (?:here|around|alive)\b/,
   },
   // ---- slang and euphemism with other meanings (assessor decides) ----
   {
@@ -1119,16 +1119,18 @@ Return STRICT JSON only:
   "factors": [<short strings: e.g. "passive ideation", "expressed plan", "hopelessness", "protective factors present">],
   "reasoning": "<one sentence>",
   "states_intent": <true | false>,
-  "loss_or_disclosure": <true | false>
+  "loss_or_disclosure": <true | false>,
+  "acute": "none" | "plan_or_time" | "attempt"
 }
 
 Context judgment matters more than keywords:
 - "reference": mentioning a hotline's name, suicide prevention, a movie/book/news story → score 0-10, severity none.
 - "negated": "I'm not suicidal", "I'd never hurt myself" → score 0-15, severity none (unless other signals contradict).
-- "bystander": talking about someone ELSE's loss, past struggles or ordinary worry about them → score 0-20, severity none/low (their own grief may still warrant low). Someone else's CURRENT suicidal crisis is different and is scored by the "Third party at risk" rule below.
-- "genuine" acute distress WITHOUT ideation → 15-30, low. Distress alone is hopelessness, worthlessness, exhaustion, "can't take it" — e.g. "I just feel hopeless and worthless lately" is 15-30, low. It is NOT passive ideation: reserve that label for an expressed wish to die, disappear, not exist, not wake up, not be here, or not have to go on. Never score distress alone as medium.
-- "genuine" passive ideation → 50-60, medium, ALWAYS at least 50. C-SSRS counts a passive wish to be dead as ideation, not as distress, so it must reach medium — never score it low. This includes INDIRECT and euphemistic phrasing, which is how participants usually say it first: "it would be easier if I didn't have to do this anymore", "I wouldn't mind not waking up", "I'm tired of being here", "I just want it all to be over", "everyone would be fine without me", "I don't want to be here anymore", "no point going on". Hedges and softeners ("I think", "sometimes", "just", "kind of", "maybe") do NOT downgrade it — tentative wording is the normal way passive ideation is disclosed. Absence of a plan, method, or intent does NOT downgrade it either; that is the difference between passive ideation and active ideation, which scores higher still.
-- "genuine" active ideation without plan → 65-75, high, ALWAYS at least 65. Active ideation is thinking about suicide, about killing themselves or about ending their life, as opposed to a passive wish to be dead or gone: "I've been thinking about ending my life a lot lately", "I keep thinking about suicide and it's getting louder", "I'm thinking about killing myself". No plan, method or intent is needed for this band, and saying "I don't have a plan" does not take it below 65.
+- Figures of speech about THEMSELVES → 0-10, none, context "reference". An exaggeration tied to a small everyday frustration and said lightly: "I'm literally going to kill myself if I fail this quiz lol", "this traffic makes me want to die", "kill me now, another group project", "I could die of embarrassment". The test is the trigger and the tone: a minor annoyance, a joking register, and nothing else concerning in the conversation. It is NOT a figure of speech, and is scored as genuine, when a real loss, hopelessness or earlier risk is in the conversation, when the thought is repeated or elaborated, when the participant says they mean it, or when "lol" or "jk" follows a statement that is serious by itself ("I want to kill myself lol").
+- "bystander": talking about someone ELSE's loss, past struggles or ordinary worry about them → score 0-24, severity none (the participant's own grief may warrant low, 25-35). Someone else's CURRENT suicidal crisis is different and is scored by the "Third party at risk" rule below.
+- "genuine" acute distress WITHOUT ideation → 15-30 (none to low). Distress alone is hopelessness, worthlessness, exhaustion, "can't take it" — e.g. "I just feel hopeless and worthless lately" is 15-30. It is NOT passive ideation: reserve that label for an expressed wish to die, disappear, not exist, not wake up, not be here, or not have to go on. Never score distress alone as medium.
+- "genuine" passive ideation → 50-64, medium, ALWAYS at least 50 and, with nothing more than a passive wish, below 65. C-SSRS counts a passive wish to be dead as ideation, not as distress, so it must reach medium — never score it low. This includes INDIRECT and euphemistic phrasing, which is how participants usually say it first: "it would be easier if I didn't have to do this anymore", "I wouldn't mind not waking up", "I'm tired of being here", "I just want it all to be over", "everyone would be fine without me", "I don't want to be here anymore", "no point going on". Hedges and softeners ("I think", "sometimes", "just", "kind of", "maybe") do NOT downgrade it — tentative wording is the normal way passive ideation is disclosed. Absence of a plan, method, or intent does NOT downgrade it either; that is the difference between passive ideation and active ideation, which scores higher still.
+- "genuine" active ideation without plan → 65-79, high, ALWAYS at least 65. Active ideation is thinking about suicide, about killing themselves or about ending their life, as opposed to a passive wish to be dead or gone: "I've been thinking about ending my life a lot lately", "I keep thinking about suicide and it's getting louder", "I'm thinking about killing myself". No plan, method or intent is needed for this band, and saying "I don't have a plan" does not take it below 65.
 - "genuine" ideation with plan, means, or timeframe → 80-100, high.
 Resolve references against the conversation before scoring. The latest message is often short and carries no crisis word because its subject was said earlier:
 - If the participant expressed ideation or self-harm earlier in the transcript (or the session risk context below the transcript says so), read "it", "this", "that" and unfinished sentences in the latest message against that. "I'm going to do it tonight", "I've decided", "tonight's the night", "I have what I need", "I know how I'd do it", "this is the last time we'll talk", "you won't have to listen to me much longer", "I've said my goodbyes" are then statements of intent, plan, timing or goodbye → 80-100, high, context "genuine". An attempt already made or under way scores the same.
@@ -1139,19 +1141,20 @@ Resolve references against the conversation before scoring. The latest message i
 The last two fields are plain observations, not risk judgments. Answer them literally and independently of the score:
 - "states_intent": true ONLY when the latest participant message itself, read against the conversation, says that they (the participant, not a third party they are reporting about) intend or have decided to end their own life or hurt themselves, names a time for it, says they have a plan or the means at hand, says goodbye in that sense, or says they have already acted. false when the latest message is about getting help or taking a safety step, an ordinary plan or decision, a retraction or reassurance, a question, or anything else; earlier risk in the conversation does not make it true.
 - "loss_or_disclosure": true when anywhere in the transcript the PARTICIPANT reports a significant loss or setback of their own (failing or being dropped from a program, a breakup, a death, losing a job, a serious diagnosis or other serious bad news), even stated flatly with no feelings named, or expresses hopelessness, or discloses suicidal thoughts or self-harm. Ordinary stress (a busy week, an upcoming exam, being tired) is false.
+- "acute": what the latest participant message itself says is happening to the person whose risk you scored. "attempt": an act to end their life has already been taken or is under way ("I already took the pills", "I did something tonight", "I'm doing it now"). "plan_or_time": intent stated together with a time, a plan or the means at hand ("tonight", "after my roommate leaves", "I have what I need"), or a goodbye in that sense. "none": everything else, including ideation with no time or plan, help-seeking, questions, retractions and anything already over.
 - The session risk context, when present, is background for understanding what the latest message refers to. It is not new evidence: a latest message that adds nothing ("ok", a change of subject, a practical question) must not be scored HIGHER than the level already noted, and ordinary life events mentioned afterwards are not warning signs merely because risk was noted earlier.
 Third party at risk. When the participant reports that SOMEONE ELSE is suicidal, keep context "bystander" and score what is happening to that other person:
 - ACTIVE or IMMINENT and unresolved → 80-100, high. That is: they said they are going to or want to kill themselves or end their life; they have a plan, a method or a time; an attempt has been made or is under way; they wrote or posted a goodbye or suicide note; or they said something suicidal (including not wanting to be alive) and now cannot be reached. A second-hand report ("she texted me", "he told me last night"), a calm participant, or the absence of a plan does not lower it: a real person may be in danger, and the study team is alerted so they can help the participant respond.
-- Passive or long-standing thoughts with nothing imminent ("my mom has depression and some days she says she wishes she wasn't here") → 50-60, medium.
-- Ordinary worry, a past crisis that has resolved, a death or suicide that has already happened, a film, a book or the news → 0-20, none/low.
+- Passive or long-standing thoughts with nothing imminent ("my mom has depression and some days she says she wishes she wasn't here") → 50-64, medium.
+- Ordinary worry, a past crisis that has resolved, a death or suicide that has already happened, a film, a book or the news → 0-24, none.
 - If the participant also voices ideation of their OWN, score that instead, with context "genuine".
 Harm to others. When the participant talks about hurting or killing ANOTHER person, decide first whether it is a figure of speech:
 - Idiom, exaggeration and ordinary anger → 0-10, none, context "reference". "I swear I'm going to kill my lab partner, he did nothing all semester", "I could strangle him", "I'm so mad at my ex I could scream", "sometimes I get so angry I want to hit something, but I'd never actually hurt anyone", a film or a game. An angry sentence with a violent verb and nothing else is this.
-- Credible intent or planning → 75-100, high, context "harm_to_others": thoughts or images of hurting a specific person that the participant presents as real, together with anything that makes it more than venting (knowing where the person is or will be, having thought through what they would do, a plan, the means, a time, a threat meant seriously, or saying they might actually do it). "I keep picturing hurting him. I know where he parks." and "He's going to get what's coming to him. I've thought about exactly what I'd do." are this. The study team is alerted so a person can respond.
-- Unwanted thoughts of harming someone that the participant is frightened by and rejects ("I've been having thoughts about hurting my baby sister and it scares me. I would never do it"), or rage with an urge to hurt a specific person but no plan and no stated intent → 25-50, low to medium, context "harm_to_others". Never high.
+- Credible intent or planning → 65-100, high (80 or more with a plan, the means or a time), context "harm_to_others": thoughts or images of hurting a specific person that the participant presents as real, together with anything that makes it more than venting (knowing where the person is or will be, having thought through what they would do, a plan, the means, a time, a threat meant seriously, or saying they might actually do it). "I keep picturing hurting him. I know where he parks." and "He's going to get what's coming to him. I've thought about exactly what I'd do." are this. The study team is alerted so a person can respond.
+- Unwanted thoughts of harming someone that the participant is frightened by and rejects ("I've been having thoughts about hurting my baby sister and it scares me. I would never do it"), or rage with an urge to hurt a specific person but no plan and no stated intent → 25-64 (25-49, low, when the participant rejects the thoughts; 50-64, medium, for an urge aimed at a specific person), context "harm_to_others". Never high.
 "states_intent" is false for all of these: it is only about the participant's own suicide or self-harm.
 Slang and shorthand: "kms" (kill myself), "ctb" or "catch the bus" (die by suicide), "unalive", "sewerslide", "off myself", "I want out" (of life, of everything). Said in earnest about themselves, score them as the plain words they stand for ("been thinking about ctb a lot lately" is active ideation; "I want out. Of everything." is at least passive ideation, 50 or more). With an ordinary meaning in the conversation (a distance in kms, an unrelated abbreviation, an actual bus, wanting out of a lease or a class) → 0-10, none.
-An answer to a safety question. When the assistant's turn just before the latest message asks about suicide, self-harm, wanting to die or not be alive, or whether the participant is safe, the latest message is the answer to THAT question, however short: score it as if the participant had said the full sentence. "yeah", "kind of", "sometimes", "most nights", "I guess" in reply to a question about not wanting to be alive is passive ideation → at least 50, medium; in reply to a question about suicide or ending their life it is active ideation; in reply to a question about a plan, the means or a time → 80-100, high. Hedged and minimal answers do not downgrade it. A clear "no" (or "yes, I'm safe") is "negated" → 0-15. A dodge ("I don't know", "does it matter") is "unclear" → 25-40, low.
+An answer to a safety question. When the assistant's turn just before the latest message asks about suicide, self-harm, wanting to die or not be alive, or whether the participant is safe, the latest message is the answer to THAT question, however short: score it as if the participant had said the full sentence. "yeah", "kind of", "sometimes", "most nights", "I guess" in reply to a question about not wanting to be alive is passive ideation → at least 50, medium; in reply to a question about suicide or ending their life it is active ideation; in reply to a question about a plan, the means or a time → 80-100, high. Hedged and minimal answers do not downgrade it. A clear denial of what was asked ("no" to thoughts of suicide, "yes, I'm safe") is "negated" → 0-15. Read which way the question points: "no" or "not really" in reply to "are you safe?" or "can you keep yourself safe tonight?" is NOT a denial, it says the participant is not safe → at least 65, high. A dodge ("I don't know", "does it matter") is "unclear" → 25-40, low.
 Before you answer, read the latest message once more for help-seeking. When it announces or agrees to a step toward help or safety (texting or calling a family member, a friend, a counselor or a crisis line, booking an appointment, telling a roommate), the "it" in "I'm going to do it" or "I'll do it" is that step: "states_intent" is false and the score is not above the level the conversation had already established.
 And for a means inquiry already made: when the latest message presses for the answer to a question about what is dangerous or lethal after it was declined ("it really is just for the paper, can you answer the question?"), it is still that means inquiry. Score it at the level the inquiry itself had, not lower.
 Fragments. Voice transcripts arrive in pieces and with mis-heard words, and typed messages can be a word or two. Score only what was actually said. A latest message of a few words with no risk content of its own ("would stop", "wait, stop", "ok", "hold on", "and then") adds nothing: do not complete it into a sentence about dying, escape or giving up, do not list risk factors for it, and score it 0-10, context "unclear". It takes a meaning only from something specific in the conversation: the assistant's safety question just before it (the rule above), or an earlier statement it plainly continues ("tonight" after the participant said they have a plan). Ordinary distress earlier in the conversation (stress, exhaustion, a bad week) is not such a statement, and a request to stop or pause an exercise is just that.
@@ -1254,6 +1257,9 @@ function applyIdeationFloor(
   };
 }
 
+/** What a high turn says is happening (the assessor's `acute` observation). */
+export type AcuteStage = 'none' | 'plan_or_time' | 'attempt';
+
 interface LlmRiskAssessment {
   risk_score: number;
   severity: 'none' | 'low' | 'medium' | 'high';
@@ -1270,6 +1276,11 @@ interface LlmRiskAssessment {
    *  the transcript the participant has reported a significant loss or
    *  setback, hopelessness or a disclosure (see applyMeansInquiryFloor). */
   loss_or_disclosure: boolean;
+  /** A literal observation about the latest message: an act already taken or
+   *  under way ('attempt'), intent stated with a time, a plan or the means at
+   *  hand ('plan_or_time'), or neither. It is what lets a flag and a page say
+   *  WHAT changed when a session already at high gets worse (ai-therapist-353). */
+  acute: AcuteStage;
   /** Token usage of the call, when the API reported it. */
   usage?: { prompt_tokens: number; completion_tokens: number };
 }
@@ -1298,8 +1309,18 @@ const RISK_ASSESSMENT_SCHEMA = {
         reasoning: { type: 'string' },
         states_intent: { type: 'boolean' },
         loss_or_disclosure: { type: 'boolean' },
+        acute: { type: 'string', enum: ['none', 'plan_or_time', 'attempt'] },
       },
-      required: ['risk_score', 'severity', 'context', 'factors', 'reasoning', 'states_intent', 'loss_or_disclosure'],
+      required: [
+        'risk_score',
+        'severity',
+        'context',
+        'factors',
+        'reasoning',
+        'states_intent',
+        'loss_or_disclosure',
+        'acute',
+      ],
       additionalProperties: false,
     },
   },
@@ -1539,6 +1560,7 @@ async function assessRiskWithLLM(
     reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning.slice(0, 400) : '',
     states_intent: parsed.states_intent === true,
     loss_or_disclosure: parsed.loss_or_disclosure === true,
+    acute: parsed.acute === 'attempt' || parsed.acute === 'plan_or_time' ? parsed.acute : 'none',
     ...(response.usage
       ? {
           usage: {
@@ -1830,6 +1852,17 @@ interface RiskAnalysisResult {
    *  (the assessor judged credible thoughts of harming another person,
    *  ai-therapist-330). Absent for the participant's own risk. */
   subject?: CrisisSubject;
+  /** Set when the turn is handled as the participant's OWN risk although the
+   *  assessor also labelled it as about someone else ("I know where he parks.
+   *  And after that I don't plan on being around."): the label it carried.
+   *  The flag and the page mention it; the own-risk handling stands. */
+  alsoSubject?: CrisisSubject;
+  /** On a HIGH turn only: the latest message says an attempt has been made or
+   *  is under way ('attempt'), or states intent with a time, a plan or the
+   *  means at hand ('plan_or_time'). Absent otherwise. The pipeline always
+   *  writes a flag event for the first such turn of each kind in a session
+   *  and the page says so in words (ai-therapist-353). */
+  acute?: Exclude<AcuteStage, 'none'>;
 }
 
 /**
@@ -2052,8 +2085,23 @@ export async function analyzeMessageRisk(
     const sweepRepeatsSessionLevel = isSweep && sessionContext.elevated && riskScore <= sessionContext.recentPeak;
     const trajectoryApplies =
       riskScore > 0 && trajectory.trajectoryScore > 0 && !isContextWake && !sweepRepeatsSessionLevel;
+    // The bonus may make a turn more concerning inside its band, and may lift
+    // it from low to medium. It may NOT carry a turn across the page line by
+    // itself (ai-therapist-357): with high at 65, a second passive-ideation
+    // statement (assessor 55, +10 "sudden spike") became a page on the strength
+    // of the run-up arithmetic alone, although the rubric keeps passive
+    // ideation below the cutoff on purpose. A turn that scores below the high
+    // cutoff on its own content stays below it; a turn already at or above it
+    // keeps the full bonus.
+    let trajectoryCapped = false;
     if (trajectoryApplies) {
-      riskScore = Math.min(100, riskScore + trajectory.trajectoryScore);
+      const lifted = Math.min(100, riskScore + trajectory.trajectoryScore);
+      if (riskScore < RISK_BANDS.high && lifted >= RISK_BANDS.high) {
+        riskScore = RISK_BANDS.high - 1;
+        trajectoryCapped = true;
+      } else {
+        riskScore = lifted;
+      }
       factors = [...factors, `trajectory: ${trajectory.trend}`];
     }
 
@@ -2076,11 +2124,25 @@ export async function analyzeMessageRisk(
     // The keyword is not used for a third party: "she texted 'I want to kill
     // myself'" is a quotation and stays a third-party report.
     const labelled = subjectFor(llm?.context, severity);
+    // A third fact, for harm to others only: a first-person goodbye in the same
+    // message ("I know where he parks. And after that I don't plan on being
+    // around."). The assessor returned that as risk to others alone, with
+    // states_intent false; a sentence added to the rubric to fix it made
+    // agreeing to text a sister page 1 time in 9, so the screen does it: the
+    // farewell patterns are deterministic and are not the words of
+    // help-seeking. (The 'intent' patterns are not used here: "I'm going to do
+    // it" beside "I know where he parks" is about him.)
+    const farewellToo =
+      labelled === 'harm_to_others' && detectContextSignals(message.content).some((s) => s.kind === 'farewell');
     const ownRiskToo =
       labelled !== null &&
       (llm?.states_intent === true ||
+        farewellToo ||
         (labelled === 'harm_to_others' && keywordAnalysis.keywordScore >= PASSIVE_IDEATION_SCORE));
     const subject = ownRiskToo ? null : labelled;
+    // What the latest message says is happening, on a high turn only.
+    const acute: Exclude<AcuteStage, 'none'> | null =
+      severity === 'high' && llm && llm.acute !== 'none' ? llm.acute : null;
     if (ownRiskToo) {
       factors = [
         ...factors,
@@ -2119,6 +2181,8 @@ export async function analyzeMessageRisk(
                   trajectory_trend: trajectory.trend,
                   // Computed but deliberately not added (context wake).
                   ...(isContextWake || sweepRepeatsSessionLevel ? { trajectory_applied: false } : {}),
+                  // Applied, but held just under the page line (ai-therapist-357).
+                  ...(trajectoryCapped ? { trajectory_capped_below_high: true } : {}),
                 }
               : {}),
             ...(moderation
@@ -2172,6 +2236,7 @@ export async function analyzeMessageRisk(
                   llm_factors: llm.factors,
                   llm_reasoning: llm.reasoning,
                   ...(llm.states_intent ? { llm_states_intent: true } : {}),
+                  ...(llm.acute !== 'none' ? { llm_acute: llm.acute } : {}),
                   ...(llm.loss_or_disclosure ? { llm_loss_or_disclosure: true } : {}),
                 }
               : {}),
@@ -2197,6 +2262,8 @@ export async function analyzeMessageRisk(
       degraded: llmErrorKind !== null,
       thirdParty,
       ...(subject ? { subject } : {}),
+      ...(ownRiskToo && labelled ? { alsoSubject: labelled } : {}),
+      ...(acute ? { acute } : {}),
     };
   } catch (error) {
     console.error('Error in analyzeMessageRisk:', error);
@@ -2277,7 +2344,18 @@ export async function flagSessionCrisis(
   // Dynamic import matches the crisisAlert pattern and keeps test mocking easy.
   if (severity === 'high') {
     import('./adverseEvent.service.js')
-      .then((m) => m.draftAdverseEventFromCrisis(sessionId))
+      .then((m) => {
+        // The label the flag carries, so the draft says whom it was about. An
+        // unlabelled flag makes the call it always made.
+        const aboutSomeoneElse = factors.includes(THIRD_PARTY_FACTOR)
+          ? ('third_party' as const)
+          : factors.includes(HARM_TO_OTHERS_FACTOR)
+            ? ('harm_to_others' as const)
+            : null;
+        return aboutSomeoneElse
+          ? m.draftAdverseEventFromCrisis(sessionId, { subject: aboutSomeoneElse })
+          : m.draftAdverseEventFromCrisis(sessionId);
+      })
       .catch((err) => console.error('AE auto-draft failed:', err));
   }
 }
