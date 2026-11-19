@@ -166,7 +166,7 @@ function SessionActive({
   const showTextInput = isChatOnly || chatEnabled;
 
   return (
-    <div className={`flex items-center gap-3 sm:gap-2 w-full h-full ${!showTextInput ? 'justify-center' : ''}`}>
+    <div className={`flex items-center gap-2 w-full h-full ${!showTextInput ? 'justify-center' : ''}`}>
       <button
         className="p-3 sm:px-4 sm:py-2 bg-royal hover:bg-red-600 text-white rounded-full flex items-center justify-center shrink-0 min-h-[48px] min-w-[48px] sm:min-h-0 sm:min-w-0"
         onClick={stopSession}

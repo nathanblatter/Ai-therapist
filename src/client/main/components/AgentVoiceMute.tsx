@@ -57,15 +57,22 @@ export function SpeakerMuteButton({ muted, onToggle }: { muted: boolean; onToggl
   );
 }
 
-/** Persistent line under the orb while the assistant's voice is muted. */
+/**
+ * Persistent line under the orb while the assistant's voice is muted. One
+ * compact row (text left, button right) at every width: while muted the
+ * captions below are the only channel, so this takes as little of the chat
+ * log as it can.
+ */
 export function AgentVoiceMutedNotice({ onUnmute }: { onUnmute: () => void }) {
   return (
     <div
-      className="mx-3 mb-1 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm text-amber-900"
+      className="mx-3 mb-1 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 py-1 pl-2 pr-1 text-amber-900 sm:gap-3 sm:px-3"
       role="status"
     >
-      <VolumeX size={16} aria-hidden="true" className="shrink-0" />
-      <span className="text-center">{SPEAKER_MUTE_COPY.mutedStatus}</span>
+      <VolumeX size={14} aria-hidden="true" className="shrink-0" />
+      <span className="min-w-0 flex-1 text-xs leading-tight sm:text-sm sm:leading-snug">
+        {SPEAKER_MUTE_COPY.mutedStatus}
+      </span>
       <ListenButton onUnmute={onUnmute} />
     </div>
   );
@@ -74,33 +81,37 @@ export function AgentVoiceMutedNotice({ onUnmute }: { onUnmute: () => void }) {
 /**
  * Pinned at the top of the crisis resource card while the voice is muted
  * (the crisis rule in lib/speakerMute.ts: never unmuted for the participant).
+ * One compact row, so the crisis numbers below it move down as little as
+ * possible.
  */
 export function CrisisListenPrompt({ onUnmute }: { onUnmute: () => void }) {
   return (
     <div
-      className="flex flex-col items-center gap-2 rounded-xl border-2 border-amber-500 bg-amber-50 p-3 text-amber-900"
+      className="flex items-center gap-2 rounded-xl border-2 border-amber-500 bg-amber-50 py-1 pl-2 pr-1 text-amber-900"
       role="status"
     >
-      <p className="flex items-center gap-2 text-sm font-medium">
-        <VolumeX size={16} aria-hidden="true" className="shrink-0" />
+      <VolumeX size={14} aria-hidden="true" className="shrink-0" />
+      <p className="min-w-0 flex-1 text-xs font-medium leading-tight sm:text-sm sm:leading-snug">
         {SPEAKER_MUTE_COPY.cardMutedStatus}
       </p>
-      <ListenButton onUnmute={onUnmute} wide />
+      <ListenButton onUnmute={onUnmute} />
     </div>
   );
 }
 
+// Narrow on phones (label on two short lines inside the 44 px target, no
+// icon) so the status text beside it keeps most of the row.
 // Hover dims rather than switching to amber-800: the dark theme flips the
 // amber ramp, so hover:bg-amber-800 put white text on pale yellow there.
-function ListenButton({ onUnmute, wide = false }: { onUnmute: () => void; wide?: boolean }) {
+function ListenButton({ onUnmute }: { onUnmute: () => void }) {
   return (
     <button
       type="button"
       onClick={onUnmute}
-      className={`${wide ? 'w-full' : ''} min-h-[44px] inline-flex items-center justify-center gap-2 rounded-full bg-amber-700 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 focus:outline-none focus-visible:ring-4 focus-visible:ring-offset-2 focus-visible:ring-brand`}
+      className="min-h-[44px] max-w-[8rem] shrink-0 inline-flex items-center justify-center gap-1.5 rounded-full bg-amber-700 px-3 py-1 text-left text-xs font-semibold leading-tight text-white hover:opacity-90 focus:outline-none focus-visible:ring-4 focus-visible:ring-offset-2 focus-visible:ring-brand sm:max-w-none sm:text-sm"
     >
-      <Volume2 size={16} aria-hidden="true" />
-      {SPEAKER_MUTE_COPY.listenPrompt}
+      <Volume2 size={14} aria-hidden="true" className="hidden shrink-0 sm:block" />
+      <span>{SPEAKER_MUTE_COPY.listenPrompt}</span>
     </button>
   );
 }
