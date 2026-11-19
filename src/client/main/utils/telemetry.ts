@@ -20,7 +20,11 @@ export type ClientEventKind =
   | 'data_channel_error'
   | 'socket_connect_error'
   | 'chat_send_failed'
-  | 'audio_play_refused';
+  | 'audio_play_refused'
+  // End of a voice session (ai-therapist-372): per-track upload counts
+  // (numbers only) and the participant's mic on/off timeline in track time.
+  | 'audio_upload_summary'
+  | 'mic_timeline';
 // The sideband_* kinds (ai-therapist-195) are gone from the client: they
 // reported the browser's failure to scrape a call_id out of a CORS-hidden
 // Location header and hand it to the server. GPT-Live gives the server the
