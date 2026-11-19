@@ -1457,6 +1457,54 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ai_therapist_redteam 
 - Neither job sets `IMESSAGE_API_KEY` / `CRISIS_ALERT_PHONE`: **CI must never page
   the on-call.**
 
+### Eval failures in Flightdeck (`src/redteam/flightdeckReport.ts`)
+
+A last job in `redteam-nightly.yml` and `redteam-voice.yml`, `flightdeck-sync`,
+files **new** eval failures as Flightdeck bugs in `ai-therapist`. It runs only
+for `schedule` and `workflow_dispatch` on `main` (never for a pull request), on
+the self-hosted runner (Flightdeck's Tailscale address is out of reach of
+GitHub-hosted runners), and never turns the run red: an unreachable or refusing
+Flightdeck is a warning in the job summary.
+
+- **Write-only.** It makes exactly one kind of call, `POST /api/ingest/capture`,
+  with an `ingest`-scope key. That key can create items and can read nothing
+  (no item lists, no `/mcp`), so the reporter never looks anything up.
+- **What gets filed: transitions only.** A scenario files a bug when it
+  gating-failed or errored this run and its previous recorded result was a pass,
+  or it has none. The previous result comes from the harness's own history:
+  the `rolling-baseline.json` (else `summary.json`) in the artifacts of up to
+  five earlier runs of the same workflow, newest result per scenario, per suite
+  and variant. A scenario that failed last time and fails again files nothing.
+  Variants and variations of one scenario file one bug.
+- **Not filed:** report-only signals (judge dimension dips, progression and
+  voice metrics, non-gating assertions, non-gating generated variants), listed
+  known-gap assertions, and failures of a label-only `knownGap` scenario (its
+  `ref` already tracks it; summary.json now carries the scenario's `knownGap`).
+- **Job summary only (nothing is written):** scenarios that recovered (failed
+  last run, passed this one; close their bugs by hand if fixed), known gaps
+  whose assertions passed (consider removing the marker), and repeat failures.
+  Bugs are never commented on or closed automatically.
+- **Marker:** type `bug`, tag `eval-failure`, title
+  `[eval] <scenario-id>: <first failing assertion>` (Flightdeck cuts titles at
+  80 characters). The body has the scenario id, catalogue IDs when present,
+  suite, variant, each failing assertion with the harness's message, a capped
+  excerpt of the synthetic transcript around the failing turn, the run URL, the
+  commit and the date. Captured items start in the backlog (the capture
+  endpoint cannot set a status).
+- **Guards:** more than 8 new bugs in one run, or a run that looks like an
+  infrastructure failure (no summary.json, no scenarios, every scenario
+  errored, a quota/credit/rate-limit/database error), files ONE
+  `[eval] suite-wide failure` item listing the scenarios instead.
+- **Idempotent per run:** what a run id filed is kept in a
+  `flightdeck-sync-state` artifact, so re-running the job does not file again.
+- Try it locally without sending anything:
+  `npm run redteam:flightdeck -- --dry-run --run-url <url> [--previous <dir>] redteam-results/summary.json`.
+
+**The one step for the owner:** add the repository secret
+`FLIGHTDECK_INGEST_KEY` (an `ingest`-scope key, e.g. from
+`flightdeck keygen redteam-ci ingest`). Until it exists the job prints a
+one-line notice and does nothing.
+
 ## Config drift gate
 
 The IRB red-team attachment promises the suite is re-run on any prompt or model

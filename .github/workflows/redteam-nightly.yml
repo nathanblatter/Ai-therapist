@@ -123,3 +123,105 @@ jobs:
         # After upload + summary, so a red night still leaves its artifact as
         # the next night's baseline.
         run: npm run redteam:ci-summary -- --dir redteam-results --check
+
+  flightdeck-sync:
+    # Files NEW eval failures into Flightdeck (src/redteam/flightdeckReport.ts,
+    # docs/redteam.md "Eval failures in Flightdeck"). Self-hosted because
+    # Flightdeck listens on a Tailscale address GitHub-hosted runners cannot
+    # reach. Write-only: the FLIGHTDECK_INGEST_KEY secret is an ingest-scope
+    # key (POST /api/ingest/capture only); without it the step prints a notice
+    # and does nothing. Never on pull_request, never on another branch.
+    #
+    # Shared-runner hygiene: the mini's single runner also runs deploy.yml's
+    # stage `deploy` job, so this job is short (no npm ci; plain node runs the
+    # one dependency-free script from a sparse checkout), uses its own
+    # workspace under the runner's _work dir (the deploy job works in
+    # ~/deploy/Ai-therapist, not here) and its own concurrency group (never
+    # the deploy's). Every step tolerates failure: this job never turns the
+    # run red.
+    name: file new failures in Flightdeck
+    needs: [redteam-full]
+    if: >-
+      always() && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      needs.redteam-full.result != 'cancelled' && needs.redteam-full.result != 'skipped'
+    runs-on: self-hosted
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read # tonight's artifacts + earlier runs' results (the previous result per scenario)
+    concurrency:
+      group: flightdeck-eval-sync
+      cancel-in-progress: false
+    env:
+      FLIGHTDECK_URL: http://100.79.61.79:4300
+      FLIGHTDECK_INGEST_KEY: ${{ secrets.FLIGHTDECK_INGEST_KEY }}
+      ARTIFACTS: redteam-full-results*
+      WORKFLOW_FILE: redteam-nightly.yml
+    steps:
+      - uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          sparse-checkout: |
+            src/redteam/flightdeckReport.ts
+            package.json
+          sparse-checkout-cone-mode: false
+      - name: Download tonight's results
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ env.ARTIFACTS }}
+          path: fd-current
+      - name: Download this run's earlier sync state (re-run idempotency)
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: flightdeck-sync-state
+          path: fd-state
+      - name: Download earlier runs' results (previous result per scenario)
+        # The previous recorded result decides whether tonight's failure is new
+        # (pass -> fail, or no earlier result) or a repeat (fail -> fail, files
+        # nothing). rolling-baseline.json in each artifact carries every
+        # scenario's most recent result; up to 5 earlier runs are read so a
+        # missing night does not erase the history.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p fd-previous
+          ids=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$WORKFLOW_FILE" --branch main --status completed --limit 10 \
+                  --json databaseId,conclusion \
+                  --jq '.[] | select(.conclusion == "success" or .conclusion == "failure") | .databaseId' | head -6)
+          for id in $ids; do
+            [ "$id" = "$GITHUB_RUN_ID" ] && continue
+            gh run download "$id" --repo "$GITHUB_REPOSITORY" --pattern "$ARTIFACTS" --dir "fd-previous/$id" 2>/dev/null || true
+          done
+          find fd-previous -name summary.json | sort || true
+      - name: File new failures
+        continue-on-error: true
+        run: |
+          NODE=/opt/homebrew/opt/node@24/bin/node # not on the runner's PATH (its nvm entry is stale)
+          [ -x "$NODE" ] || NODE=$(command -v node || true)
+          if [ -z "$NODE" ] || [ ! -f src/redteam/flightdeckReport.ts ]; then
+            echo "WARNING: Flightdeck eval sync skipped: node or the script is missing on the self-hosted runner." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          summaries=$(find fd-current -name summary.json 2>/dev/null | sort)
+          # No summary at all: the harness never finished. Name the expected
+          # file so the script reports it as an infrastructure failure.
+          [ -n "$summaries" ] || summaries=fd-current/redteam-full-results/summary.json
+          prev=()
+          for d in $(find fd-previous -name summary.json -exec dirname {} \; 2>/dev/null | sort -u); do prev+=(--previous "$d"); done
+          "$NODE" src/redteam/flightdeckReport.ts \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --state fd-state/flightdeck-state.json "${prev[@]}" $summaries \
+            || echo "WARNING: Flightdeck eval sync exited non-zero; see the step log." | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Keep the sync state for a re-run of this run
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: flightdeck-sync-state
+          path: fd-state/flightdeck-state.json
+          if-no-files-found: ignore
+          overwrite: true

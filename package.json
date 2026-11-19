@@ -28,6 +28,7 @@
     "redteam:voice-run": "tsx src/redteam/cli.ts --suite voice-run",
     "redteam:replay": "tsx src/redteam/replay.ts",
     "redteam:ci-summary": "tsx src/redteam/ciSummary.ts",
+    "redteam:flightdeck": "node src/redteam/flightdeckReport.ts",
     "counterfactual": "tsx src/database/scripts/runCounterfactual.ts",
     "irb:prompts": "tsx src/server/irb/buildPromptsAttachment.ts",
     "config:snapshot": "tsx src/database/scripts/exportConfigSnapshot.ts",
