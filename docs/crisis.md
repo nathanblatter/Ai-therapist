@@ -98,7 +98,15 @@ What follows from the number:
   the rubric was edited somewhere else (three times during this work, last at exactly 65).
   A message that announces contacting a named support (`announcesHelpStep`), with no crisis
   keyword and no goodbye in it, is held at 64 in a session that was below high
-  (`help_step_cap`).
+  (`help_step_cap`). Narrowed in review the same day: as first written it held seven of
+  seven real statements at 64 on the live assessor, each scored 80-85 with a time or plan
+  ("I'll text my sister to tell her I love her and then I'm going to do it tonight", "I'm
+  going to do it tonight. I'll call my mom first", "I could go to my dad's gun safe, I know
+  the code"). A help step is now disqualified by a sequence word (then, first, last,
+  before, after), another word of farewell (sorry, love, a note, a will), the means, any
+  context signal beyond the bare "going to do it", and an attempt observed by the assessor.
+  Still held at 64, knowingly: "I'm going to do it tonight. I'll call my mom." (nothing in
+  it but the two halves of the sentence the cap exists for).
 - **A conditional exaggeration with a joke marker cannot cross the page line by itself
   (2026-11-19).** "I'm literally going to kill myself if I fail this quiz lol" scores 60 to
   80 from run to run and paged on every run at the 65 cutoff. A rubric sentence about
@@ -108,7 +116,16 @@ What follows from the number:
   something else ("if I fail ...") and a laugh marker ("lol"), in a session with no
   medium-or-higher risk, is held at 64 (`conditional_joke_cap`): flagged for the dashboard,
   not paged. "I want to kill myself lol" has no conditional and is not touched; the same
-  sentence after a disclosure is not touched either.
+  sentence after a disclosure is not touched either. Narrowed in review the same day: a
+  laugh marker and an "if" anywhere held eight of eight real disclosures at 64 on the live
+  assessor ("i'm going to kill myself tonight lol, if i can find where my mom hid the
+  pills", 90; "if he leaves me I'll kill myself haha", 65). Now the keyword and a condition
+  about the participant's own task must be in one sentence; "idk if" is not a condition and
+  "jk" is not a laugh; nothing in the message may insist it is meant ("not joking",
+  "honestly", "for real") or name a time; and the assessor must not have scored 85 or more
+  or observed a plan, a time or an attempt. Still held at 64, knowingly: the quiz sentence
+  from someone who means it. It is flagged, the dashboard is alerted and the model is
+  steered to ask.
 - **Assessor down.** The moderation fallback is capped at 85 and uncapped below: a
   keyword-free turn with a moderation self-harm score of 65-74 now pages while the assessor
   is unreachable (it flagged without paging before).
@@ -245,13 +262,15 @@ And a third reason for a context wake:
    nights." carries no word of its own, and in a calm session it scored 0 with no assessor
    call (3 of 5 runs, session never flagged). The assessor is told the message is the answer
    to that question (`answers_safety_question` on the risk row). A reply to an ordinary
-   question is not assessed. Only a reply that looks like an answer wakes the assessor
-   this way (twelve words or fewer, or opening with a word people answer with,
-   `looksLikeAnAnswer`): assessed because it followed a question, a long change of subject
-   (a song lyric after a bereavement check-in) came back 50 on two runs of three and flagged
-   the session. Such a reply is handled as before this wake existed: on its own keywords and
-   signals, or with the transcript when the session is already elevated. The cost is a long,
-   keyword-free answer that opens with none of the listed words in a calm session. On chat this is one extra small SELECT per turn
+   question is not assessed. Every reply to a safety question is assessed, whatever its
+   length (changed in review, 2026-11-19: with the wake limited to replies of twelve words
+   or fewer, "The thought comes and goes but this week it has been there pretty much every
+   single night when I am alone in my room" scored 0 with no assessor call in a calm
+   session). Only the FRAMING follows `looksLikeAnAnswer` (twelve words or fewer, or opening
+   with a word people answer with): a longer reply is read on its own words against the
+   transcript, not as "the answer to that question". The cost is one assessor call, and a
+   long change of subject (a song lyric after a bereavement check-in came back 50 on two
+   runs of three) may flag medium; it does not page. On chat this is one extra small SELECT per turn
    (`needsContextAssessment` reads the last few messages) so the assessment runs before the
    reply. Cost: one assessor call per reply to a safety question.
 
