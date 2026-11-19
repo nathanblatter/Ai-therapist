@@ -149,6 +149,24 @@ export async function getSessionHandoffLinks(sessionId: string): Promise<Handoff
   return links;
 }
 
+/** Did this chat session open as an ORDINARY chat: does it hold the ordinary
+ *  server-authored opening line (metadata.opening_line, without the
+ *  text_handoff marker a hand-off first message carries)? A chat started as
+ *  a hand-off continuation never gets one (chat.routes.ts). */
+export async function hasOrdinaryOpeningLine(sessionId: string): Promise<boolean> {
+  const result = await pool.query<{ found: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM messages
+        WHERE session_id = $1
+          AND role = 'assistant'
+          AND metadata->>'opening_line' = 'true'
+          AND NOT (metadata ? 'text_handoff')
+     ) AS found`,
+    [sessionId],
+  );
+  return result.rows[0]?.found === true;
+}
+
 /** Write one link row. Throws on failure; the caller decides what that costs. */
 export async function insertHandoffLink(sessionId: string, details: Record<string, unknown>): Promise<void> {
   await pool.query(

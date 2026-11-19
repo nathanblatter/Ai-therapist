@@ -34,6 +34,7 @@ import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { buildVoiceContinuationGuidance } from '../utils/openingLine.js';
 import {
   getHandoffRecord,
+  hasOrdinaryOpeningLine,
   getHandoffSessionRow,
   getIncidentTurns,
   getSessionAssessedPeak,
@@ -387,7 +388,29 @@ export async function prepareTextHandoff(input: PrepareHandoffInput): Promise<Pr
  * caller's read of the chat session, which must be theirs, a chat session and
  * not ended. Never throws; null when nothing was done.
  */
-export async function recordClientHandoffFallback(input: {
+export async function recordClientHandoffFallback(input: ClientFallbackInput): Promise<PreparedHandoff | null> {
+  const { chatSessionId } = input;
+  // One at a time per chat (PR #79 review). The browser posts the fallback at
+  // once and also carries it on its first chat message until acknowledged, so
+  // a quick "Yes" sends it twice in parallel; both used to pass the checks
+  // below before either wrote: two flags, two link rows, and the first
+  // message twice in the transcript and in the model's context. A second
+  // caller now waits for the first and then does nothing.
+  const inFlight = fallbacksInFlight.get(chatSessionId);
+  if (inFlight) {
+    await inFlight.catch(() => null);
+    return null;
+  }
+  const work = recordClientHandoffFallbackOnce(input);
+  fallbacksInFlight.set(chatSessionId, work);
+  try {
+    return await work;
+  } finally {
+    fallbacksInFlight.delete(chatSessionId);
+  }
+}
+
+interface ClientFallbackInput {
   chatSessionId: string;
   chatRow: HandoffSessionRow;
   continuedFrom: string;
@@ -395,13 +418,28 @@ export async function recordClientHandoffFallback(input: {
   canAccess: SessionAccessCheck;
   crisisContact?: RecoveryCrisisContact | null;
   voiceEnabled: boolean;
-}): Promise<PreparedHandoff | null> {
+}
+
+const fallbacksInFlight = new Map<string, Promise<PreparedHandoff | null>>();
+
+/** Session ids are short and plain; anything else is not one and is never
+ *  stored (PR #79 review stored a 50,000-character `continued_from`). */
+const SESSION_ID_SHAPE = /^[A-Za-z0-9_.:-]{1,128}$/;
+
+async function recordClientHandoffFallbackOnce(input: ClientFallbackInput): Promise<PreparedHandoff | null> {
   const { chatSessionId, chatRow, continuedFrom } = input;
   try {
+    if (!SESSION_ID_SHAPE.test(continuedFrom)) return null;
     if (chatRow.session_type !== 'chat' || chatRow.status === 'ended') return null;
     if (!input.canAccess(chatRow, chatSessionId) || continuedFrom === chatSessionId) return null;
     if (handoffStates.has(chatSessionId)) return null;
     if (await getHandoffRecord(chatSessionId)) return null;
+    // Never an ORDINARY chat. A chat started as a hand-off continuation gets no
+    // ordinary opening line (chat.routes.ts), so a chat that has one was not
+    // opened by a vendor cut and must not be turned into a crisis continuation
+    // by a browser request (PR #79 review: one was, the crisis first message
+    // appended after "Hello! I'm an AI ...", flagged high).
+    if (await hasOrdinaryOpeningLine(chatSessionId)) return null;
     // The cut session links and seeds only when it is the requester's; the
     // flag and the first message stand either way, since the browser knows a
     // vendor cut happened and has already said so.

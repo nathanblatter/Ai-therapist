@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // starts flagged at, and what the model is seeded with. Database, paging
 // policy and sideband are mocked; the rules under test are this module's.
 const q = vi.hoisted(() => ({
+  hasOrdinaryOpeningLine: vi.fn(),
   getHandoffRecord: vi.fn(),
   getHandoffSessionRow: vi.fn(),
   getIncidentTurns: vi.fn(),
@@ -130,6 +131,7 @@ beforeEach(() => {
   q.getSessionAssessedPeak.mockResolvedValue('none');
   q.getSessionRiskCheckSteps.mockResolvedValue([]);
   q.getHandoffRecord.mockResolvedValue(null);
+  q.hasOrdinaryOpeningLine.mockResolvedValue(false);
   (globalThis as { io?: unknown }).io = undefined;
 });
 
@@ -625,6 +627,30 @@ describe('recordClientHandoffFallback', () => {
     expect(await fallback({ chatRow: chatRow({ session_type: 'realtime' }) })).toBeNull();
     expect(await fallback({ continuedFrom: 'chat_new' })).toBeNull();
     expect(q.markTextHandoffContinuation).not.toHaveBeenCalled();
+  });
+
+  // PR #79 review, reproduced on a scratch database.
+  it('two at once (the POST and the first message): recorded once', async () => {
+    arrange({});
+    const [first, second] = await Promise.all([fallback(), fallback()]);
+    expect([first, second].filter((r) => r !== null)).toHaveLength(1);
+    expect(q.markTextHandoffContinuation).toHaveBeenCalledTimes(1);
+    expect(q.insertHandoffLink.mock.calls.filter(([id]) => id === 'chat_new')).toHaveLength(1);
+  });
+
+  it('never turns an ordinary chat (it has the ordinary opening line) into a crisis continuation', async () => {
+    arrange({});
+    q.hasOrdinaryOpeningLine.mockResolvedValue(true);
+    expect(await fallback()).toBeNull();
+    expect(q.markTextHandoffContinuation).not.toHaveBeenCalled();
+    expect(q.insertHandoffLink).not.toHaveBeenCalled();
+  });
+
+  it('ignores a continued_from that is not shaped like a session id, and stores nothing from it', async () => {
+    arrange({});
+    expect(await fallback({ continuedFrom: 'z'.repeat(50_000) })).toBeNull();
+    expect(await fallback({ continuedFrom: 'live A; <b>' })).toBeNull();
+    expect(q.insertHandoffLink).not.toHaveBeenCalled();
   });
 });
 
