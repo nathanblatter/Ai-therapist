@@ -309,10 +309,15 @@ describe('a voice session without usable participant audio is flagged (ai-therap
     const mix = { durationMs: 60_000, rmsDbfs: 0 };
     expect(assessParticipantTrack(null, null)).toBeNull();
     expect(assessParticipantTrack({ durationMs: 9_999, rmsDbfs: 0 }, null)).toBeNull();
+    expect(assessParticipantTrack({ durationMs: 10_000, rmsDbfs: 0 }, null)).toBe('missing');
     expect(assessParticipantTrack(mix, null)).toBe('missing');
     expect(assessParticipantTrack(mix, { durationMs: 47_999, rmsDbfs: -30 })).toBe('short');
     expect(assessParticipantTrack(mix, { durationMs: 48_000, rmsDbfs: -30 })).toBeNull();
     expect(assessParticipantTrack(mix, { durationMs: 60_000, rmsDbfs: -61 })).toBe('silent');
+    // A participant who speaks little is quiet overall, not silent: a few
+    // turns over mostly muted/zero audio still measures well above -60 dBFS.
+    expect(assessParticipantTrack(mix, { durationMs: 60_000, rmsDbfs: -59 })).toBeNull();
+    expect(assessParticipantTrack(mix, { durationMs: 60_000, rmsDbfs: -Infinity })).toBe('silent');
   });
 
   it('pcm16RmsDbfs measures full scale, a quiet signal and digital silence', () => {
