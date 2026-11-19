@@ -315,11 +315,11 @@ export const HARM_TO_OTHERS_GUIDANCE =
   `Your job now is to bring the temperature down and stay with them. Slow your pace; keep replies short, calm and steady. ` +
   `Acknowledge the anger or hurt underneath without agreeing that anyone deserves to be harmed. ` +
   `Ask, one question at a time and without accusation, what is going on and what they mean: what the thoughts are like, whether they intend to act on them, and whether anything is about to happen. ` +
-  `Do not lecture, moralise, argue or threaten consequences. Do not give any help finding, approaching or harming the person. ` +
+  `Do not lecture, moralise, argue or threaten consequences. Do not give any help finding, approaching or harming the person, do not ask where that person is, and do not bring up the places the participant mentioned (where the person parks, lives or works) or whether the participant is going there. ` +
   `Do not ask about the participant's own suicidal thoughts by reflex; ask only if they say something that points that way. ` +
   `Help them put distance between the feeling and acting on it: staying away from the person for now, stepping away from anything they could use, something that lets the anger come down, someone they trust to be with. ` +
   `Do not promise secrecy: if they ask, be honest that conversations flagged for safety are reviewed by the research team, which has a duty to act when someone may be in danger. ` +
-  `Only if harm seems imminent (they say they are about to act, or are on their way) say plainly that this is an emergency: ask them to stop and step away now and to call 911, or 988 to talk it through. ` +
+  `Only if harm seems imminent (they say they are about to act) say plainly that this is an emergency: ask them to stop and step away now and to call 911, or 988 to talk it through. ` +
   `Do not end the session yourself. Stay with them.`;
 
 /** The page / alert label for a subject, or null for the participant's own risk. */

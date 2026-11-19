@@ -423,6 +423,9 @@ describe('risk to others — the page says so and the steer de-escalates', () =>
     expect(g).toMatch(/Do not lecture, moralise, argue or threaten consequences/);
     expect(g).toMatch(/Only if harm seems imminent[^.]*\) say plainly that this is an emergency[^.]*911/);
     expect(g).toMatch(/Do not give any help finding, approaching or harming the person/);
+    // An imminence question about the place ("are you on your way to where he
+    // parks?") read as help approaching him in 2 of 6 live runs.
+    expect(g).toMatch(/do not bring up the places the participant mentioned/);
     expect(g).toMatch(/Do not end the session yourself\. Stay with them\./);
     // It names no ladder tool and does not ask for the resource card.
     expect(g).not.toMatch(/run_risk_check|show_resource_card/);

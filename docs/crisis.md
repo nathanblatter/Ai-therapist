@@ -185,6 +185,31 @@ And a third reason for a context wake:
    (`needsContextAssessment` reads the last few messages) so the assessment runs before the
    reply. Cost: one assessor call per reply to a safety question.
 
+**Low-content fragments are the exception (2026-11-18, ai-therapist-349).** In a real voice
+session "wait, stop", said during a breathing exercise, was transcribed as "would stop". The
+session had one earlier low-band turn (work stress), so the fragment was context-assessed,
+and the assessor completed it into a sentence: 50, "passive ideation, hopelessness", "the
+phrase 'would stop' suggests a passive wish to escape". The session was flagged, the
+assistant asked the ideation question, the vendor's filter cut the call on that question,
+and staff were paged. Two changes:
+
+- **Guard** (`isLowContentFragment`): a message of at most six words made ONLY of filler,
+  acknowledgement and stop/go words (a closed list: stop, wait, would, ok, yeah, no, um,
+  hold on, ...) is not sent to the assessor merely because the session had an earlier
+  low-band turn. It scores 0 and its risk row carries `low_content_fragment: true`. It is a
+  word list and not a length rule: "tonight", "pills" and "bought a gun" are not on it. The
+  guard does not apply when the fragment answers an assistant safety question ("yeah" is
+  the disclosure there), when it matches a context signal, in a session already at medium
+  or high, on a periodic sweep, or when the session state could not be read.
+- **Rubric**: a "Fragments" rule tells the assessor that voice transcripts arrive in pieces
+  and mis-heard, to score only what was said, and not to complete a few empty words into a
+  sentence about dying or escape. This covers what the guard lets through (a medium session,
+  a sweep, a longer fragment).
+
+Measured on six golden rows (three runs each): before, "would stop" scored 50 in 1 of 3 runs
+and the variants 15 to 30; after, the five fragment rows score 0 in 15 of 15, and the longer
+"wait, stop. can we do something else" scores 0 (2 of 3) or 25 (1 of 3: steering, no flag).
+
 On a context wake the assessor is told that no keyword matched, and is given one line of
 **session risk context** in addition to the transcript: the highest recent severity band, how
 many turns ago, the factors noted then, and whether the session is flagged. That carries the
