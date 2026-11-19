@@ -199,6 +199,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.code == 'true'
+    env:
+      NO_COLOR: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -242,7 +244,8 @@ jobs:
           SHUFFLED: ${{ steps.shuffled.outcome }}
         run: |
           seed=$(cat shuffle-seed.txt 2>/dev/null || echo unknown)
-          failed() { grep -E '^ +(FAIL|×) ' "$1" 2>/dev/null | sed -E 's/ [0-9]+ms$//' | sort -u | head -20; }
+          # Colour codes stripped first (vitest colours its output on Actions).
+          failed() { sed -E 's/\x1b\[[0-9;]*m//g' "$1" 2>/dev/null | grep -E '^ +FAIL ' | sort -u | head -20; }
           {
             echo "### Unit-suite robustness (report only, not a gate)"
             echo ""
