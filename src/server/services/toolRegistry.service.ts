@@ -6,6 +6,7 @@
 import { pool } from '../config/db.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { PRACTICE_KINDS } from '../../shared/practice.js';
+import { runWithToolTimeout } from './toolTimeouts.js';
 import { FORGET_SAFETY_EXCEPTION } from '../utils/memoryScreen.js';
 
 export interface ToolDefinition {
@@ -292,7 +293,10 @@ export class ToolRegistry {
 
     try {
       console.log(`[ToolRegistry] Executing tool: ${name}`);
-      const result = await tool.handler(args, ctx);
+      // Bounded (toolTimeouts.ts): a hung handler is answered with a
+      // ToolTimeoutError, once; its late outcome is discarded. Keyed by session
+      // so a repeat escalate_to_human waits on the one still running.
+      const result = await runWithToolTimeout(name, () => tool.handler(args, ctx), undefined, ctx.sessionId);
       return result;
     } catch (error) {
       console.error(`[ToolRegistry] Tool execution error for ${name}:`, error);

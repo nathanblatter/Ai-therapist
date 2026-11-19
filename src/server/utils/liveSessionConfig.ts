@@ -362,7 +362,9 @@ export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
  * `low` it was within ~0.4 s. GPT-6 Astra and GPT-6.1 Sol reject `none`
  * (GPT-6 guide, Limitations), so `none` is raised to `low` for models the
  * registry marks as not supporting it rather than letting GPT-Live reject the
- * setting asynchronously (responses_validation_failed) mid-session.
+ * setting asynchronously (responses_validation_failed) mid-session. `xhigh`
+ * and `max` are clamped, with a warning, to LIVE_MAX_REASONING_EFFORT: this
+ * resolver serves GPT-Live voice sessions only.
  */
 export function resolveBackendReasoningEffort(raw: unknown, backendModel: string): ReasoningEffort | null {
   if (raw === undefined || raw === null || (typeof raw === 'string' && !raw.trim())) return null;
@@ -386,8 +388,28 @@ export function resolveBackendReasoningEffort(raw: unknown, backendModel: string
     return null;
   }
   if (effort === 'none' && registered?.supportsNoneEffort === false) return 'low';
+  if (effort === 'xhigh' || effort === 'max') {
+    log.warn(
+      { backendModel, live_backend_reasoning_effort: effort, applied: LIVE_MAX_REASONING_EFFORT },
+      `live_backend_reasoning_effort '${effort}' is above what a voice session allows; using '${LIVE_MAX_REASONING_EFFORT}'`,
+    );
+    return LIVE_MAX_REASONING_EFFORT;
+  }
   return effort as ReasoningEffort;
 }
+
+/**
+ * The highest backend reasoning effort a voice session runs at
+ * (ai-therapist-364). `xhigh` and `max` are clamped to it by
+ * resolveBackendReasoningEffort, which only GPT-Live voice sessions use
+ * (typed chat has its own model settings and is untouched). A reasoning
+ * backend is silent while it reasons, so the delegation watchdog has to allow
+ * a quiet period that grows with the effort (delegationStallMs): 60 s at
+ * xhigh/max, which is the silence the watchdog was built to end
+ * (ai-therapist-348). `high` allows 30 s, measured; nothing above it has
+ * been measured on a voice call.
+ */
+export const LIVE_MAX_REASONING_EFFORT = 'high' as const satisfies ReasoningEffort;
 
 /**
  * Conversation-layer instructions for the live voice model.
@@ -677,7 +699,8 @@ export function hasStudyContact(deploymentMode: unknown, isDemoSession: boolean)
  *   none, low      12 s  measured; about 12x the longest gap seen
  *   medium, unset  20 s  not measured (unset runs the model default, medium)
  *   high           30 s  measured on two short questions; about 7x
- *   xhigh, max     60 s  not measured
+ *   xhigh, max     60 s  not measured; never reached by a voice session, whose
+ *                        effort is clamped to `high` (LIVE_MAX_REASONING_EFFORT)
  *
  * These are generous on purpose: a false "I could not get that answer" over
  * an answer that was about to arrive is worse than a few more seconds of

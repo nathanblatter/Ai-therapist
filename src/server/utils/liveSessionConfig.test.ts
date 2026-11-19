@@ -20,6 +20,7 @@ import {
   resolveBackendReasoningEffort,
   delegationStallMs,
   hasStudyContact,
+  LIVE_MAX_REASONING_EFFORT,
 } from './liveSessionConfig.js';
 import type { ToolDefinition } from '../services/toolRegistry.service.js';
 
@@ -401,6 +402,24 @@ describe('backend reasoning effort (system_config.live_backend_reasoning_effort)
     expect(resolveBackendReasoningEffort(undefined, 'gpt-6.1-terra')).toBeNull();
     expect(resolveBackendReasoningEffort(null, 'gpt-6.1-terra')).toBeNull();
     expect(logMock.warn).not.toHaveBeenCalled();
+  });
+
+  it('clamps xhigh and max to high for voice, with a warning, and leaves high and below alone (ai-therapist-364)', () => {
+    // 60 s of allowed backend silence at xhigh/max is the stall the
+    // delegation watchdog exists to end.
+    logMock.warn.mockClear();
+    expect(LIVE_MAX_REASONING_EFFORT).toBe('high');
+    expect(resolveBackendReasoningEffort('xhigh', 'gpt-6.1-terra')).toBe('high');
+    expect(resolveBackendReasoningEffort(' MAX ', 'gpt-6.1-terra')).toBe('high');
+    expect(logMock.warn).toHaveBeenCalledTimes(2);
+    expect(String(logMock.warn.mock.calls[0][1])).toMatch(/'xhigh' is above what a voice session allows; using 'high'/);
+    logMock.warn.mockClear();
+    for (const effort of ['none', 'low', 'medium', 'high'] as const) {
+      expect(resolveBackendReasoningEffort(effort, 'gpt-6.1-terra')).toBe(effort);
+    }
+    expect(logMock.warn).not.toHaveBeenCalled();
+    // So no voice session's quiet period is ever the 60 s one.
+    expect(delegationStallMs(resolveBackendReasoningEffort('max', 'gpt-6.1-terra'))).toBe(30_000);
   });
 });
 
