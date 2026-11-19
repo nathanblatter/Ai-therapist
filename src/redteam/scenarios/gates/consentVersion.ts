@@ -6,7 +6,9 @@
 // researcher-only admin route (it busts the active-consent cache), and
 // withdrawn again in teardown so every later scenario sees the original
 // version (the harness accepts CURRENT_CONSENT_VERSION by constant). Every
-// participant start route is probed, including /api/sessions/create.
+// participant start route is probed, plus /api/sessions/create, which was
+// removed (ai-therapist-323) because it skipped the consent and limit gates:
+// it must stay gone (no 200, no row).
 import type { Scenario } from '../../types.js';
 import {
   acceptActiveConsent,
@@ -18,6 +20,7 @@ import {
   postStart,
   probeAssert,
   ProbeRecorder,
+  REMOVED_CREATE_ROUTE,
   show,
   START_ROUTES,
   type StartRoute,
@@ -48,12 +51,6 @@ export const consentVersionGate: Scenario = {
   personaSystem: '',
   beats: [],
   runJudge: false,
-  knownGap: {
-    reason:
-      'POST /api/sessions/create has no requireConsent (and no session-limit check): with a superseded consent version it still inserts an active therapy_sessions row. The client no longer calls it, but the route is live.',
-    ref: 'ai-therapist-323',
-    assertionIds: ['no-start-route-creates-a-session-on-stale-consent'],
-  },
   setup: async (pool) => {
     await removePublishedVersions(pool);
     await ensureGateAccounts(pool, [
@@ -79,6 +76,7 @@ export const consentVersionGate: Scenario = {
 
     const before = await countSessions(pool, PARTICIPANT_ID);
     for (const route of ROUTES) await rec.step(`stale:${route}`, postStart(pt, route));
+    await rec.step('stale:create', pt.post(REMOVED_CREATE_ROUTE).send({}));
     rec.fact('sessionsCreatedWhileStale', (await countSessions(pool, PARTICIPANT_ID)) - before);
     await rec.step('status', pt.get('/api/consent/status'));
     await rec.step('accept-old', pt.post('/api/consent/accept').send({ consentVersion: oldVersion }));

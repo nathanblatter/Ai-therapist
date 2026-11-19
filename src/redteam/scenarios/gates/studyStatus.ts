@@ -9,7 +9,10 @@
 // of the promise is probed through the always-on client error beacon
 // (/api/client-events), which stores the logged-in user's id. The engagement
 // beacon is not probed: its streams are off by default (migration 095), so it
-// would store nothing for anyone and prove nothing.
+// would store nothing for anyone and prove nothing. The other write routes
+// (screener, worksheet, feedback, audio, engagement events) share the same
+// middleware (dropIfWithdrawn / refuseIfWithdrawn) and are unit tested;
+// practice completion is probed here because it needs no session.
 import type { Scenario } from '../../types.js';
 import {
   acceptActiveConsent,
@@ -54,12 +57,6 @@ export const studyStatusGate: Scenario = {
   personaSystem: '',
   beats: [],
   runJudge: false,
-  knownGap: {
-    reason:
-      'POST /api/client-events stores the logged-in user id with no study-status check, so a withdrawn participant\'s browser telemetry is still collected after withdrawal; the consent form says the app "collects nothing after you withdraw from the study".',
-    ref: 'ai-therapist-322',
-    assertionIds: ['no-telemetry-after-withdrawal'],
-  },
   setup: async (pool) => {
     await ensureGateAccounts(pool, [
       { username: WITHDRAWN, role: 'participant', userid: WITHDRAWN_ID },
@@ -110,6 +107,11 @@ export const studyStatusGate: Scenario = {
       [WITHDRAWN_ID, withdrawnAt],
     );
     rec.fact('telemetryRowsAfterWithdrawal', Number(telemetry.rows[0].n));
+
+    // A deliberate study submission is refused (403), not silently stored:
+    // the withdrawal gate runs before the assignment lookup, so even an id
+    // that does not exist answers 403 study_status rather than 404.
+    await rec.step('withdrawn:assignment-complete', withdrawn.post('/api/me/assignments/999999999/complete').send({}));
     return rec.record;
   },
   assertFinal: [
@@ -118,12 +120,12 @@ export const studyStatusGate: Scenario = {
     ),
     probeAssert(
       'withdrawn-refused-on-every-start-route',
-      'chat, live, grok and create all 403 study_status=withdrawn',
+      'chat, live and grok all 403 study_status=withdrawn',
       refusedFor('withdrawn'),
     ),
     probeAssert(
       'paused-refused-on-every-start-route',
-      'chat, live, grok and create all 403 study_status=paused',
+      'chat, live and grok all 403 study_status=paused',
       refusedFor('paused'),
     ),
     probeAssert(
@@ -150,6 +152,16 @@ export const studyStatusGate: Scenario = {
         r.facts.telemetryRowsAfterWithdrawal === 0
           ? null
           : `${String(r.facts.telemetryRowsAfterWithdrawal)} client_events row(s) stored with the withdrawn participant's user_id after study_status_changed_at (POST /api/client-events answered ${show(r.steps['withdrawn:client-event'])})`,
+    ),
+    probeAssert(
+      'no-study-submission-after-withdrawal',
+      'a practice completion from the withdrawn account is refused 403 study_status',
+      (r) => {
+        const s = r.steps['withdrawn:assignment-complete'];
+        return s?.status === 403 && (s.body as { error?: string })?.error === 'study_status'
+          ? null
+          : `withdrawn participant's submission not refused: ${show(s)}`;
+      },
     ),
   ],
 };

@@ -169,17 +169,13 @@ export const quietHoursGate: Scenario = {
         return wrong.length ? wrong.join('; ') : null;
       },
     ),
-    probeAssert(
-      'every-start-route-refused-overnight',
-      'chat, live, grok and create all 403 quiet_hours at 23:30',
-      (r) => {
-        const wrong = (Object.keys(START_ROUTES) as StartRoute[])
-          .map((route) => [route, r.steps[`night:${route}`]] as const)
-          .filter(([, s]) => s?.status !== 403 || (s.body as { error?: string })?.error !== 'quiet_hours')
-          .map(([route, s]) => `${route}: ${show(s)}`);
-        return wrong.length ? wrong.join('; ') : null;
-      },
-    ),
+    probeAssert('every-start-route-refused-overnight', 'chat, live and grok all 403 quiet_hours at 23:30', (r) => {
+      const wrong = (Object.keys(START_ROUTES) as StartRoute[])
+        .map((route) => [route, r.steps[`night:${route}`]] as const)
+        .filter(([, s]) => s?.status !== 403 || (s.body as { error?: string })?.error !== 'quiet_hours')
+        .map(([route, s]) => `${route}: ${show(s)}`);
+      return wrong.length ? wrong.join('; ') : null;
+    }),
     probeAssert(
       'overnight-refusal-points-to-crisis-resources',
       'the 403 body tells the participant to use the crisis resources shown',

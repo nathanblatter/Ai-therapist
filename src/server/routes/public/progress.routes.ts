@@ -9,6 +9,7 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { requireAuth } from '../../middleware/auth.js';
+import { refuseIfWithdrawn } from '../../middleware/studyStatus.js';
 import {
   getOwnProgress,
   getUserLatestSafetyPlan,
@@ -139,7 +140,8 @@ export default function progressRoutes(): Router {
   // POST /api/me/assignments/:id/complete {note?} - mark one of YOUR OWN
   // assignments done. completeAssignment is scoped by (id, user_id), so a
   // guessed id belonging to someone else just comes back null -> 404.
-  router.post('/api/me/assignments/:id/complete', progressLimiter, requireAuth, async (req, res) => {
+  // Refused after withdrawal (ai-therapist-322).
+  router.post('/api/me/assignments/:id/complete', progressLimiter, requireAuth, refuseIfWithdrawn, async (req, res) => {
     try {
       const id = parseInt(req.params.id, 10);
       if (!Number.isInteger(id) || id <= 0) {

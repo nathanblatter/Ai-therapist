@@ -29,6 +29,7 @@ import {
   buildCheckinBlock,
   buildLeadConversationBlock,
   buildScreenerCadenceBlock,
+  SCREENER_CUE_HEADING,
   buildToolGuidanceBlock,
 } from '../utils/promptContext.js';
 import { buildPhaseTexts } from '../utils/phaseGuidance.js';
@@ -299,7 +300,7 @@ function buildItems(): Item[] {
       'it only in the psychoeducation-cue research arm (conditional, see A.6); ' +
       '(6) the leading-the-conversation block, only while that feature flag is on (conditional, A.14); ' +
       '(7) for logged-in returning participants who opted in to session memory, a returning-participant context ' +
-      'block (A.7); and ' +
+      'block (A.7); every other logged-in participant receives the screener-cadence block alone instead (A.7); and ' +
       '(8) a pre-session check-in block, only if the participant filled in the optional check-in form (A.8).',
   );
   add(
@@ -483,6 +484,14 @@ function buildItems(): Item[] {
       .filter((line) => line.startsWith('- '))
       .join('\n'),
   );
+  add(
+    'p',
+    'A logged-in participant whose prompt has no returning-participant block (session memory off, which is the ' +
+      'default, or on with nothing to recall yet) receives the screener-cadence lines on their own, so the PHQ-2 ' +
+      'and GAD-2 are offered to every participant on the same weekly cadence. Nothing else from the block above is ' +
+      'included: no scores, summaries or remembered facts. Verbatim, for a participant who has never taken either:',
+  );
+  add('pre', block(`\n\n${SCREENER_CUE_HEADING}${buildScreenerCadenceBlock([], now)}`));
 
   add('h2', 'A.8 Pre-session check-in block');
   add(

@@ -5,10 +5,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
-const { insertEngagementEventsMock, getSystemConfigMock } = vi.hoisted(() => ({
+const { insertEngagementEventsMock, getSystemConfigMock, getStudyStatusMock } = vi.hoisted(() => ({
   insertEngagementEventsMock: vi.fn(),
   getSystemConfigMock: vi.fn(),
+  getStudyStatusMock: vi.fn(),
 }));
+
+vi.mock('../../db/studyStatus.queries.js', () => ({ getStudyStatus: getStudyStatusMock }));
 
 vi.mock('../../db/index.js', () => ({
   insertEngagementEvents: insertEngagementEventsMock,
@@ -46,6 +49,7 @@ function withFlags(flags: Record<string, unknown>) {
 beforeEach(() => {
   vi.clearAllMocks();
   insertEngagementEventsMock.mockResolvedValue(undefined);
+  getStudyStatusMock.mockResolvedValue('active');
   withFlags({});
 });
 
@@ -111,6 +115,16 @@ describe('POST /api/engagement-events', () => {
   it('returns 204 on a malformed body (no events array)', async () => {
     withFlags({ telemetry_engagement_events: true });
     const res = await request(makeApp()).post('/api/engagement-events').send({ nope: true });
+    expect(res.status).toBe(204);
+    expect(insertEngagementEventsMock).not.toHaveBeenCalled();
+  });
+
+  it("drops a withdrawn participant's batch: 204, nothing stored (ai-therapist-322)", async () => {
+    withFlags({ telemetry_engagement_events: true });
+    getStudyStatusMock.mockResolvedValueOnce('withdrawn');
+    const res = await request(makeApp(7))
+      .post('/api/engagement-events')
+      .send({ events: [{ kind: 'tool_open' }] });
     expect(res.status).toBe(204);
     expect(insertEngagementEventsMock).not.toHaveBeenCalled();
   });

@@ -13,6 +13,7 @@
 import { Router, json } from 'express';
 import rateLimit from 'express-rate-limit';
 import { insertClientEvent } from '../../db/index.js';
+import { dropIfWithdrawn } from '../../middleware/studyStatus.js';
 
 import { createLogger } from '../../utils/logger.js';
 
@@ -89,8 +90,10 @@ export default function clientEventsRoutes(): Router {
   // POST /api/client-events - accept one browser-reported event. Body parsing
   // is route-local with a tight 4kb cap so an oversized beacon is rejected
   // (413) before it is ever parsed; index.ts skips the global json parser for
-  // this path so this limit actually applies.
-  router.post('/api/client-events', beaconLimiter, json({ limit: '4kb' }), async (req, res) => {
+  // this path so this limit actually applies. A withdrawn participant's
+  // beacons are answered 204 and dropped (ai-therapist-322: the consent form
+  // says nothing is collected after withdrawal; see middleware/studyStatus.ts).
+  router.post('/api/client-events', beaconLimiter, json({ limit: '4kb' }), dropIfWithdrawn, async (req, res) => {
     const { kind, detail, sessionId } = req.body || {};
 
     if (typeof kind !== 'string' || !KIND_SET.has(kind)) {
