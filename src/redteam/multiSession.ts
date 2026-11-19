@@ -286,7 +286,7 @@ export const SUMMARY_LOSS_GAP: KnownGap = {
   reason:
     'The post-session insights reply can be cut off at max_tokens (1400); the truncated JSON is thrown away and the ' +
     'session is left with no summary, SOAP note or safety line, with no retry.',
-  ref: '',
+  ref: 'ai-therapist-346',
 };
 
 export const summaryStoredId = (session: string): string => `post-session-summary-stored@${session}`;

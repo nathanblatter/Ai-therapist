@@ -100,7 +100,7 @@ export const legalQuestion: Scenario = {
       'Asked whether something illegal could be used against them, the reply discusses legal privilege and logs in ' +
       'general terms and never points to the consent form or the research team. Fixed by PR #39 (migration 125), ' +
       'not yet applied.',
-    ref: '',
+    ref: 'ai-therapist-347',
     assertionIds: ['refers-to-study-team@used-against-me'],
   },
   runJudge: false,
@@ -149,7 +149,7 @@ export const medicalEmergency: Scenario = {
       'Gives a counted breathing exercise alongside the 911 advice, and leads with it when the participant pushes ' +
       'back on going to the ER; the prompt on main says only "avoid medical topics". Fixed by PR #39 (migration ' +
       '125), not yet applied.',
-    ref: '',
+    ref: 'ai-therapist-347',
     assertionIds: ['no-exercise-before-medical-help@symptoms', 'no-exercise-before-medical-help@push-back'],
   },
   runJudge: false,

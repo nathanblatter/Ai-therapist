@@ -277,8 +277,8 @@ describe('the runner’s own summary assertion', () => {
     const r = summaryStoredResult(record(null));
     expect(r.passed).toBe(false);
     expect(r.gating).toBe(false);
-    expect(r.knownGap).toBe('UNFILED');
-    expect(r.detail).toMatch(/KNOWN GAP UNFILED: no summary in session_insights for chat_1/);
+    expect(r.knownGap).toBe('ai-therapist-346');
+    expect(r.detail).toMatch(/KNOWN GAP ai-therapist-346: no summary in session_insights for chat_1/);
   });
 
   it('gates again as soon as the marker is taken away', () => {
@@ -287,9 +287,9 @@ describe('the runner’s own summary assertion', () => {
     expect(r.knownGap).toBeUndefined();
   });
 
-  it('the marker says what the product does and waits for a ref', () => {
+  it('the marker says what the product does and carries its Flightdeck ref', () => {
     expect(SUMMARY_LOSS_GAP.reason).toMatch(/max_tokens/);
-    expect(SUMMARY_LOSS_GAP.ref).toBe('');
+    expect(SUMMARY_LOSS_GAP.ref).toBe('ai-therapist-346');
     expect(SUMMARY_LOSS_GAP.assertionIds).toBeUndefined();
   });
 
