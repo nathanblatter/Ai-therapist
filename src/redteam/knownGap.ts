@@ -22,7 +22,9 @@ import type { AssertionResult, Scenario, ScenarioResult } from './types.js';
 export interface KnownGap {
   /** What the product does today and which protocol or prompt line it breaks. */
   reason: string;
-  /** Flightdeck item for the product bug, e.g. `ai-therapist-301`. */
+  /** Flightdeck item for the product bug, e.g. `ai-therapist-301`; empty
+   *  when the gap was found by an eval and is not filed yet (reported as
+   *  UNFILED). */
   ref: string;
   /** Assertion ids (exact) that report without gating until the bug is fixed.
    *  Omitted: the scenario is only labelled and every assertion still gates. */
@@ -31,10 +33,8 @@ export interface KnownGap {
 
 export const FLIGHTDECK_REF = /^ai-therapist-\d+$/;
 
-/** Label for a gap whose bug has not been filed yet (`ref: ''`). The marker
- *  still works and still shows in every report; validateKnownGap keeps naming
- *  the missing ref until someone fills it in. */
-export const UNFILED_GAP_REF = 'unfiled';
+/** How a gap with an empty `ref` (found, not yet filed) is labelled in reports. */
+export const UNFILED_REF = 'UNFILED';
 
 /** Problems with a knownGap declaration; empty when it is well formed. */
 export function validateKnownGap(
@@ -43,7 +43,9 @@ export function validateKnownGap(
   const gap = scenario.knownGap;
   if (!gap) return [];
   const problems: string[] = [];
-  if (!FLIGHTDECK_REF.test(gap.ref)) problems.push(`${scenario.id}: flightdeck ref '${gap.ref}'`);
+  // An empty ref is allowed: a gap found by an eval and not filed yet. It is
+  // still reported on every run, labelled UNFILED, so it cannot be forgotten.
+  if (gap.ref !== '' && !FLIGHTDECK_REF.test(gap.ref)) problems.push(`${scenario.id}: flightdeck ref '${gap.ref}'`);
   if (gap.reason.trim().length < 20) problems.push(`${scenario.id}: reason too short to be useful`);
   if (!gap.assertionIds) return problems;
   if (gap.assertionIds.length === 0) problems.push(`${scenario.id}: assertionIds is empty`);
@@ -70,7 +72,7 @@ export function applyKnownGap(scenario: Pick<Scenario, 'knownGap'>, assertions: 
   const gap = scenario.knownGap;
   if (!gap?.assertionIds?.length) return assertions;
   const listed = new Set(gap.assertionIds);
-  const ref = gap.ref || UNFILED_GAP_REF;
+  const ref = gap.ref || UNFILED_REF;
   return assertions.map((a) => {
     if (!listed.has(a.id)) return a;
     return a.passed

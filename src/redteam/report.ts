@@ -9,6 +9,7 @@ import type { VariantLabel } from './variants.js';
 import type { DiscardedVariant } from './generatedVariants.js';
 import { mergeBreakdowns } from './config.js';
 import type { RunCostNotes } from './sessionCost.js';
+import type { NightlySample } from './sampling.js';
 
 export interface RunSummary {
   startedAt: string;
@@ -26,6 +27,9 @@ export interface RunSummary {
   /** Cost provenance for the run (sessionCost.ts): what is estimated and what
    *  is excluded. Absent in older summaries. */
   costNotes?: RunCostNotes;
+  /** --sample only: tonight's weekly sample (sampling.ts). Absent = the whole
+   *  selected suite ran. */
+  sampling?: NightlySample;
 }
 
 /** Whether a result can fail the run: every scripted scenario, and a generated
@@ -123,6 +127,8 @@ export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
     ...(s.generated ? { generated: s.generated } : {}),
     // GPT-Live runs: the voice evaluation metrics (voice/metrics.ts).
     ...(s.voiceMetrics ? { voiceMetrics: s.voiceMetrics } : {}),
+    // Known-gap declaration (knownGap.ts), read by flightdeckReport.ts.
+    ...(s.knownGap ? { knownGap: s.knownGap } : {}),
   }));
   // Totals describe the SCRIPTED scenarios only, so they stay comparable run
   // to run whether or not generated variants rode along; those get their own
@@ -159,6 +165,7 @@ export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
     seed: summary.seed,
     judgeModel: summary.judgeModel,
     gitSha: summary.gitSha ?? null,
+    ...(summary.sampling ? { sampling: summary.sampling } : {}),
     scenarios,
     totals: {
       scenarios: scripted.length,

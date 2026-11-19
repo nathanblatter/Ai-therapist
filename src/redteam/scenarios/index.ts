@@ -32,6 +32,10 @@ import { faithMissionDoubt, faithBelonging, faithScrupulosity } from './relation
 import { longSessionDrift } from './relational/longSessionDrift.js';
 import { armProactiveOffering, armReactiveOffering } from './arms/proactiveOffering.js';
 import { MEMORY_SCENARIOS, MEMORY_EXTENDED_SCENARIOS } from './memory/index.js';
+import { SCREENING_SCENARIOS, SCREENING_EXTENDED_SCENARIOS } from './screening/index.js';
+import { OPENING_SCENARIOS, OPENING_EXTENDED_SCENARIOS } from './opening/index.js';
+import { USE_SCENARIOS, USE_EXTENDED_SCENARIOS } from './use/index.js';
+import { GATE_SCENARIOS } from './gates/index.js';
 
 /** One suite member: a scenario plus optional beat-subset / judge overrides. */
 export interface SuiteEntry {
@@ -88,6 +92,14 @@ export const SAFETY_SCENARIOS: Scenario[] = [
   armReactiveOffering,
   // Catalogue A11 (MEM-*) and the other multi-session entries: memory/index.ts.
   ...MEMORY_SCENARIOS,
+  // Catalogue SCR-*, OPEN-*, USE-* entries the catalogue tiers NIGHTLY (the
+  // EXT ones are in EXTENDED_SCENARIOS). Full suite only, never smoke. Known
+  // gaps are listed per scenario (only the listed assertions stop gating).
+  ...SCREENING_SCENARIOS,
+  ...OPENING_SCENARIOS,
+  ...USE_SCENARIOS,
+  // Catalogue GATE-01, GATE-03 to GATE-06 and STAFF-10: http pipeline, no model, no judge.
+  ...GATE_SCENARIOS,
 ];
 
 // Quality scenarios (ai-therapist-124): ordinary-participant personas gated on
@@ -140,6 +152,9 @@ export const EXTENDED_SCENARIOS: Scenario[] = [
   ...PROTOCOL_EXTENDED_SCENARIOS,
   longSessionDrift,
   ...MEMORY_EXTENDED_SCENARIOS,
+  ...SCREENING_EXTENDED_SCENARIOS,
+  ...OPENING_EXTENDED_SCENARIOS,
+  ...USE_EXTENDED_SCENARIOS,
 ];
 export const EXTENDED_SUITE: SuiteEntry[] = EXTENDED_SCENARIOS.map((scenario) => ({ scenario }));
 
@@ -150,6 +165,18 @@ export const SMOKE_SUITE: SuiteEntry[] = [
   { scenario: crisisLadder, beatIds: ['passive-ideation', 'explicit-intent'], judge: false },
   { scenario: chatCrisisLadder, judge: false },
   { scenario: medication, beatIds: ['context', 'dose-advice'], judge: false },
+];
+
+// Safety-critical scenarios for the sampled nightly (src/redteam/sampling.ts):
+// the smoke four plus the crisis family. They get the weekly repeat slots
+// first, so they run several times a week. Explicit list: new crisis scenarios
+// join through CRISIS_SCENARIOS.
+export const SAMPLING_PRIORITY_SCENARIOS: Scenario[] = [
+  ...SMOKE_SUITE.map((e) => e.scenario),
+  crisisLadder,
+  chatCrisisLadder,
+  passiveIdeation,
+  ...CRISIS_SCENARIOS,
 ];
 
 export function selectSuite(suite: RedteamSuite, scenarioId?: string): SuiteEntry[] {
@@ -172,5 +199,8 @@ export function selectSuite(suite: RedteamSuite, scenarioId?: string): SuiteEntr
                     ? VOICE_RUN_SCENARIOS.map((scenario) => ({ scenario }))
                     : FULL_SUITE;
   if (!scenarioId) return base;
-  return base.filter((e) => e.scenario.id === scenarioId);
+  // A comma-separated list runs several scenarios in one process (one server
+  // boot, one cost summary), e.g. `--scenario grief,legal-question`.
+  const ids = new Set(scenarioId.split(',').map((s) => s.trim()));
+  return base.filter((e) => ids.has(e.scenario.id));
 }

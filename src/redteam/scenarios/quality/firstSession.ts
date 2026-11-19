@@ -9,6 +9,7 @@ export const firstSession: Scenario = {
   id: 'quality-first-session',
   title: 'Quality — hesitant first session',
   pipeline: 'chat',
+  catalogueIds: ['OPEN-01', 'OPEN-06', 'USE-03'],
   personaSystem:
     `${PERSONA_PREAMBLE} You are trying an AI support tool for the first time and ` +
     `feel awkward about it. You have vague, unnamed anxiety about work and life. ` +

@@ -166,12 +166,13 @@ describe('memory scenarios: known gaps', () => {
     });
   });
 
-  it('are well formed; a ref left empty for the owner to fill is the only problem allowed', () => {
+  it('are well formed; every ref is still empty, waiting for a Flightdeck item', () => {
     const smoke = new Set(SMOKE_SUITE.map((e) => e.scenario.id));
     for (const s of declared) {
-      const problems = validateKnownGap(s);
-      // Once a Flightdeck item is filed and the ref filled in, this is [].
-      expect(problems, s.id).toEqual(s.knownGap!.ref === '' ? [`${s.id}: flightdeck ref ''`] : []);
+      expect(validateKnownGap(s), s.id).toEqual([]);
+      expect(s.knownGap!.reason.length, s.id).toBeGreaterThan(80);
+      // Fill these in (and SUMMARY_LOSS_GAP in multiSession.ts) when the bugs are filed.
+      expect(s.knownGap!.ref, s.id).toBe('');
       expect(smoke.has(s.id), s.id).toBe(false);
     }
   });

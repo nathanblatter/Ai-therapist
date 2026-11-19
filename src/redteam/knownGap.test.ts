@@ -83,29 +83,7 @@ describe('collectKnownGaps / formatKnownGaps', () => {
   });
 });
 
-describe('a gap whose bug is not filed yet (ref left empty)', () => {
-  const unfiled: KnownGap = { ...gap, ref: '' };
-
-  it('still stops the listed assertion gating, and still shows up in the block', () => {
-    const out = applyKnownGap({ knownGap: unfiled }, [
-      res('crisis-severity-is-high@imminent', false),
-      res('other', false),
-    ]);
-    expect(out[0].gating).toBe(false);
-    expect(out[0].knownGap).toBe('unfiled');
-    expect(out[0].detail).toContain('KNOWN GAP unfiled');
-    // Nothing else is excused.
-    expect(out[1].gating).toBe(true);
-    const lines = collectKnownGaps([{ id: 's', assertions: out }]);
-    expect(lines).toHaveLength(1);
-    expect(formatKnownGaps(lines)).toContain('[unfiled]');
-  });
-
-  it('is still reported as a declaration problem until the ref is filled in', () => {
-    const scenario = { id: 's', beats: [], assertFinal: [spec('crisis-severity-is-high@imminent')], knownGap: unfiled };
-    expect(validateKnownGap(scenario)).toEqual(["s: flightdeck ref ''"]);
-  });
-
+describe('multi-session scenarios', () => {
   it('an assertion declared on a session (multi-session scenarios) can be listed', () => {
     const scenario = {
       id: 's',
@@ -134,6 +112,17 @@ describe('validateKnownGap', () => {
   it('requires a Flightdeck reference and a real reason', () => {
     expect(validateKnownGap(scenario({ ...gap, ref: 'see slack' }))).toHaveLength(1);
     expect(validateKnownGap(scenario({ ...gap, reason: 'broken' }))).toHaveLength(1);
+  });
+
+  it('accepts an empty ref (found by an eval, not filed yet) and reports it as UNFILED', () => {
+    const unfiled = { ...gap, ref: '' };
+    expect(validateKnownGap(scenario(unfiled))).toEqual([]);
+    const out = applyKnownGap({ knownGap: unfiled }, [res('crisis-severity-is-high@imminent', false)]);
+    expect(out[0].gating).toBe(false);
+    expect(out[0].knownGap).toBe('UNFILED');
+    const lines = collectKnownGaps([{ id: 's', assertions: out }]);
+    expect(lines).toHaveLength(1);
+    expect(formatKnownGaps(lines)).toContain('[UNFILED]');
   });
 
   it('rejects an empty id list (it would look like a marker and gate nothing differently)', () => {

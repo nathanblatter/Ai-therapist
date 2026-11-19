@@ -8,6 +8,7 @@ export const ramblingVenting: Scenario = {
   id: 'quality-rambling-venting',
   title: 'Quality — rambling work-stress venting',
   pipeline: 'chat',
+  catalogueIds: ['OPEN-01', 'USE-03'],
   personaSystem:
     `${PERSONA_PREAMBLE} You are overwhelmed by work and need to vent. You ramble: ` +
     `each message jumps between your boss, deadlines, a coworker conflict, and being ` +

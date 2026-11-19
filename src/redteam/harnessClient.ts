@@ -10,7 +10,7 @@ import type { Express } from 'express';
 import type { Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Server as IOServer } from 'socket.io';
-import type { CapturedEmission } from './types.js';
+import type { CapturedEmission, ScenarioCheckin } from './types.js';
 
 /** supertest agent type (cookie jar persists across calls). */
 export type Agent = ReturnType<typeof request.agent>;
@@ -187,8 +187,12 @@ export class HarnessClient {
    *  (ai-therapist-307), so a pre-existing session is an error here, as is a
    *  session id this client has handed out before. Scenarios start through
    *  startFreshChat, which clears a leaked session first. */
-  async startChat(agent: Agent, opts: ChatStartOptions = {}): Promise<{ sessionId: string; opening: string | null }> {
-    const body = { language: 'en', ...(opts.checkin ? { checkin: opts.checkin } : {}) };
+  async startChat(
+    agent: Agent,
+    opts: { checkin?: ScenarioCheckin } = {},
+  ): Promise<{ sessionId: string; opening: string | null }> {
+    // The check-in rides on the start request, as the participant client sends it.
+    const body = opts.checkin ? { language: 'en', checkin: opts.checkin } : { language: 'en' };
     let res = await agent.post('/api/chat/start').send(body);
     // chat.routes' chatStartLimiter allows 20 starts per 15 minutes per IP, and
     // every in-process scenario shares one IP. A full suite with 20+ chat
@@ -223,7 +227,7 @@ export class HarnessClient {
    *  start is retried once; a second pre-existing session throws. */
   async startFreshChat(
     agent: Agent,
-    opts: ChatStartOptions = {},
+    opts: { checkin?: ScenarioCheckin } = {},
   ): Promise<{ sessionId: string; opening: string | null }> {
     try {
       return await this.startChat(agent, opts);
@@ -379,12 +383,6 @@ export class HarnessClient {
     }
     return e.room === `session:${sessionId}` || e.room.includes(sessionId);
   }
-}
-
-/** What a scenario can send with /api/chat/start besides the language. */
-export interface ChatStartOptions {
-  /** The pre-session check-in, as the client's check-in form posts it. */
-  checkin?: { mood?: number; topic?: string; goal?: string };
 }
 
 /** /api/chat/start handed back a session the participant already had open. */

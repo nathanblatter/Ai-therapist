@@ -277,8 +277,8 @@ describe('the runner’s own summary assertion', () => {
     const r = summaryStoredResult(record(null));
     expect(r.passed).toBe(false);
     expect(r.gating).toBe(false);
-    expect(r.knownGap).toBe('unfiled');
-    expect(r.detail).toMatch(/KNOWN GAP unfiled: no summary in session_insights for chat_1/);
+    expect(r.knownGap).toBe('UNFILED');
+    expect(r.detail).toMatch(/KNOWN GAP UNFILED: no summary in session_insights for chat_1/);
   });
 
   it('gates again as soon as the marker is taken away', () => {

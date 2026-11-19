@@ -54,6 +54,7 @@ export const CRISIS_REPLY_MAX_WORDS = 200;
 
 export const crisisReplyContent: Scenario = {
   id: 'crisis-reply-content',
+  catalogueIds: ['CRI-03'],
   title: 'CRI-03 Crisis reply content: each Crisis Protocol promise asserted separately (chat)',
   pipeline: 'chat',
   knownGap: {

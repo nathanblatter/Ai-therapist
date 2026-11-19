@@ -3,6 +3,17 @@ on:
   schedule:
     - cron: '0 8 * * *' # 02:00 America/Denver ≈ 08:00 UTC
   workflow_dispatch:
+    inputs:
+      full_suite:
+        description: 'Run the whole full suite unsampled (before launch, after a prompt or model change)'
+        type: boolean
+        default: false
+env:
+  # Weekly sampling (src/redteam/sampling.ts, docs/redteam.md "Sampled
+  # nightly"): each night runs at most 25 scenarios (20 on Sunday) and every
+  # scenario runs at least once per Monday-to-Sunday UTC week. 'false' runs the
+  # whole suite every night. The caps live in DAILY_CAPS in sampling.ts.
+  REDTEAM_NIGHTLY_SAMPLED: 'true'
 permissions:
   contents: read
   actions: read # gh run download: previous nightly's artifact is the diff baseline
@@ -14,17 +25,27 @@ jobs:
     # several times the earlier estimate, and the flag it tests is off.
     name: plan variant legs
     runs-on: ubuntu-latest
+    # Sampling: on unless REDTEAM_NIGHTLY_SAMPLED is 'false' or a manual run
+    # asks for the full suite. Both legs sample the same scenarios (the
+    # lead-conversation leg reads the default leg's history).
     outputs:
       variants: ${{ steps.pick.outputs.variants }}
+      sample: ${{ steps.pick.outputs.sample }}
     steps:
       - id: pick
         env:
           EVENT_NAME: ${{ github.event_name }}
+          FULL_SUITE: ${{ inputs.full_suite }}
         run: |
           if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$(date -u +%u)" = "7" ]; then
             echo 'variants=["default","lead-conversation"]' >> "$GITHUB_OUTPUT"
           else
             echo 'variants=["default"]' >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$REDTEAM_NIGHTLY_SAMPLED" = "true" ] && [ "$FULL_SUITE" != "true" ]; then
+            echo 'sample=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'sample=false' >> "$GITHUB_OUTPUT"
           fi
   redteam-full:
     needs: plan
@@ -67,7 +88,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/redteam-db-setup
-      - name: Download previous nightly results (diff baseline)
+      - name: Download previous nightly results (diff baseline, sample history)
         # actions/download-artifact cannot reach other workflow runs, so use the
         # gh CLI. Best-effort: a missing baseline just means no diff tonight.
         #
@@ -77,29 +98,37 @@ jobs:
         # whenever a scenario fails, and a success-only filter would freeze the
         # baseline at the last green night forever. Cancelled runs and runs
         # whose harness crashed before writing summary.json are skipped.
+        #
+        # The artifact carries rolling-baseline.json (each scenario's most
+        # recent result), which the CLI prefers over summary.json, so a sampled
+        # night compares every scenario with its own last run. The sampler
+        # reads the DEFAULT leg's artifact as its history, so both legs pick
+        # the same sample.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           candidates=$(gh run list --workflow redteam-nightly.yml --branch main --status completed --limit 20 \
                          --json databaseId,conclusion \
                          --jq '.[] | select(.conclusion == "success" or .conclusion == "failure") | .databaseId')
-          found=""
-          for id in $candidates; do
-            [ "$id" = "$GITHUB_RUN_ID" ] && continue
-            rm -rf redteam-baseline
-            if gh run download "$id" --name "$RESULTS_ARTIFACT" --dir redteam-baseline 2>/dev/null \
-               && [ -f redteam-baseline/summary.json ]; then
-              found="$id"
-              break
-            fi
-          done
-          if [ -n "$found" ]; then
-            echo "baseline: run $found, artifact $RESULTS_ARTIFACT"
-          else
-            rm -rf redteam-baseline
-            echo "no earlier $RESULTS_ARTIFACT with a summary.json found; no diff tonight"
+          fetch() { # fetch <artifact> <dir>
+            for id in $candidates; do
+              [ "$id" = "$GITHUB_RUN_ID" ] && continue
+              rm -rf "$2"
+              if gh run download "$id" --name "$1" --dir "$2" 2>/dev/null && [ -f "$2/summary.json" ]; then
+                echo "$2: run $id, artifact $1"
+                return 0
+              fi
+            done
+            rm -rf "$2"
+            echo "$2: no earlier $1 with a summary.json found"
+          }
+          fetch "$RESULTS_ARTIFACT" redteam-baseline
+          if [ "$RESULTS_ARTIFACT" != "redteam-full-results" ]; then
+            fetch redteam-full-results redteam-sample-history
+          elif [ -d redteam-baseline ]; then
+            cp -r redteam-baseline redteam-sample-history
           fi
-          ls -la redteam-baseline 2>/dev/null || true
+          ls -la redteam-baseline redteam-sample-history 2>/dev/null || true
       - name: Red-team full suite
         # --allow-fail keeps this step green so the artifact upload and the job
         # summary below always run; the last step ends the job red when any
@@ -107,7 +136,17 @@ jobs:
         # different variant. Promotion to gating (--gate-diff / --gate-quality)
         # is documented in docs/redteam.md. The smoke suite (deploy.yml) is the
         # deploy gate; this workflow gates nothing.
-        run: npm run redteam:full -- --allow-fail --variant "$VARIANT" --baseline redteam-baseline/summary.json
+        #
+        # SAMPLE: the weekly sample for tonight's UTC date (sampling.ts); the
+        # job summary states how many of how many ran and when the rest are due.
+        env:
+          SAMPLE: ${{ needs.plan.outputs.sample }}
+        run: |
+          sample_args=()
+          if [ "$SAMPLE" = "true" ]; then
+            sample_args=(--sample --sample-history redteam-sample-history/summary.json)
+          fi
+          npm run redteam:full -- --allow-fail --variant "$VARIANT" --baseline redteam-baseline/summary.json "${sample_args[@]}"
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
@@ -123,3 +162,105 @@ jobs:
         # After upload + summary, so a red night still leaves its artifact as
         # the next night's baseline.
         run: npm run redteam:ci-summary -- --dir redteam-results --check
+
+  flightdeck-sync:
+    # Files NEW eval failures into Flightdeck (src/redteam/flightdeckReport.ts,
+    # docs/redteam.md "Eval failures in Flightdeck"). Self-hosted because
+    # Flightdeck listens on a Tailscale address GitHub-hosted runners cannot
+    # reach. Write-only: the FLIGHTDECK_INGEST_KEY secret is an ingest-scope
+    # key (POST /api/ingest/capture only); without it the step prints a notice
+    # and does nothing. Never on pull_request, never on another branch.
+    #
+    # Shared-runner hygiene: the mini's single runner also runs deploy.yml's
+    # stage `deploy` job, so this job is short (no npm ci; plain node runs the
+    # one dependency-free script from a sparse checkout), uses its own
+    # workspace under the runner's _work dir (the deploy job works in
+    # ~/deploy/Ai-therapist, not here) and its own concurrency group (never
+    # the deploy's). Every step tolerates failure: this job never turns the
+    # run red.
+    name: file new failures in Flightdeck
+    needs: [redteam-full]
+    if: >-
+      always() && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      needs.redteam-full.result != 'cancelled' && needs.redteam-full.result != 'skipped'
+    runs-on: self-hosted
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read # tonight's artifacts + earlier runs' results (the previous result per scenario)
+    concurrency:
+      group: flightdeck-eval-sync
+      cancel-in-progress: false
+    env:
+      FLIGHTDECK_URL: http://100.79.61.79:4300
+      FLIGHTDECK_INGEST_KEY: ${{ secrets.FLIGHTDECK_INGEST_KEY }}
+      ARTIFACTS: redteam-full-results*
+      WORKFLOW_FILE: redteam-nightly.yml
+    steps:
+      - uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          sparse-checkout: |
+            src/redteam/flightdeckReport.ts
+            package.json
+          sparse-checkout-cone-mode: false
+      - name: Download tonight's results
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ env.ARTIFACTS }}
+          path: fd-current
+      - name: Download this run's earlier sync state (re-run idempotency)
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: flightdeck-sync-state
+          path: fd-state
+      - name: Download earlier runs' results (previous result per scenario)
+        # The previous recorded result decides whether tonight's failure is new
+        # (pass -> fail, or no earlier result) or a repeat (fail -> fail, files
+        # nothing). rolling-baseline.json in each artifact carries every
+        # scenario's most recent result; up to 5 earlier runs are read so a
+        # missing night does not erase the history.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p fd-previous
+          ids=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$WORKFLOW_FILE" --branch main --status completed --limit 10 \
+                  --json databaseId,conclusion \
+                  --jq '.[] | select(.conclusion == "success" or .conclusion == "failure") | .databaseId' | head -6)
+          for id in $ids; do
+            [ "$id" = "$GITHUB_RUN_ID" ] && continue
+            gh run download "$id" --repo "$GITHUB_REPOSITORY" --pattern "$ARTIFACTS" --dir "fd-previous/$id" 2>/dev/null || true
+          done
+          find fd-previous -name summary.json | sort || true
+      - name: File new failures
+        continue-on-error: true
+        run: |
+          NODE=/opt/homebrew/opt/node@24/bin/node # not on the runner's PATH (its nvm entry is stale)
+          [ -x "$NODE" ] || NODE=$(command -v node || true)
+          if [ -z "$NODE" ] || [ ! -f src/redteam/flightdeckReport.ts ]; then
+            echo "WARNING: Flightdeck eval sync skipped: node or the script is missing on the self-hosted runner." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          summaries=$(find fd-current -name summary.json 2>/dev/null | sort)
+          # No summary at all: the harness never finished. Name the expected
+          # file so the script reports it as an infrastructure failure.
+          [ -n "$summaries" ] || summaries=fd-current/redteam-full-results/summary.json
+          prev=()
+          for d in $(find fd-previous -name summary.json -exec dirname {} \; 2>/dev/null | sort -u); do prev+=(--previous "$d"); done
+          "$NODE" src/redteam/flightdeckReport.ts \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --state fd-state/flightdeck-state.json "${prev[@]}" $summaries \
+            || echo "WARNING: Flightdeck eval sync exited non-zero; see the step log." | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Keep the sync state for a re-run of this run
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: flightdeck-sync-state
+          path: fd-state/flightdeck-state.json
+          if-no-files-found: ignore
+          overwrite: true

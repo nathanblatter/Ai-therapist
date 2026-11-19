@@ -5,6 +5,7 @@ import type { ProgressionMetrics } from './progression.js';
 import type { CostBreakdown } from './config.js';
 import type { VoiceEvalSpec } from './voice/scenarioTypes.js';
 import type { RunMetrics } from './voice/metrics.js';
+import type { HarnessClient } from './harnessClient.js';
 
 export type { EvalDimensionId };
 
@@ -23,8 +24,32 @@ export type JudgeDimensionId = EvalDimensionId | 'session_progression';
  *  ADMIN data assistant (POST /admin/api/assistant/chat) driven as a logged-in
  *  staff user of `Scenario.assistantRole` (ai-therapist-207): the persona is a
  *  staff member, not a participant, and the thing under test is role scoping,
- *  injection resistance and data exfiltration, not therapy quality. */
-export type Pipeline = 'chat' | 'realtime-text' | 'voice' | 'assistant';
+ *  injection resistance and data exfiltration, not therapy quality. `http` →
+ *  no conversation at all: the scenario's `httpProbe` drives the real routes
+ *  (session-start gates, RBAC, audit rows) and its `assertFinal` checks read
+ *  what the probe recorded (`AssertionContext.http`). Judge-free and
+ *  model-free by construction; it runs the same under --dry-run. */
+export type Pipeline = 'chat' | 'realtime-text' | 'voice' | 'assistant' | 'http';
+
+/** One HTTP call an `http` scenario made, as the assertions see it. */
+export interface HttpStep {
+  status: number;
+  body: unknown;
+}
+
+/** What an `http` scenario's probe recorded: every call by a stable key, plus
+ *  database facts read along the way (row counts, ids, timestamps). */
+export interface HttpProbeRecord {
+  steps: Record<string, HttpStep>;
+  facts: Record<string, unknown>;
+}
+
+/** What the runner hands an `http` scenario's probe. */
+export interface HttpProbeEnv {
+  client: HarnessClient;
+  pool: DbLike;
+  dryRun: boolean;
+}
 
 /** Staff roles the admin assistant serves (mirrors assistant.service.ts). */
 export type AssistantRole = 'therapist' | 'researcher' | 'caseworker';
@@ -139,6 +164,8 @@ export interface AssertionContext {
    *  and `transcript` above are the CURRENT session's, so single-session
    *  assertions work unchanged inside any one session. */
   sessions?: SessionRecord[];
+  /** Set on the http pipeline only: what the scenario's probe recorded. */
+  http?: HttpProbeRecord;
   pool: DbLike;
   classify: ClassifyFn;
   dryRun: boolean;
@@ -227,7 +254,7 @@ export interface SessionSpec {
    *  seven-day screener window, "since last session") then sees the gap. */
   daysSincePrevious?: number;
   /** Pre-session check-in, sent with /api/chat/start as the client sends it. */
-  checkin?: { mood?: number; topic?: string; goal?: string };
+  checkin?: ScenarioCheckin;
   beats: Beat[];
   /** Runs before the session starts (after any ageing). */
   before?: (env: SessionHookEnv) => Promise<void>;
@@ -261,13 +288,21 @@ export interface SessionRecord {
   observations: Record<string, unknown>;
 }
 
+/** The optional pre-session check-in a participant fills in before a chat
+ *  session (mood slider, "what's on your mind", "what do you want from
+ *  today"). Sent as `checkin` on /api/chat/start, exactly as the client does. */
+export interface ScenarioCheckin {
+  mood?: number;
+  topic?: string;
+  goal?: string;
+}
+
 export interface Scenario {
   id: string;
   title: string;
-  pipeline: Pipeline;
-  /** IDs in docs/eval-scenario-catalogue.md this scenario covers (e.g.
-   *  `MEM-02`). */
+  /** docs/eval-scenario-catalogue.md ids this scenario covers (e.g. GATE-01). */
   catalogueIds?: string[];
+  pipeline: Pipeline;
   /** Chat pipeline: the scenario spans these sessions, in order
    *  (multiSession.ts). `beats` must then be the sessions' beats flattened
    *  (use `multiSessionScenario`), so everything that walks `beats` still
@@ -275,6 +310,8 @@ export interface Scenario {
   sessions?: SessionSpec[];
   /** Accounts `sessions` run as, by key. Required with `sessions`. */
   participants?: Record<string, ParticipantSpec>;
+  /** Chat pipeline: the pre-session check-in to submit with /api/chat/start. */
+  checkin?: ScenarioCheckin;
   modality?: string;
   /** Test-only fault or fixture installed around the run and undone after it,
    *  pass or fail (e.g. the risk assessor made unreachable). Lives in the
@@ -320,6 +357,9 @@ export interface Scenario {
   /** GPT-Live voice evaluation mode (src/redteam/voice, docs/redteam.md
    *  "GPT-Live evaluation guide"). Absent = an ordinary voice scenario. */
   voiceEval?: VoiceEvalSpec;
+  /** Required on the http pipeline: drive the real routes and record what
+   *  came back for `assertFinal` to check. Must never call a model. */
+  httpProbe?: (env: HttpProbeEnv) => Promise<HttpProbeRecord>;
 }
 
 export interface JudgeScores {
@@ -370,6 +410,10 @@ export interface ScenarioResult {
   /** GPT-Live runs: the guide's audio, delegation and consumption metrics
    *  (src/redteam/voice/metrics.ts). */
   voiceMetrics?: RunMetrics;
+  /** The scenario's knownGap declaration, carried into summary.json so a
+   *  label-only gap (no assertionIds) is recognisable from the artifact
+   *  (flightdeckReport.ts files nothing for it). */
+  knownGap?: KnownGap;
 }
 
 export interface GeneratedVariantMeta {
