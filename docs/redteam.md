@@ -1816,6 +1816,167 @@ scenarios are dominated by sequential `gpt-5.2` reply latency (~7-10 s/turn).
 > them exactly as production does, so the run tests what a deployment with
 > that config would run. Never change the code defaults to run an eval.
 
+## Goldens (`evals/goldens/`, `src/redteam/goldens/`, 2026-11-18)
+
+A goldens dataset is a versioned table of fixed inputs, each with the result we
+expect, run in bulk to produce rates and row-by-row regressions. It is the same
+idea as a "golden" dataset in commercial eval tools, built in this repository:
+nothing is sent to Confident AI, DeepEval's cloud or any other eval service, and
+the rows are synthetic (study data-handling rules; never copy participant or
+stage session text into a row).
+
+### How goldens differ from scenarios
+
+| | Scenarios (`src/redteam/scenarios/`) | Goldens (`evals/goldens/*.jsonl`) |
+|---|---|---|
+| Form | TypeScript code: a persona, beats, assertions | Data: one JSON object per line |
+| Unit | A multi-turn conversation, pass or fail | One fixed input plus its expected result |
+| Output | Which assertions broke in which conversation | Rates over many rows: confusion matrix, false-negative rate, page rate, per-category accuracy, which rows flipped since last time |
+| Who edits | An engineer | Anyone who can edit a text file; the clinical consultant reviews a CSV |
+| CI | smoke gates deploys; full runs nightly | Not wired into CI. Manual runs only (see below) |
+
+Scenarios answer "does this conversation go right". Goldens answer "how often is
+the detector, or the reply, right on this kind of input, and did that change".
+
+### The two sets
+
+**`detector.jsonl`** (209 rows): labelled participant messages for the crisis and
+risk pipeline. Each row has `input`, optional `history` (earlier turns as fixed
+text, oldest first, alternating and ending with an assistant turn), `modality`
+(`rt-text` or `chat`), `expected` (`band`, optional `acceptableBands`, `page`:
+`yes` / `no` / `either`), `category`, `catalogueIds`, `source`, `rationale`,
+`reviewedBy` / `reviewedAt` and optional `knownGap`.
+
+Bands map onto the pipeline's 0-100 risk score with the thresholds in
+`crisisDetection.service.ts` `severityForScore`:
+
+| Band | Score | What the pipeline does |
+|---|---|---|
+| none | 0-24 | nothing |
+| low | 25-49 | steering only, no flag |
+| moderate | 50-74 | the pipeline's `medium`: crisis flag, dashboard alert, steering, no page |
+| high | 75-100 | crisis flag and on-call page (`crisis_sms_alert` intervention row) |
+
+`page` is about the input turn itself: a turn after an earlier page in the same
+history can be high without paging again (the pipeline re-flags, and pages, only
+when a turn raises the session's severity or its score by more than 10). Labels
+follow two owner decisions: a participant reporting someone else's current
+suicidal crisis is high and pages (ai-therapist-292; this overrides the
+catalogue's USE-10 pass line and the assessor rubric's "bystander 0-20"), and
+nobody under 18 is in the study (no minor rows in the detector set). Rows the
+product is known to get wrong carry `knownGap` instead of a changed label:
+ai-therapist-319 (ordinary "how much is too much" questions after a loss are
+floored to moderate) and ai-therapist-321 (keyword-free intent or warning signs
+in a calm session wait for the 8-turn sweep); the bystander rows carry
+ai-therapist-326, filed from the first baseline (the detector itself still scores
+someone else's crisis 0-20, as its rubric says). At least a third of the rows are
+true negatives (hyperbole, idiom, song and film talk, dark humour, clinical talk,
+ordinary low mood), because a false positive pages a person. No row contains
+method detail for self-harm.
+
+**`reply.jsonl`** (47 rows): single-turn cases for the assistant's reply: fixed
+`history` plus one `input`, a plain-language `expectedBehaviour`, deterministic
+`mustInclude` / `mustNotInclude` checks (a case-insensitive `phrase` or a
+`regex`, each with a `why`), and `criteria`: yes/no questions for the harness's
+temperature-0 classifier with the expected answer. Optional
+`expectSessionEnded` covers the under-18 eligibility gate. No rubric scores and
+no LLM judge.
+
+### What a run does
+
+```sh
+npm run redteam:goldens -- --set detector --layer keyword   # free, no network
+npm run redteam:goldens -- --set detector --layer full      # real assessor (cents)
+npm run redteam:goldens -- --set reply                      # real chat replies
+npm run redteam:goldens -- --check                          # validate the data only
+npm run redteam:goldens -- --review-sheet                   # rebuild the review CSVs
+```
+
+Needs `DATABASE_URL` pointing at an empty disposable database
+(`scripts/redteam-db-setup.sh`), like every harness run. The runner sets the
+same guards as `cli.ts` (`IMESSAGE_API_KEY` / `CRISIS_ALERT_PHONE` empty, no pg
+adapter) and turns quiet hours off in-process.
+
+- **Detector**: each row is a fresh session. History is replayed turn by turn,
+  so earlier participant turns are scored exactly as they would be live and the
+  input sees the same session risk context. `rt-text` rows go through
+  `POST /logs/batch`; `chat` rows persist the turn and call `runCrisisPipeline`
+  with channel `chat` in-process (what `/api/chat/message` runs for detection),
+  skipping the paid model reply. The input's `risk_score_history` row, the
+  session flag and any new `crisis_sms_alert` row are read back.
+  `--layer keyword` removes the OpenAI key after boot, so the assessor and the
+  moderation screen fail before any network call and every score is the
+  stage-1 keyword tier plus the context-signal fallback: what production scores
+  while the assessor is down. `--layer full` is the production pipeline.
+- **Reply**: each row is a fresh `/api/chat/start` session. The history is
+  written to `messages`, its participant turns are scored, the model context is
+  rebuilt from the database (`rehydrateChatSession`) with any steering those
+  turns earned, and the input goes once through `/api/chat/message`. Sessions
+  are closed in the database rather than through `/api/chat/end`, so no billed
+  post-session jobs run. `/api/chat/start` allows 20 starts per 15 minutes per
+  IP, so a full reply run waits out the limiter twice (about 30 minutes).
+- Flags: `--ids a,b`, `--category c`, `--limit n`, `--out <dir>`,
+  `--baseline <summary.json>`, `--max-usd n` (stop once recorded spend reaches
+  n; default 2), `--dry-run` (no OpenAI calls; reply rows get a canned reply and
+  the classifier answers "no", so a dry-run only proves the plumbing).
+- Output: `redteam-results/goldens/<set>/summary.json` (every row with its
+  observation, the summary, recorded cost) and `report.md`. Without
+  `--baseline`, the previous `summary.json` in the same directory is the
+  baseline and the report lists which rows regressed, were fixed or changed.
+  The run stops all API work on a quota or credit error.
+- The report always says "N of M rows human-reviewed". Unreviewed rows still
+  run and count.
+
+The first baseline results are committed under `evals/goldens/baselines/` so a
+later run can diff against them with `--baseline`.
+
+### First baseline (2026-11-18, local disposable DB, labels unreviewed)
+
+| Run | Rows | Result | Recorded cost |
+|---|---|---|---|
+| detector, keyword layer | 209 | 132 correct (63.2%); high rows below high 24/42; pages on none rows 24/98 | $0 |
+| detector, full layer | 209 | 176 correct (84.2%); high rows below high 18/42 (42.9%), 15 expected pages missing; pages on none rows 1/98 (1.0%), flagged none rows 6/98 | $0.048 (150 assessor calls) |
+| reply | 47 | 37 pass (78.7%), 38 after one grader fault was fixed; deterministic checks alone 46/47 | $0.95 (79 chat replies, classifier $0.018) |
+
+The keyword layer's 24 pages on none rows are the degraded-mode cost of the
+keyword screen: every hyperbole or media line with a high-tier keyword ("This
+traffic makes me want to die", a song title) pages when the assessor is down.
+With the assessor up, the misses concentrate in bystander reports (now
+ai-therapist-326), slang and algospeak with no keyword ("kms", "ctb",
+"sewerslide"), active ideation the assessor bands 60-65 (moderate, so no page),
+harm to others (scored 0) and the known gaps. Details: `evals/goldens/baselines/*.md`.
+
+### Adding a row
+
+1. Append one line to the JSONL file (keep ids unique: `det-<category>-NN`,
+   `rep-<topic>`). Set `reviewedBy` and `reviewedAt` to `null`.
+2. Pick the band from the table above and say why in `rationale` in one line.
+   Where clinical judgement admits a range, give `acceptableBands` (and
+   `page: either` if the range spans high).
+3. If the product is known to get it wrong, file or find the Flightdeck item and
+   put its ref in `knownGap`; do not relabel the row to match the product.
+4. Run `npm run redteam:goldens -- --review-sheet` and `npx vitest run
+   src/redteam/goldens`. The test rejects invalid rows, duplicate ids, unknown
+   catalogue ids and a stale review sheet.
+
+### Recording a review
+
+`evals/goldens/review/detector-review.csv` and `reply-review.csv` list every row
+with its input, history, expected result and rationale, plus two blank columns,
+"agree (yes/no)" and "correction or comment". The reviewer fills those in (any
+spreadsheet program). Then, for each row: if they agree, set `reviewedBy` (name
+or role) and `reviewedAt` (date) on the row in the JSONL; if they correct it,
+change the label and rationale first. Regenerating the sheet keeps what the
+reviewer typed (matched by id).
+
+### Not in CI
+
+Deliberately left out of the nightly and the deploy gate, and no
+`workflow_dispatch` workflow was added: the labels are unreviewed, the full
+detector layer and the reply set cost money, and the rates need a few runs
+before anyone can say what a regression is. The offline part (schema, graders,
+review-sheet freshness) runs in `npm test`.
+
 ## Known limitations (from the spec's risk register)
 
 - **R3 — tool-firing is not asserted directly.** On the realtime-text pipeline
