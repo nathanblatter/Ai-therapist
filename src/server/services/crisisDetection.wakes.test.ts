@@ -762,8 +762,4 @@ describe("a subject label never stands on a turn that also carries the participa
     expect(result.subject).toBe('harm_to_others');
     expect(riskRow().subject_overridden).toBeUndefined();
   });
-
-  it('the rubric tells the assessor that own risk comes first when both are voiced', () => {
-    expect(RISK_ASSESSMENT_PROMPT).toMatch(/If the participant ALSO says they mean to die or to hurt themselves/);
-  });
 });

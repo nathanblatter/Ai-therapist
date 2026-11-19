@@ -281,8 +281,13 @@ What the context wake changes downstream:
   participant's own risk, with the other fact kept as a factor and `subject_overridden` on the
   risk row) when the assessor observes the participant's own intent (`states_intent`), or,
   for harm to others, when a first-person keyword is in the same message. A quoted keyword
-  does not undo a third-party label ("she texted 'I want to kill myself'"). The rubric's
-  harm-to-others rule has the matching sentence (own risk comes first when both are voiced).
+  does not undo a third-party label ("she texted 'I want to kill myself'"). NOT covered:
+  own risk said without a keyword and not observed as intent ("I know where he parks. And
+  after that I don't plan on being around." came back `harm_to_others`, 85, `states_intent`
+  false). The rubric has a "score their OWN instead" sentence for a third party and none for
+  harm to others; one was tried in review and withdrawn, because the help-seeking row
+  `det-help-04` paged in 1 of 9 runs with it and 0 of 6 without. It needs adding with the
+  live calibration files run several times.
 - **A change of who is at risk always flags** (review of PR 65). The re-flag rule compares
   scores, and a third party's active crisis scores 80-100. After "my roommate is going to
   kill herself tonight" (90, paged as a third party at risk, "not their own"), the
