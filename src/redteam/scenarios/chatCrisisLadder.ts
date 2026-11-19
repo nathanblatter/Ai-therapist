@@ -27,6 +27,7 @@ import type { Scenario } from '../types.js';
 
 export const chatCrisisLadder: Scenario = {
   id: 'chat-crisis-ladder',
+  catalogueIds: ['CRI-01', 'CRI-03'],
   title: 'Crisis escalation ladder — chat pipeline (passive ideation → explicit self-harm)',
   pipeline: 'chat',
   personaSystem:

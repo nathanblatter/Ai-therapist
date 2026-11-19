@@ -19,6 +19,14 @@ import { crisisMeansQuestion } from './scenarios/crisis/meansQuestion.js';
 import { crisisAssessorDown, chatCrisisAssessorDown } from './scenarios/crisis/assessorDown.js';
 import { crisisImminentIntent } from './scenarios/crisis/attemptInProgress.js';
 import { crisisFalsePositives } from './scenarios/crisis/falsePositives.js';
+import { CRISIS_SLANG_SCENARIOS, SLANG_LINES } from './scenarios/crisis/slang.js';
+import { CRISIS_OTHER_LANGUAGE_SCENARIOS, OTHER_LANGUAGE_LINES } from './scenarios/crisis/otherLanguage.js';
+import { HARM_OTHERS_IDIOM, HARM_OTHERS_REAL } from './scenarios/crisis/harmToOthers.js';
+import { crisisMessagesThread } from './scenarios/crisis/messagesThread.js';
+import { crisisAcrossQuietHours } from './scenarios/crisis/quietHours.js';
+import { crisisLadder } from './scenarios/crisisLadder.js';
+import { chatCrisisLadder } from './scenarios/chatCrisisLadder.js';
+import { passiveIdeation } from './scenarios/passiveIdeation.js';
 import { namedAgents } from './crisisAssertions.js';
 import { validateKnownGap } from './knownGap.js';
 import type { Scenario } from './types.js';
@@ -26,8 +34,8 @@ import type { Scenario } from './types.js';
 const EVERY_CRISIS: Scenario[] = [...CRISIS_SCENARIOS, ...CRISIS_EXTENDED_SCENARIOS];
 
 describe('crisis scenario group: suite placement', () => {
-  it('the group has fourteen scenarios, and none is in the smoke deploy gate', () => {
-    expect(EVERY_CRISIS).toHaveLength(14);
+  it('the group has forty scenarios, and none is in the smoke deploy gate', () => {
+    expect(EVERY_CRISIS).toHaveLength(40);
     const smoke = new Set(SMOKE_SUITE.map((e) => e.scenario.id));
     for (const s of EVERY_CRISIS) expect(smoke.has(s.id)).toBe(false);
   });
@@ -67,7 +75,28 @@ describe('crisis scenario group: shape', () => {
       // Verbatim beats make a run reproducible and keep the persona LLM out
       // of the loop: nothing here depends on generated wording.
       expect(s.beats.every((b) => typeof b.verbatim === 'string' && b.verbatim.length > 0)).toBe(true);
-      expect(s.title).toMatch(/^CRI-\d\d /);
+      expect(s.title).toMatch(/^(CRI|GATE)-\d\d /);
+    }
+  });
+
+  it('every scenario is tagged with the catalogue ids it covers, its title id first', () => {
+    for (const s of EVERY_CRISIS) {
+      expect(s.catalogueIds?.length, s.id).toBeGreaterThan(0);
+      for (const id of s.catalogueIds!) expect(id, s.id).toMatch(/^(CRI|GATE)-\d\d$/);
+      expect(s.catalogueIds, s.id).toContain(s.title.split(' ')[0]);
+    }
+  });
+
+  it('covers every CRI id except the MANUAL one and the multi-session one', () => {
+    const covered = new Set(
+      [...EVERY_CRISIS, crisisLadder, chatCrisisLadder, passiveIdeation].flatMap((s) => s.catalogueIds ?? []),
+    );
+    for (let n = 1; n <= 28; n++) {
+      const id = `CRI-${String(n).padStart(2, '0')}`;
+      // CRI-22, 23, 25: voice-only (voice suites); CRI-27: four sessions
+      // (another group); CRI-28: MANUAL fire drill.
+      if (['CRI-22', 'CRI-23', 'CRI-25', 'CRI-27', 'CRI-28'].includes(id)) continue;
+      expect(covered.has(id), id).toBe(true);
     }
   });
 
@@ -123,6 +152,42 @@ describe('crisis scenario group: premises', () => {
       expect(ids).toContain('risk-method-is-keyword_fallback@passive-ideation');
       expect(ids).toContain('risk-method-is-keyword_fallback@explicit-intent');
     }
+  });
+
+  it('no beat or persona in the group names a self-harm method', () => {
+    const METHOD =
+      /\b(bridge|rope|gun|knife|blade|razor|pills?|overdose|jump(?:ing)?|hang(?:ing)?|poison|cut(?:ting)?|veins?|wrists?|dose)\b/i;
+    for (const s of EVERY_CRISIS) {
+      expect(s.personaSystem, s.id).not.toMatch(METHOD);
+      for (const b of s.beats) expect(b.verbatim ?? '', `${s.id}/${b.id}`).not.toMatch(METHOD);
+    }
+  });
+
+  it('slang: each form runs alone; the misspelled keyword and the shorthand forms trip no keyword', () => {
+    expect(CRISIS_SLANG_SCENARIOS).toHaveLength(7);
+    for (const s of CRISIS_SLANG_SCENARIOS) expect(s.beats).toHaveLength(1);
+    const zero = ['kms', 'unalive', 'end-it-all', 'ctb', 'want-out'];
+    for (const [key, text] of SLANG_LINES) {
+      if (zero.includes(key)) expect(detectCrisisKeywords(text).keywordScore, text).toBe(0);
+    }
+  });
+
+  it('other languages: no English keyword in any line, so detection cannot ride the English screen', () => {
+    for (const [, text] of OTHER_LANGUAGE_LINES.slice(0, 3)) expect(detectCrisisKeywords(text).keywordScore).toBe(0);
+    for (const s of CRISIS_OTHER_LANGUAGE_SCENARIOS) expect(s.beats).toHaveLength(1);
+  });
+
+  it('harm to others: neither line is a self-harm keyword', () => {
+    expect(detectCrisisKeywords(HARM_OTHERS_IDIOM).keywordScore).toBe(0);
+    expect(detectCrisisKeywords(HARM_OTHERS_REAL).keywordScore).toBe(0);
+  });
+
+  it('thread and quiet-hours scenarios install their fixtures', () => {
+    expect(crisisMessagesThread.fixture).toBeTypeOf('function');
+    expect(crisisMessagesThread.beats).toHaveLength(0);
+    expect(crisisAcrossQuietHours.teardown).toBeTypeOf('function');
+    const firstBeat = crisisAcrossQuietHours.beats[0].assertAfter!.map((a) => a.id);
+    expect(firstBeat).toContain('quiet-hours-begun');
   });
 
   it('false positives: every beat is capped at low and the scenario ends with no flag and no page', () => {
