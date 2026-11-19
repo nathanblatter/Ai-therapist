@@ -1800,23 +1800,26 @@ export class SidebandManager {
 
   /**
    * Wait until this voice session's participant turns have been persisted and
-   * scored, for at most `timeoutMs`. First waits (up to `closeWaitMs` of the
-   * budget) for the sideband to have seen the session close, which is what
-   * flushes a half-spoken final turn into the pipeline: the browser can ask
-   * for the hand-off a few milliseconds before the server's own socket
-   * delivers the same close.
+   * scored, for at most `timeoutMs`. First waits for the sideband to have seen
+   * the session close (or the socket go), which is what flushes a half-spoken
+   * final turn into the pipeline: the browser can ask for the hand-off a few
+   * milliseconds before the server's own socket delivers the same close.
    *
    * Resolves true when nothing is pending, false when the budget ran out with
    * work still in flight (the caller then treats the risk as not yet known).
-   * A session this process has no record of resolves true at once. Never
-   * throws.
+   * A close that has not been seen by the deadline is also false: until it
+   * arrives the participant's last words may still be sitting unflushed in the
+   * transcript buffer, untracked, so "nothing pending" would be a guess (PR
+   * #77 review: it used to stop looking for the close after one second and
+   * answer true). A session this process has no record of resolves true at
+   * once. Never throws.
    */
-  async waitForUserTurnsScored(sessionId: string, timeoutMs: number, closeWaitMs = 1_000): Promise<boolean> {
+  async waitForUserTurnsScored(sessionId: string, timeoutMs: number): Promise<boolean> {
     const deadline = Date.now() + Math.max(0, timeoutMs);
-    const closeDeadline = Math.min(deadline, Date.now() + Math.max(0, closeWaitMs));
-    while (Date.now() < closeDeadline) {
+    for (;;) {
       const state = this.sessions.get(sessionId);
       if (!state || state.finalized) break;
+      if (Date.now() >= deadline) return false;
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
     for (;;) {

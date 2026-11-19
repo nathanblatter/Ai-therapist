@@ -64,6 +64,8 @@ vi.mock('../../middleware/consent.js', () => ({
 vi.mock('../../middleware/quietHours.js', () => ({
   requireOutsideQuietHours: (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
+const quietMocks = vi.hoisted(() => ({ getQuietHoursStatus: vi.fn(() => ({ active: false })) }));
+vi.mock('../../utils/quietHours.js', () => quietMocks);
 vi.mock('../../middleware/studyStatus.js', () => ({
   requireActiveStudyStatus: (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
@@ -349,5 +351,15 @@ describe('POST /api/chat/voice-return', () => {
       allowed: false,
     });
     expect((await request(makeApp()).post('/api/chat/voice-return').send({})).status).toBe(400);
+  });
+
+  // The voice start it leads to is refused overnight; the chat is ended
+  // first, so a "yes" would drop the participant on Home (PR #77 review).
+  it('is "no" during quiet hours, without ending anything', async () => {
+    handoffMocks.verifyVoiceReturn.mockResolvedValue(true);
+    quietMocks.getQuietHoursStatus.mockReturnValueOnce({ active: true });
+    const res = await request(makeApp()).post('/api/chat/voice-return').send({ sessionId: 'chat_1' });
+    expect(res.body).toEqual({ allowed: false });
+    expect(handoffMocks.verifyVoiceReturn).not.toHaveBeenCalled();
   });
 });

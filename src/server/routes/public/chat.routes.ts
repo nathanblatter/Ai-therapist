@@ -801,6 +801,15 @@ export default function chatRoutes(): Router {
       return res.status(400).json({ error: 'sessionId is required' });
     }
     try {
+      // The new voice call is an ordinary start, which quiet hours refuse for
+      // a participant (requireOutsideQuietHours on /api/live/session). Saying
+      // "yes" here would end this chat first and then land them on Home with a
+      // refusal (PR #77 review), so the answer is no and the chat continues.
+      const role = req.session?.userRole ?? 'participant';
+      if (role === 'participant' && !req.session?.isSandbox) {
+        const { getQuietHoursStatus } = await import('../../utils/quietHours.js');
+        if (getQuietHoursStatus().active) return res.json({ allowed: false });
+      }
       const { verifyVoiceReturn } = await import('../../services/textHandoff.service.js');
       const allowed = await verifyVoiceReturn(sessionId, (row, id) => canAccessSession(req, row, id));
       res.json({ allowed });

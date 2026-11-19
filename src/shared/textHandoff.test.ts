@@ -160,25 +160,33 @@ describe('voiceReturnAllowed: when a new voice call may be offered', () => {
     }
   });
 
-  it('a high or unknown incident: not until the assistant has logged the ideation check', () => {
-    for (const handoffSeverity of ['high', 'unknown', 'medium'] as HandoffSeverity[]) {
-      expect(voiceReturnAllowed({ handoffSeverity, chatPeakSeverity: 'none', riskCheckSteps: [] })).toBe(false);
-      // A check that never asked about ideation is not the risk check.
-      expect(
-        voiceReturnAllowed({
-          handoffSeverity,
-          chatPeakSeverity: 'none',
-          riskCheckSteps: [{ step: 'protective_factors', risk_band: 'none' }],
-        }),
-      ).toBe(false);
+  it('a high or unknown incident: never, whatever the risk check in this chat says', () => {
+    // The voice call it would start is unflagged and has no transcript; the
+    // safety assessment stays in writing (PR #77 review, checked live).
+    for (const handoffSeverity of ['high', 'unknown'] as HandoffSeverity[]) {
+      for (const riskCheckSteps of [[], cleared, [{ step: 'ideation', risk_band: 'low' }]]) {
+        expect(voiceReturnAllowed({ handoffSeverity, chatPeakSeverity: 'none', riskCheckSteps })).toBe(false);
+      }
     }
+  });
+
+  it('a medium incident: not until the assistant has logged the ideation check', () => {
+    expect(voiceReturnAllowed({ handoffSeverity: 'medium', chatPeakSeverity: 'none', riskCheckSteps: [] })).toBe(false);
+    // A check that never asked about ideation is not the risk check.
+    expect(
+      voiceReturnAllowed({
+        handoffSeverity: 'medium',
+        chatPeakSeverity: 'none',
+        riskCheckSteps: [{ step: 'protective_factors', risk_band: 'none' }],
+      }),
+    ).toBe(false);
   });
 
   it('the risk check has cleared when the latest logged band is none or low', () => {
     for (const band of ['none', 'low']) {
       expect(
         voiceReturnAllowed({
-          handoffSeverity: 'high',
+          handoffSeverity: 'medium',
           chatPeakSeverity: 'none',
           riskCheckSteps: [{ step: 'ideation', risk_band: band }],
         }),
@@ -187,7 +195,7 @@ describe('voiceReturnAllowed: when a new voice call may be offered', () => {
     for (const band of ['moderate', 'high', 'imminent', 'something-new']) {
       expect(
         voiceReturnAllowed({
-          handoffSeverity: 'high',
+          handoffSeverity: 'medium',
           chatPeakSeverity: 'none',
           riskCheckSteps: [{ step: 'ideation', risk_band: band }],
         }),
@@ -198,7 +206,7 @@ describe('voiceReturnAllowed: when a new voice call may be offered', () => {
   it('the LATEST step decides: an early "low" does not clear a later "high"', () => {
     expect(
       voiceReturnAllowed({
-        handoffSeverity: 'high',
+        handoffSeverity: 'medium',
         chatPeakSeverity: 'none',
         riskCheckSteps: [
           { step: 'ideation', risk_band: 'low' },
@@ -208,7 +216,7 @@ describe('voiceReturnAllowed: when a new voice call may be offered', () => {
     ).toBe(false);
     expect(
       voiceReturnAllowed({
-        handoffSeverity: 'high',
+        handoffSeverity: 'medium',
         chatPeakSeverity: 'medium',
         riskCheckSteps: [
           { step: 'ideation', risk_band: 'moderate' },

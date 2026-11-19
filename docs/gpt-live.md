@@ -553,7 +553,12 @@ high flag is the stamp still asks for a page under the ordinary folding rules
 
 **Return to voice** (`voiceReturnAllowed`): offered from the first screen when
 nothing in the incident or the chat scored medium or high; never once a turn in
-the chat has scored high; otherwise only after the model has logged the
+the chat has scored high; never after a hand-off whose incident risk was high or
+could not be read (the new call would be unflagged and carry no transcript; PR
+#77 review saw the button offered two turns after a spoken "I want to kill
+myself"); never during quiet hours (`/api/chat/voice-return` answers no, since
+the voice start would be refused after the chat had ended); otherwise only
+after the model has logged the
 ideation step with `run_risk_check` in the chat session and rated its most
 recent logged step `none` or `low`. The browser asks `POST
 /api/chat/voice-return` before ending the chat, and `POST /api/live/session`

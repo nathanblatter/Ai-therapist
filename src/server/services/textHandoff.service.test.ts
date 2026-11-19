@@ -428,8 +428,16 @@ describe('return to voice', () => {
     expect(await resolveVoiceReturn('chat_plain')).toBeNull();
   });
 
-  it('after a crisis hand-off: withheld until the risk check clears, then allowed', async () => {
+  it('after a crisis hand-off: never, even once the risk check reads low', async () => {
     arrange({ peak: { severity: 'high', riskScore: 85 } });
+    await start();
+    expect(await resolveVoiceReturn('chat_new')).toBe(false);
+    q.getSessionRiskCheckSteps.mockResolvedValue([{ step: 'ideation', risk_band: 'low' }]);
+    expect(await resolveVoiceReturn('chat_new')).toBe(false);
+  });
+
+  it('after a medium hand-off: withheld until the risk check clears, then allowed', async () => {
+    arrange({ peak: { severity: 'medium', riskScore: 55 } });
     await start();
     expect(await resolveVoiceReturn('chat_new')).toBe(false);
     q.getSessionRiskCheckSteps.mockResolvedValue([{ step: 'ideation', risk_band: 'low' }]);

@@ -172,8 +172,15 @@ export interface VoiceReturnInput {
  *    signal);
  *  - any turn in this chat session scored high: no, for the rest of the
  *    session;
- *  - otherwise (a medium or high signal in the incident or in this chat): only
- *    once the assistant's risk check has cleared, which means it logged the
+ *  - the incident itself was high, or its risk could not be read: no, for the
+ *    rest of the session. The voice call this would start is an ordinary one:
+ *    unflagged, with no transcript of what was said, on the service that has
+ *    just ended a call over it. Checked live on 2026-11-19 (PR #77 review): a
+ *    spoken "I want to kill myself" (90), then "No" and "I'm not going to do
+ *    anything tonight", and the model logged ideation "low" two turns in, mid
+ *    assessment, with the chat still flagged high; the button appeared;
+ *  - otherwise (a medium signal in the incident or in this chat): only once
+ *    the assistant's risk check has cleared, which means it logged the
  *    ideation question with run_risk_check in this chat session and the band
  *    it gave its most recent logged step is `none` or `low`.
  *
@@ -183,6 +190,7 @@ export interface VoiceReturnInput {
  */
 export function voiceReturnAllowed(input: VoiceReturnInput): boolean {
   if (input.chatPeakSeverity === 'high') return false;
+  if (input.handoffSeverity === 'high' || input.handoffSeverity === 'unknown') return false;
   const riskSignal = input.handoffSeverity !== 'none' || input.chatPeakSeverity !== 'none';
   if (!riskSignal) return true;
   const steps = input.riskCheckSteps;

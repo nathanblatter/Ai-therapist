@@ -225,11 +225,17 @@ export async function runCrisisPipeline(
       // ---- Flagging ---- (identical to the original realtime logic)
       if (stateError) throw stateError;
       const currentScore = state?.crisis_risk_score || 0;
+      const currentRank = SEVERITY_RANK[state?.crisis_severity ?? 'none'] ?? 0;
+      // A re-flag never LOWERS a session's severity. The score clause exists
+      // for "same band, clearly worse"; on a high flag stored without a score
+      // (the text hand-off's stamp when the incident's risk could not be read)
+      // it would otherwise let a medium turn (e.g. 65 for "Not sure") rewrite
+      // the session to medium. Seen live in the PR #77 review.
       const shouldFlag =
         (severity === 'high' || severity === 'medium') &&
         (!state?.crisis_flagged ||
-          SEVERITY_RANK[severity] > (SEVERITY_RANK[state?.crisis_severity ?? 'none'] ?? 0) ||
-          risk.riskScore > currentScore + 10);
+          SEVERITY_RANK[severity] > currentRank ||
+          (SEVERITY_RANK[severity] >= currentRank && risk.riskScore > currentScore + 10));
 
       if (shouldFlag) {
         await flagSessionCrisis(
