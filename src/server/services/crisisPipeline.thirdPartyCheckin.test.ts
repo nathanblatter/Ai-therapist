@@ -21,9 +21,11 @@ const {
   getRecentSessionMessagesMock,
   getSessionCrisisStateMock,
   getSessionCheckinMock,
+  getSessionHighFlagSubjectsMock,
   enqueueWorkItemMock,
   emitCrisisResourcesMock,
 } = vi.hoisted(() => ({
+  getSessionHighFlagSubjectsMock: vi.fn(),
   emitCrisisResourcesMock: vi.fn(),
   analyzeMessageRiskMock: vi.fn(),
   flagSessionCrisisMock: vi.fn(),
@@ -72,6 +74,7 @@ vi.mock('./crisisResources.js', () => ({
 vi.mock('../db/index.js', () => ({
   getRecentSessionMessages: getRecentSessionMessagesMock,
   getSessionCrisisState: getSessionCrisisStateMock,
+  getSessionHighFlagSubjects: getSessionHighFlagSubjectsMock,
   getSessionCheckin: getSessionCheckinMock,
   isDemoAccountSession: vi.fn(async () => false),
   getSessionAccessInfo: vi.fn(async () => ({ status: 'active', user_id: 42, session_type: 'chat' })),
@@ -91,6 +94,7 @@ beforeEach(() => {
   (global as unknown as { io: unknown }).io = { to: vi.fn(() => ({ emit: emitMock })) };
   getRecentSessionMessagesMock.mockResolvedValue([]);
   getSessionCheckinMock.mockResolvedValue(null);
+  getSessionHighFlagSubjectsMock.mockResolvedValue([]);
   getSessionCrisisStateMock.mockResolvedValue({
     crisis_flagged: false,
     crisis_severity: null,
@@ -375,5 +379,116 @@ describe('risk to others: flagged and paged like a high self-risk, labelled, de-
     expect(executeGraduatedResponseMock).not.toHaveBeenCalled();
     expect(maybeSteerSessionMock).not.toHaveBeenCalled();
     expect(emitCrisisResourcesMock).not.toHaveBeenCalled();
+  });
+});
+
+// Review of PR 65. The re-flag rule compares numbers only, and a third party's
+// active crisis scores 80-100, so once a session was flagged high for someone
+// else nothing the participant said about THEMSELVES could flag or page again
+// short of 10 points above that score.
+describe('who is at risk changes inside a session that is already flagged high', () => {
+  const alreadyHighAt = (score: number) =>
+    getSessionCrisisStateMock.mockResolvedValue({
+      crisis_flagged: true,
+      crisis_severity: 'high',
+      crisis_risk_score: score,
+    });
+  const OWN_TURN = {
+    sessionId: 'chat_1',
+    messageId: 43,
+    content: 'honestly i have been thinking about killing myself too',
+  };
+
+  it("REPRODUCTION: after a third-party flag at 90, the participant's own ideation (75) flags and pages as their own", async () => {
+    alreadyHighAt(90);
+    getSessionHighFlagSubjectsMock.mockResolvedValue(['third_party']);
+    risk(75, 'high', { factors: ['active ideation'] });
+
+    const r = await runCrisisPipeline(OWN_TURN, 'chat');
+
+    expect(r.flagged).toBe(true);
+    // The participant's own risk: no subject, so the unlabelled page and the
+    // standard protocol.
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 75);
+    const [, severity, score, , , , , notes] = flagSessionCrisisMock.mock.calls[0];
+    expect([severity, score]).toEqual(['high', 75]);
+    expect(notes).toMatch(
+      /the participant's OWN risk now; the earlier high flag in this session was about a third party at risk/,
+    );
+    expect(interventions('auto_flag')[0]).toMatchObject({ trigger: 'new_subject', earlierSubjects: ['third_party'] });
+    expect(interventions('auto_flag')[0].subject).toBeUndefined();
+    expect(maybeRequireRiskCheckMock).toHaveBeenCalled();
+  });
+
+  it('the same after a risk-to-others flag', async () => {
+    alreadyHighAt(85);
+    getSessionHighFlagSubjectsMock.mockResolvedValue(['harm_to_others']);
+    risk(70, 'high', { factors: ['active ideation'] });
+
+    const r = await runCrisisPipeline(OWN_TURN, 'realtime');
+
+    expect(r.flagged).toBe(true);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 70);
+  });
+
+  it('own risk first, then credible intent to harm someone: staff are told about the risk to others', async () => {
+    alreadyHighAt(85);
+    getSessionHighFlagSubjectsMock.mockResolvedValue([null]);
+    risk(80, 'high', { subject: 'harm_to_others', factors: ['stated intent to harm'] });
+
+    const r = await runCrisisPipeline(
+      { ...OWN_TURN, content: 'i know where he parks and i am going there tonight' },
+      'chat',
+    );
+
+    expect(r.flagged).toBe(true);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 80, { subject: 'harm_to_others' });
+    expect(flagSessionCrisisMock.mock.calls[0][7]).toMatch(
+      /risk to others now; the earlier high flag in this session was about the participant's OWN risk/,
+    );
+  });
+
+  it('a repeat about the same person does not flag again (the level rule still decides)', async () => {
+    alreadyHighAt(90);
+    getSessionHighFlagSubjectsMock.mockResolvedValue(['third_party']);
+    risk(90, 'high', { thirdParty: true, factors: [THIRD_FACTOR] });
+
+    const r = await runCrisisPipeline(TURN, 'chat');
+
+    expect(r.flagged).toBe(false);
+    expect(flagSessionCrisisMock).not.toHaveBeenCalled();
+  });
+
+  it('once both have been flagged, neither flags again on a repeat', async () => {
+    alreadyHighAt(75);
+    getSessionHighFlagSubjectsMock.mockResolvedValue(['third_party', null]);
+    risk(75, 'high', { factors: ['active ideation'] });
+
+    expect((await runCrisisPipeline(OWN_TURN, 'chat')).flagged).toBe(false);
+  });
+
+  it('a session flagged high with no automatic flag on record (manual flag, recovery stamp) is left to the existing rules', async () => {
+    alreadyHighAt(100);
+    getSessionHighFlagSubjectsMock.mockResolvedValue([]);
+    risk(75, 'high', { factors: ['active ideation'] });
+
+    expect((await runCrisisPipeline(OWN_TURN, 'chat')).flagged).toBe(false);
+  });
+
+  it('a medium turn never flags by this rule', async () => {
+    alreadyHighAt(90);
+    getSessionHighFlagSubjectsMock.mockResolvedValue(['third_party']);
+    risk(55, 'medium', { factors: ['passive ideation'] });
+
+    expect((await runCrisisPipeline(OWN_TURN, 'chat')).flagged).toBe(false);
+    expect(getSessionHighFlagSubjectsMock).not.toHaveBeenCalled();
+  });
+
+  it('when the earlier flags cannot be read, the high turn flags rather than staying silent', async () => {
+    alreadyHighAt(90);
+    getSessionHighFlagSubjectsMock.mockRejectedValue(new Error('db down'));
+    risk(75, 'high', { factors: ['active ideation'] });
+
+    expect((await runCrisisPipeline(OWN_TURN, 'chat')).flagged).toBe(true);
   });
 });

@@ -158,6 +158,26 @@ export async function getSessionCrisisState(sessionId: string): Promise<SessionC
   return result.rows[0] ?? null;
 }
 
+/**
+ * Who each automatic HIGH flag of a session was about, oldest first: the
+ * `subject` the crisis pipeline wrote on its 'auto_flag' row ('third_party',
+ * 'harm_to_others'), or null for the participant's own risk. Empty when the
+ * session has no automatic high flag (a manual flag or a recovery stamp writes
+ * no such row).
+ */
+export async function getSessionHighFlagSubjects(sessionId: string): Promise<Array<string | null>> {
+  const result = await pool.query<{ subject: string | null }>(
+    `SELECT action_details->>'subject' AS subject
+       FROM intervention_actions
+      WHERE session_id = $1
+        AND action_type = 'auto_flag'
+        AND action_details->>'severity' = 'high'
+      ORDER BY performed_at, action_id`,
+    [sessionId],
+  );
+  return result.rows.map((row) => row.subject ?? null);
+}
+
 export interface AllCrisisData {
   clinicalReviews: Record<string, unknown>[];
   crisisEvents: Record<string, unknown>[];

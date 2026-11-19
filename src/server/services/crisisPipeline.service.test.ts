@@ -51,6 +51,8 @@ vi.mock('./crisisIntervention.service.js', () => ({
 vi.mock('../db/index.js', () => ({
   getRecentSessionMessages: getRecentSessionMessagesMock,
   getSessionCrisisState: getSessionCrisisStateMock,
+  // No automatic high flag on record about anyone: the level rule decides.
+  getSessionHighFlagSubjects: vi.fn(async () => []),
   isDemoAccountSession: isDemoAccountSessionMock,
   getSessionAccessInfo: getSessionAccessInfoMock,
   // No pre-session check-in in these tests (see crisisPipeline.thirdPartyCheckin.test.ts).

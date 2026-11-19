@@ -31,6 +31,7 @@ import {
   getSessionAccessInfo,
   getSessionCheckin,
   getSessionCrisisState,
+  getSessionHighFlagSubjects,
   type SessionCheckin,
 } from '../db/index.js';
 import { sessionSuppressesSafetyPipeline } from './suppression.js';
@@ -336,11 +337,30 @@ export async function runCrisisPipeline(
       // ---- Flagging ---- (identical to the original realtime logic)
       if (stateError) throw stateError;
       const currentScore = state?.crisis_risk_score || 0;
-      const shouldFlag =
+      const flagByLevel =
         (severity === 'high' || severity === 'medium') &&
         (!state?.crisis_flagged ||
           SEVERITY_RANK[severity] > (SEVERITY_RANK[state?.crisis_severity ?? 'none'] ?? 0) ||
           risk.riskScore > currentScore + 10);
+      // A high turn about someone this session's high flags have not been
+      // about. The level rule above compares numbers only, and a third party's
+      // active crisis scores 80-100: after "my roommate is going to kill
+      // herself tonight" (90, paged as THIRD PARTY AT RISK: "not their own"),
+      // the participant's own "I've been thinking about killing myself too"
+      // (75) is neither a higher severity nor 10 points above 90, so it raised
+      // no flag, no crisis event and no page, and the only thing staff had
+      // been told was that the participant was not the one at risk. The same
+      // holds for the other orders (own risk, then credible intent to harm
+      // someone). A change of who is at risk is new information: it flags.
+      const flagBySubject =
+        !flagByLevel && severity === 'high' && alreadyHigh
+          ? await isFirstHighFlagAbout(turn.sessionId, subject)
+          : { first: false, earlier: [] as FlagSubject[] };
+      const shouldFlag = flagByLevel || flagBySubject.first;
+      const subjectChangeNote = flagBySubject.first
+        ? `${FLAG_SUBJECT_NAME[subject ?? 'own']} now; the earlier high flag in this session was about ` +
+          `${flagBySubject.earlier.map((s) => FLAG_SUBJECT_NAME[s]).join(' and ') || 'someone else'}`
+        : null;
 
       if (shouldFlag) {
         await flagSessionCrisis(
@@ -353,6 +373,7 @@ export async function runCrisisPipeline(
           fromCheckin ? [...risk.factors, CHECKIN_FACTOR] : risk.factors,
           `Risk score: ${risk.riskScore} - ` +
             (label ? `${label} - ` : '') +
+            (subjectChangeNote ? `${subjectChangeNote} - ` : '') +
             (fromCheckin ? 'Source: pre-session check-in text - ' : '') +
             `Factors: ${risk.factors.join(', ')}`,
         );
@@ -364,6 +385,7 @@ export async function runCrisisPipeline(
           factors: risk.factors,
           ...subjectDetail,
           ...(fromCheckin ? { source: 'checkin' } : {}),
+          ...(flagBySubject.first ? { trigger: 'new_subject', earlierSubjects: flagBySubject.earlier } : {}),
         });
 
         if (global.io) {
@@ -380,6 +402,7 @@ export async function runCrisisPipeline(
               message:
                 `${severity.toUpperCase()} risk detected (score: ${risk.riskScore})` +
                 (label ? ` - ${label}` : '') +
+                (subjectChangeNote ? ` - ${subjectChangeNote}` : '') +
                 (fromCheckin ? ' - from the pre-session check-in' : ''),
               ...subjectDetail,
               ...(channel === 'chat' ? { sessionType: 'chat' } : {}),
@@ -468,6 +491,42 @@ export async function runCrisisPipeline(
   } catch (err) {
     console.error('[CrisisPipeline] pipeline failed (non-fatal):', err);
     return NONE_RESULT;
+  }
+}
+
+/** Who a high flag is about: a labelled subject, or the participant. */
+type FlagSubject = 'own' | 'third_party' | 'harm_to_others';
+
+const FLAG_SUBJECT_NAME: Record<FlagSubject, string> = {
+  own: "the participant's OWN risk",
+  third_party: 'a third party at risk',
+  harm_to_others: 'risk to others',
+};
+
+/**
+ * Is this the first automatic high flag of the session about `subject` (null:
+ * the participant's own risk), the session having been flagged high about
+ * someone else? False when the session has no automatic high flag on record
+ * (a manual flag or a recovery stamp: those are handled as before). A lookup
+ * that fails flags: not knowing who the earlier flag was about is not a reason
+ * to stay silent about a high turn. Never throws.
+ */
+async function isFirstHighFlagAbout(
+  sessionId: string,
+  subject: 'third_party' | 'harm_to_others' | null,
+): Promise<{ first: boolean; earlier: FlagSubject[] }> {
+  try {
+    const earlier = [
+      ...new Set(
+        (await getSessionHighFlagSubjects(sessionId)).map(
+          (s): FlagSubject => (s === 'third_party' || s === 'harm_to_others' ? s : 'own'),
+        ),
+      ),
+    ];
+    return { first: earlier.length > 0 && !earlier.includes(subject ?? 'own'), earlier };
+  } catch (err) {
+    console.error('[CrisisPipeline] could not read who the earlier high flag was about; flagging this turn:', err);
+    return { first: true, earlier: [] };
   }
 }
 
