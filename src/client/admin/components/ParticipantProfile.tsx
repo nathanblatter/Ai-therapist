@@ -693,8 +693,8 @@ export default function ParticipantProfile({
     >
       {/* Header */}
       <div className="sticky top-0 z-10 bg-white border-b shadow-sm">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 sm:py-4 pt-[max(0.75rem,env(safe-area-inset-top))] sm:pt-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div className="flex items-center gap-3 min-w-0 flex-1 basis-56">
             <span className="w-10 h-10 rounded-full bg-royal text-white flex items-center justify-center shrink-0">
               <User size={20} />
             </span>
@@ -729,7 +729,7 @@ export default function ParticipantProfile({
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0 ml-auto">
             {(userRole === 'therapist' || userRole === 'researcher') && <ChartDownloadButton userId={user.userid} />}
             <button
               onClick={onClose}

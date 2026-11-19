@@ -933,7 +933,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-2xl font-bold text-navy">Live Session Monitoring</h2>
           <p className="text-gray-600 mt-1">
@@ -972,7 +972,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
         <div className="bg-white p-4 rounded-lg shadow" role="status" aria-live="polite">
           <div className="flex items-center justify-between">
             <div>
