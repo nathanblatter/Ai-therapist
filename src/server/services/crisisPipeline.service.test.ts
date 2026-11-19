@@ -543,6 +543,15 @@ describe('runCrisisPipeline — steering delivery per channel', () => {
     expect(r.steeringGuidance).toBeNull();
   });
 
+  it.each(['attempt', 'plan_or_time'] as const)(
+    'realtime high turn stating %s: the steer is told, so it carries no voice heads-up',
+    async (acute) => {
+      analyzeMessageRiskMock.mockResolvedValue({ riskScore: 95, severity: 'high', factors: [], breakdown: {}, acute });
+      await runCrisisPipeline(TURN, 'realtime');
+      expect(maybeSteerSessionMock).toHaveBeenCalledWith('chat_1', 95, 'high', true, null, null, acute);
+    },
+  );
+
   it('chat returns base steering guidance and logs risk_steering', async () => {
     risk(40, 'medium');
     const r = await runCrisisPipeline(TURN, 'chat');
