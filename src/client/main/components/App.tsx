@@ -1785,6 +1785,37 @@ export default function App() {
     pc.ontrack = (e) => {
       audioEl.srcObject = e.streams[0];
       setRemoteStream(e.streams[0]);
+      // Start playback explicitly instead of relying on `autoplay` alone
+      // (ai-therapist-348). A recovery session starts with no click, on a new
+      // audio element, and on 2026-11-18 a participant on an iPhone said "I
+      // cannot hear you" for the first 25 seconds of one while the transcript
+      // shows the assistant speaking. A browser that refuses to start sound
+      // without a gesture refuses silently with `autoplay`; play() rejects, so
+      // a refusal is reported and retried on the participant's next touch.
+      void audioEl.play().catch((err: unknown) => {
+        const name = err instanceof Error ? err.name : String(err);
+        // AbortError is a play() overtaken by a newer source, not a refusal.
+        if (name === 'AbortError') return;
+        reportClientEvent('audio_play_refused', { name, recovery }, newSessionId);
+        // Retried on the events that actually unlock sound. On a touch screen
+        // that is the END of a touch (pointerup, touchend, click), not
+        // pointerdown, which grants no activation there: a single
+        // pointerdown-only retry would be refused again on exactly the phone
+        // this is for. The listeners stay until one play() succeeds, the call
+        // has ended or this element is no longer the session's, then all of
+        // them are removed.
+        const gestures = ['pointerup', 'touchend', 'click', 'keydown'] as const;
+        const remoteTrack = e.track;
+        const stopRetrying = () => gestures.forEach((g) => window.removeEventListener(g, retry, true));
+        function retry() {
+          if (audioElement.current !== audioEl || remoteTrack.readyState === 'ended') {
+            stopRetrying();
+            return;
+          }
+          void audioEl.play().then(stopRetrying, () => {});
+        }
+        gestures.forEach((g) => window.addEventListener(g, retry, true));
+      });
       // Capture the whole conversation: mix mic + assistant audio into one PCM
       // stream and upload it over HTTP for the entire session, so the server can
       // record it and relay it live to any admin who is listening. Independent

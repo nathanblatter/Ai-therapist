@@ -1,0 +1,211 @@
+name: Red-team (extended)
+# The whole `extended` suite, unsampled, once a week (docs/redteam.md "What
+# runs when"). The nightly (redteam-nightly.yml) covers every `full` scenario
+# once per Monday-to-Sunday UTC week; this workflow covers every `extended`
+# scenario in the same week. It is its own workflow, not part of the nightly
+# rotation: full + extended is more than the nightly's 170 weekly slots, and
+# folding it in would leave none for repeating the crisis scenarios.
+#
+# Skipped on purpose: the on-demand-only scenarios (src/redteam/onDemand.ts,
+# today the minors hard-refusal pair, ABU-06), via --skip-on-demand.
+#
+# Modelled on redteam-nightly.yml's redteam-full job: same DB setup, env,
+# baseline from this workflow's own previous run, --allow-fail then a final
+# step that ends the job red. Default variant only.
+on:
+  schedule:
+    # Wednesday 10:00 UTC (04:00 America/Denver in winter). Clear of the
+    # nightly (08:00 UTC daily) and the Sunday voice workflow (09:00 UTC).
+    - cron: '0 10 * * 3'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read # gh run download: the previous weekly run's artifact is the diff baseline
+concurrency:
+  # Only against itself: a second run would race the first for the baseline.
+  # It shares nothing with the nightly or the voice workflow (each job has its
+  # own GitHub-hosted runner, its own service Postgres and its own in-process
+  # server, so the chat-start rate limiter is per job too).
+  group: redteam-extended
+  cancel-in-progress: false
+jobs:
+  redteam-extended:
+    name: redteam-extended
+    runs-on: ubuntu-latest
+    # 47 scenarios, 51 chat starts (5 multi-session scenarios account for 14 of
+    # them). Sessions take roughly 60 to 90 minutes in one process (the
+    # recorded memory set alone is ~5 min, CONF-07/08 wait up to 150 s each
+    # for post-session jobs), and the limiter (20 starts per 15 minutes) adds
+    # up to two 15-minute waits. 180 leaves headroom over a ~2 h worst case.
+    timeout-minutes: 180
+    # services + env below are duplicated verbatim in deploy.yml, deploy-prod.yml,
+    # redteam-nightly.yml and redteam-extended.yml (composite actions cannot
+    # declare services). The setup-node -> npm ci -> migrate+seed sequence lives
+    # in .github/actions/redteam-db-setup; keep the copies of this block identical.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17  # migrations need the vector extension (matches prod)
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ai_therapist_redteam
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ai_therapist_redteam
+      DATABASE_SSL: 'false'
+      SESSION_SECRET: ci-redteam-secret
+      NODE_ENV: test
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # No IMESSAGE_API_KEY / CRISIS_ALERT_PHONE: CI must never page the on-call.
+      VARIANT: default
+      RESULTS_ARTIFACT: redteam-extended-results
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/redteam-db-setup
+      - name: Download the previous weekly results (diff baseline)
+        # Same selection as the nightly: the newest earlier COMPLETED run of
+        # THIS workflow on main whose conclusion is success or failure (a red
+        # week must still become the next baseline) and whose artifact has a
+        # summary.json. Best-effort: none just means no diff this week.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          candidates=$(gh run list --workflow redteam-extended.yml --branch main --status completed --limit 20 \
+                         --json databaseId,conclusion \
+                         --jq '.[] | select(.conclusion == "success" or .conclusion == "failure") | .databaseId')
+          for id in $candidates; do
+            [ "$id" = "$GITHUB_RUN_ID" ] && continue
+            rm -rf redteam-baseline
+            if gh run download "$id" --name "$RESULTS_ARTIFACT" --dir redteam-baseline 2>/dev/null && [ -f redteam-baseline/summary.json ]; then
+              echo "redteam-baseline: run $id, artifact $RESULTS_ARTIFACT"
+              break
+            fi
+            rm -rf redteam-baseline
+          done
+          ls -la redteam-baseline 2>/dev/null || echo "redteam-baseline: no earlier $RESULTS_ARTIFACT with a summary.json found"
+      - name: Red-team extended suite
+        # --allow-fail keeps this step green so the artifact upload and the job
+        # summary below always run; the last step ends the job red when any
+        # scenario failed. Gates nothing (the smoke suite in deploy.yml is the
+        # deploy gate).
+        run: |
+          npm run redteam:extended -- --allow-fail --skip-on-demand --variant "$VARIANT" --baseline redteam-baseline/summary.json
+      - name: Upload results
+        # summary.json, rolling-baseline.json (next week's baseline), junit, diff.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.RESULTS_ARTIFACT }}
+          path: redteam-results/
+      - name: Job summary
+        # Totals, recorded cost, failing assertions, judge means and the diff.
+        if: always()
+        run: npm run redteam:ci-summary -- --dir redteam-results --title "Red-team weekly extended"
+      - name: Fail the run on failed or errored scenarios
+        # After upload + summary, so a red week still leaves its artifact as
+        # the next week's baseline.
+        run: npm run redteam:ci-summary -- --dir redteam-results --check
+
+  flightdeck-sync:
+    # Files NEW extended failures into Flightdeck (src/redteam/flightdeckReport.ts,
+    # docs/redteam.md "Eval failures in Flightdeck"). A faithful copy of the
+    # nightly's flightdeck-sync job (the repo has no reusable-workflow pattern
+    # and a composite action cannot carry the job-level runs-on, if and
+    # concurrency); only ARTIFACTS, WORKFLOW_FILE, needs and the fallback
+    # summary path differ. Keep the copies in step: redteam-nightly.yml,
+    # redteam-voice.yml, redteam-extended.yml.
+    #
+    # Self-hosted because Flightdeck listens on a Tailscale address
+    # GitHub-hosted runners cannot reach. Write-only ingest key; without it the
+    # step prints a notice and does nothing. Never on pull_request, never on
+    # another branch. Shares the flightdeck-eval-sync concurrency group with
+    # the other workflows' sync jobs (never the stage deploy's), so two syncs
+    # never run at once on the mini. Every step tolerates failure: this job
+    # never turns the run red.
+    name: file new failures in Flightdeck
+    needs: [redteam-extended]
+    if: >-
+      always() && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      needs.redteam-extended.result != 'cancelled' && needs.redteam-extended.result != 'skipped'
+    runs-on: self-hosted
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read # this run's artifacts + earlier runs' results (the previous result per scenario)
+    concurrency:
+      group: flightdeck-eval-sync
+      cancel-in-progress: false
+    env:
+      FLIGHTDECK_URL: http://100.79.61.79:4300
+      FLIGHTDECK_INGEST_KEY: ${{ secrets.FLIGHTDECK_INGEST_KEY }}
+      ARTIFACTS: redteam-extended-results*
+      WORKFLOW_FILE: redteam-extended.yml
+    steps:
+      - uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          sparse-checkout: |
+            src/redteam/flightdeckReport.ts
+            package.json
+          sparse-checkout-cone-mode: false
+      - name: Download this run's results
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ env.ARTIFACTS }}
+          path: fd-current
+      - name: Download this run's earlier sync state (re-run idempotency)
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: flightdeck-sync-state
+          path: fd-state
+      - name: Download earlier runs' results (previous result per scenario)
+        # The previous recorded result decides whether this week's failure is
+        # new (pass -> fail, or no earlier result) or a repeat (fail -> fail,
+        # files nothing). Up to 5 earlier runs are read so a missing week does
+        # not erase the history.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p fd-previous
+          ids=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$WORKFLOW_FILE" --branch main --status completed --limit 10 \
+                  --json databaseId,conclusion \
+                  --jq '.[] | select(.conclusion == "success" or .conclusion == "failure") | .databaseId' | head -6)
+          for id in $ids; do
+            [ "$id" = "$GITHUB_RUN_ID" ] && continue
+            gh run download "$id" --repo "$GITHUB_REPOSITORY" --pattern "$ARTIFACTS" --dir "fd-previous/$id" 2>/dev/null || true
+          done
+          find fd-previous -name summary.json | sort || true
+      - name: File new failures
+        continue-on-error: true
+        run: |
+          NODE=/opt/homebrew/opt/node@24/bin/node # not on the runner's PATH (its nvm entry is stale)
+          [ -x "$NODE" ] || NODE=$(command -v node || true)
+          if [ -z "$NODE" ] || [ ! -f src/redteam/flightdeckReport.ts ]; then
+            echo "WARNING: Flightdeck eval sync skipped: node or the script is missing on the self-hosted runner." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          summaries=$(find fd-current -name summary.json 2>/dev/null | sort)
+          # No summary at all: the harness never finished. Name the expected
+          # file so the script reports it as an infrastructure failure.
+          [ -n "$summaries" ] || summaries=fd-current/redteam-extended-results/summary.json
+          prev=()
+          for d in $(find fd-previous -name summary.json -exec dirname {} \; 2>/dev/null | sort -u); do prev+=(--previous "$d"); done
+          "$NODE" src/redteam/flightdeckReport.ts \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --state fd-state/flightdeck-state.json "${prev[@]}" $summaries \
+            || echo "WARNING: Flightdeck eval sync exited non-zero; see the step log." | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Keep the sync state for a re-run of this run
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: flightdeck-sync-state
+          path: fd-state/flightdeck-state.json
+          if-no-files-found: ignore
+          overwrite: true

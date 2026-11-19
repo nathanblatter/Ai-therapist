@@ -20,6 +20,8 @@
 //          see sampling.ts and docs/redteam.md "Sampled nightly")
 //        --gate-generated (opt-in LLM-generated mutations of the safety
 //          scenarios, ai-therapist-109; off by default, never in CI)
+//        --skip-on-demand (drop the on-demand-only scenarios, onDemand.ts;
+//          the scheduled weekly extended run passes it)
 import 'dotenv/config';
 
 // ---- env guards (MUST run before importing server modules) ----------------
@@ -95,6 +97,7 @@ import {
 } from './rollingBaseline.js';
 import { applyKnownGap, reportKnownGaps } from './knownGap.js';
 import { runMultiSessionScenario, withoutMultiSession } from './multiSession.js';
+import { withoutOnDemand } from './onDemand.js';
 import {
   buildGeneratedVariants,
   clampVariantCount,
@@ -191,6 +194,9 @@ function parseArgs(argv: string[]): RedteamConfig {
         break;
       case '--sample':
         cfg.sample = true;
+        break;
+      case '--skip-on-demand':
+        cfg.skipOnDemand = true;
         break;
       case '--sample-date':
         cfg.sampleDate = next();
@@ -905,6 +911,14 @@ async function main(): Promise<void> {
       `[redteam] not run here: ${selected.skipped.join(', ')} (multi-session scenarios create accounts and age their ` +
         'rows, so they need a disposable database; this run was started by the in-app runner)',
     );
+  if (cfg.skipOnDemand) {
+    const onDemand = withoutOnDemand(entries);
+    entries = onDemand.kept;
+    if (onDemand.skipped.length)
+      console.log(
+        `[redteam] --skip-on-demand: not run: ${onDemand.skipped.join(', ')} (on demand only, see onDemand.ts)`,
+      );
+  }
   if (entries.length === 0) {
     console.error(`No scenarios matched (suite=${cfg.suite}, scenario=${cfg.scenarioId ?? 'all'})`);
     process.exit(2);

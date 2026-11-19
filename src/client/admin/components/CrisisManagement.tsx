@@ -63,6 +63,9 @@ interface InterventionAction {
   performed_by: string;
   performed_at: string;
   outcome?: string;
+  /** JSONB. Paging decisions carry a one-line summary under `paging`
+   *  (server: crisisPaging.service): sent, folded into which page, or not paged. */
+  action_details?: { paging?: { summary?: string } | null } | null;
 }
 
 interface RiskScoreHistory {
@@ -634,7 +637,14 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
                             {action.session_id.substring(0, 12)}...
                           </code>
                         </td>
-                        <td className="px-6 py-4 text-sm font-medium">{action.action_type.replace(/_/g, ' ')}</td>
+                        <td className="px-6 py-4 text-sm font-medium">
+                          {action.action_type.replace(/_/g, ' ')}
+                          {action.action_details?.paging?.summary && (
+                            <p className="mt-1 text-xs font-normal text-gray-600 max-w-md">
+                              {action.action_details.paging.summary}
+                            </p>
+                          )}
+                        </td>
                         <td className="px-6 py-4">
                           {action.risk_score && (
                             <span className={`font-semibold ${getRiskScoreColor(action.risk_score)}`}>

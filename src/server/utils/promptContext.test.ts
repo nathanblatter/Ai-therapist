@@ -79,7 +79,38 @@ const {
   LEAD_CONVERSATION_BLOCK,
   buildPracticeBlock,
   buildScreenerCadenceBlock,
+  assembleMemoryBlock,
 } = await import('./promptContext.js');
+
+describe('assembleMemoryBlock: incomplete summaries (ai-therapist-346)', () => {
+  it('leaves out a fallback row whose summary generation failed', () => {
+    const at = new Date('2026-11-18T05:00:00Z');
+    const block = assembleMemoryBlock({
+      endedCount: 2,
+      summaries: [
+        {
+          summary: { headline: 'Summary unavailable: automatic generation failed', incomplete: true },
+          ended_at: at,
+          created_at: at,
+        },
+        { summary: { headline: 'Work stress', topics: ['work'] }, ended_at: at, created_at: at },
+      ],
+      facts: [],
+      caseProfile: null,
+      scaleHistory: [],
+      moodTrajectory: [],
+      safetyPlan: null,
+      thoughtRecord: null,
+      clinicianNote: null,
+      riskFlags: [],
+      openAssignments: [],
+      completedSinceLast: [],
+      now: at,
+    });
+    expect(block).toContain('("Work stress")');
+    expect(block).not.toContain('Summary unavailable');
+  });
+});
 
 beforeEach(() => {
   getRecentUserSummariesMock.mockReset().mockResolvedValue([]);
