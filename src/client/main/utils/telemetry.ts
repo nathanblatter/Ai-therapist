@@ -19,7 +19,8 @@ export type ClientEventKind =
   | 'sdp_fetch_failed'
   | 'data_channel_error'
   | 'socket_connect_error'
-  | 'chat_send_failed';
+  | 'chat_send_failed'
+  | 'audio_play_refused';
 // The sideband_* kinds (ai-therapist-195) are gone from the client: they
 // reported the browser's failure to scrape a call_id out of a CORS-hidden
 // Location header and hand it to the server. GPT-Live gives the server the

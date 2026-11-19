@@ -82,6 +82,14 @@ interface CrisisAlert {
   type: 'auto' | 'manual';
 }
 
+/** A paging decision the on-call was NOT texted about, or a vendor cut
+ *  (server: crisisPaging.service, event 'session:page-decision'). */
+interface PageNotice {
+  sessionId: string;
+  outcome: string;
+  message: string;
+}
+
 interface LiveMonitoringProps {
   onViewSession: (sessionId: string, editMode: boolean) => void;
 }
@@ -95,6 +103,10 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   // Auto-dismiss timer for the crisis banner: kept in a ref so a NEW alert
   // cancels the previous alert's timer instead of being dismissed early by it.
   const crisisAlertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Shown beside (never instead of) the crisis banner: a vendor cut, or a
+  // later event folded into a page the on-call already has. Stays until
+  // dismissed, because by design no text message accompanies it.
+  const [pageNotice, setPageNotice] = useState<PageNotice | null>(null);
   const { socket: rawSocket, connected } = useSocket();
   const socket = rawSocket as Socket | null;
 
@@ -199,6 +211,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     socket.on('session:crisis-flagged', handleCrisisFlagged);
     socket.on('session:crisis-unflagged', handleCrisisUnflagged);
     socket.on('session:eligibility-violation', handleEligibilityViolation);
+    socket.on('session:page-decision', handlePageDecision);
 
     // Sideband event listeners
     socket.on('sideband:connected', handleSidebandConnected);
@@ -218,6 +231,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
       socket.off('session:crisis-detected', handleCrisisDetected);
       socket.off('session:crisis-flagged', handleCrisisFlagged);
       socket.off('session:crisis-unflagged', handleCrisisUnflagged);
+      socket.off('session:page-decision', handlePageDecision);
       socket.off('session:eligibility-violation', handleEligibilityViolation);
       socket.off('sideband:connected', handleSidebandConnected);
       socket.off('sideband:disconnected', handleSidebandDisconnected);
@@ -481,6 +495,11 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
       `Eligibility: session ${data.sessionId.substring(0, 12)}… disclosed being a minor` +
         `${data.statedAge != null ? ` (stated age ${data.statedAge})` : ''} and was ended. An adverse-event draft was created.`,
     );
+  };
+
+  const handlePageDecision = (data: { sessionId?: string; outcome?: string; message?: string } | undefined) => {
+    if (!data?.sessionId || !data.message) return;
+    setPageNotice({ sessionId: data.sessionId, outcome: data.outcome ?? '', message: data.message });
   };
 
   const handleCrisisDetected = (data: {
@@ -925,6 +944,39 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
               onClick={() => setCrisisAlert(null)}
               className="p-1 hover:bg-white hover:bg-opacity-25 rounded transition min-h-[44px] min-w-[44px] flex items-center justify-center"
               aria-label="Dismiss crisis alert"
+            >
+              <X size={20} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Paging notice: vendor cuts and events folded into an earlier page */}
+      {pageNotice && (
+        <div
+          className="border-l-4 p-4 rounded bg-amber-100 border-amber-500 text-amber-900 flex items-center justify-between"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex items-center gap-3">
+            <AlertTriangle size={24} aria-hidden="true" />
+            <div>
+              <p className="font-bold">{pageNotice.message}</p>
+              <p className="text-sm">Session: {pageNotice.sessionId.substring(0, 12)}...</p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => onViewSession(pageNotice.sessionId, false)}
+              className="px-3 py-1 bg-white bg-opacity-50 rounded hover:bg-opacity-75 transition text-sm font-medium min-h-[44px]"
+              aria-label={`View session ${pageNotice.sessionId.substring(0, 12)}`}
+            >
+              View Session
+            </button>
+            <button
+              onClick={() => setPageNotice(null)}
+              className="p-1 hover:bg-white hover:bg-opacity-25 rounded transition min-h-[44px] min-w-[44px] flex items-center justify-center"
+              aria-label="Dismiss paging notice"
             >
               <X size={20} />
             </button>

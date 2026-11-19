@@ -13,6 +13,8 @@ const {
   getUserCaseProfileMock,
   upsertUserCaseProfileMock,
   getSessionSafetyContextMock,
+  getSessionRiskPeakMock,
+  recordLlmUsageMock,
 } = vi.hoisted(() => ({
   createMock: vi.fn(),
   getSessionMock: vi.fn(),
@@ -23,6 +25,8 @@ const {
   getUserCaseProfileMock: vi.fn(),
   upsertUserCaseProfileMock: vi.fn(),
   getSessionSafetyContextMock: vi.fn(),
+  getSessionRiskPeakMock: vi.fn(),
+  recordLlmUsageMock: vi.fn(),
 }));
 
 /** Matches the real crisis.queries helper; the barrel is mocked wholesale. */
@@ -41,6 +45,7 @@ function hasSafetyContextImpl(ctx: {
 }
 
 const EMPTY_SAFETY = { crisisEvents: [], escalations: [], resourceCards: [], adverseEvents: [] };
+const NO_PEAK = { crisis_flagged: false, peak_severity: null, peak_risk_score: null };
 
 vi.mock('../config/secrets.js', () => ({
   getOpenAIKey: vi.fn().mockResolvedValue('test-key'),
@@ -61,13 +66,32 @@ vi.mock('../db/index.js', () => ({
   getUserCaseProfile: getUserCaseProfileMock,
   upsertUserCaseProfile: upsertUserCaseProfileMock,
   getSessionSafetyContext: getSessionSafetyContextMock,
+  getSessionRiskPeak: getSessionRiskPeakMock,
   hasSafetyContext: hasSafetyContextImpl,
+  recordLlmUsage: recordLlmUsageMock,
 }));
 
-const { generateSessionInsights } = await import('./sessionInsights.service.js');
+const { generateSessionInsights, FULL_MAX_COMPLETION_TOKENS, ESSENTIAL_MAX_COMPLETION_TOKENS, INCOMPLETE_HEADLINE } =
+  await import('./sessionInsights.service.js');
 
 function llmResponse(payload: Record<string, unknown>) {
-  return { choices: [{ message: { content: JSON.stringify(payload) } }] };
+  return {
+    choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(payload) } }],
+    usage: { prompt_tokens: 3600, completion_tokens: 1150 },
+  };
+}
+
+/** A reply cut off at the output cap: finish_reason 'length', JSON unterminated. */
+function truncatedResponse() {
+  return {
+    choices: [
+      {
+        finish_reason: 'length',
+        message: { content: '{"summary": {"headline": "Struggles with Work Stress an' },
+      },
+    ],
+    usage: { prompt_tokens: 3600, completion_tokens: 3200 },
+  };
 }
 
 const BASIC_SUMMARY = { headline: 'Talked about work stress', topics: ['work'] };
@@ -86,6 +110,8 @@ beforeEach(() => {
   getUserCaseProfileMock.mockReset().mockResolvedValue(null);
   upsertUserCaseProfileMock.mockReset().mockResolvedValue(undefined);
   getSessionSafetyContextMock.mockReset().mockResolvedValue(EMPTY_SAFETY);
+  getSessionRiskPeakMock.mockReset().mockResolvedValue(NO_PEAK);
+  recordLlmUsageMock.mockReset().mockResolvedValue(undefined);
 });
 
 describe('generateSessionInsights', () => {
@@ -115,14 +141,146 @@ describe('generateSessionInsights', () => {
     expect(upsertUserCaseProfileMock).not.toHaveBeenCalled();
   });
 
-  it('throws when the model response is not valid JSON', async () => {
-    createMock.mockResolvedValue({ choices: [{ message: { content: 'not json' } }] });
-    await expect(generateSessionInsights('s1')).rejects.toThrow(/not valid JSON/);
+  it('ordinary path: one strict json_schema call with the raised cap, no retry', async () => {
+    createMock.mockResolvedValue(llmResponse({ summary: BASIC_SUMMARY, soap: BASIC_SOAP, affect: [] }));
+    await generateSessionInsights('s1');
+    expect(createMock).toHaveBeenCalledTimes(1);
+    const req = createMock.mock.calls[0][0];
+    expect(req.model).toBe('gpt-4o-mini');
+    expect(req.max_completion_tokens).toBe(FULL_MAX_COMPLETION_TOKENS);
+    expect(req).not.toHaveProperty('max_tokens');
+    expect(req.response_format.type).toBe('json_schema');
+    expect(req.response_format.json_schema.strict).toBe(true);
+    const props = req.response_format.json_schema.schema.properties;
+    expect(Object.keys(props)).toEqual(['summary', 'soap', 'affect']); // no case_profile without memory consent
+    expect(req.messages).toHaveLength(2);
+    expect(upsertSessionInsightsMock).toHaveBeenCalledTimes(1);
+    expect(upsertSessionInsightsMock.mock.calls[0][2].incomplete).toBeUndefined();
   });
 
-  it('throws when the model response is missing summary or soap', async () => {
-    createMock.mockResolvedValue(llmResponse({ summary: BASIC_SUMMARY }));
-    await expect(generateSessionInsights('s1')).rejects.toThrow(/missing summary or soap/);
+  describe('truncation, retry and safety fallback (ai-therapist-346)', () => {
+    it('a reply cut off at the cap (finish_reason length) triggers one essential-fields retry', async () => {
+      createMock
+        .mockResolvedValueOnce(truncatedResponse())
+        .mockResolvedValueOnce(llmResponse({ summary: BASIC_SUMMARY, soap: BASIC_SOAP }));
+      await generateSessionInsights('s1');
+      expect(createMock).toHaveBeenCalledTimes(2);
+      const retry = createMock.mock.calls[1][0];
+      expect(retry.max_completion_tokens).toBe(ESSENTIAL_MAX_COMPLETION_TOKENS);
+      expect(Object.keys(retry.response_format.json_schema.schema.properties)).toEqual(['summary', 'soap']);
+      expect(retry.messages[1].content).toMatch(/^RETRY/);
+      // Same transcript on the retry.
+      expect(retry.messages[2].content).toBe(createMock.mock.calls[0][0].messages[1].content);
+    });
+
+    it('detects truncation from finish_reason even when the cut-off text happens to parse', async () => {
+      const r = llmResponse({ summary: BASIC_SUMMARY, soap: BASIC_SOAP });
+      r.choices[0].finish_reason = 'length';
+      createMock
+        .mockResolvedValueOnce(r)
+        .mockResolvedValueOnce(llmResponse({ summary: BASIC_SUMMARY, soap: BASIC_SOAP }));
+      await generateSessionInsights('s1');
+      expect(createMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('retry success stores the full summary and SOAP note (no affect, case profile untouched)', async () => {
+      getSessionMock.mockResolvedValue({ session_id: 's1', user_id: 42, checkin: null });
+      getUserMemoryEnabledMock.mockResolvedValue(true);
+      createMock
+        .mockResolvedValueOnce(truncatedResponse())
+        .mockResolvedValueOnce(llmResponse({ summary: BASIC_SUMMARY, soap: BASIC_SOAP }));
+      await generateSessionInsights('s1');
+      expect(upsertSessionInsightsMock).toHaveBeenCalledWith('s1', 42, BASIC_SUMMARY, BASIC_SOAP, 'gpt-4o-mini', null);
+      expect(upsertUserCaseProfileMock).not.toHaveBeenCalled();
+      // Both attempts are costed.
+      await vi.waitFor(() => expect(recordLlmUsageMock).toHaveBeenCalledTimes(2));
+    });
+
+    it('double failure stores the safety fallback, marked incomplete, and does not throw', async () => {
+      createMock.mockResolvedValueOnce(truncatedResponse()).mockRejectedValueOnce(new Error('503 upstream'));
+      await expect(generateSessionInsights('s1')).resolves.toBeUndefined();
+      expect(upsertSessionInsightsMock).toHaveBeenCalledTimes(1);
+      const [, , summary, soap, model, affect] = upsertSessionInsightsMock.mock.calls[0];
+      expect(summary).toMatchObject({
+        headline: INCOMPLETE_HEADLINE,
+        incomplete: true,
+        crisis_flagged: false,
+        peak_severity: null,
+        peak_risk_score: null,
+      });
+      expect(summary.incomplete_reason).toMatch(/full: reply cut off at max_completion_tokens/);
+      expect(summary.incomplete_reason).toMatch(/essential: API error: 503 upstream/);
+      expect(summary).not.toHaveProperty('safety'); // nothing safety-relevant happened
+      expect(soap.assessment).toMatch(/Automated draft unavailable/);
+      expect(model).toBe('gpt-4o-mini');
+      expect(affect).toBeNull();
+    });
+
+    it('invalid JSON, a missing field or a refusal are failed attempts, not thrown errors', async () => {
+      createMock
+        .mockResolvedValueOnce({ choices: [{ finish_reason: 'stop', message: { content: 'not json' } }] })
+        .mockResolvedValueOnce({ choices: [{ finish_reason: 'stop', message: { content: null, refusal: 'no' } }] });
+      await generateSessionInsights('s1');
+      const summary = upsertSessionInsightsMock.mock.calls[0][2];
+      expect(summary.incomplete_reason).toMatch(/full: reply was not valid JSON/);
+      expect(summary.incomplete_reason).toMatch(/essential: model refused/);
+
+      upsertSessionInsightsMock.mockClear();
+      createMock.mockReset().mockResolvedValue(llmResponse({ summary: BASIC_SUMMARY }));
+      await generateSessionInsights('s1');
+      expect(upsertSessionInsightsMock.mock.calls[0][2].incomplete_reason).toMatch(/missing summary or soap/);
+    });
+
+    it('a crisis-flagged session ALWAYS ends with a safety line, peak severity and score stored', async () => {
+      // Flag on the session row only (no crisis_events rows returned), and
+      // both model attempts fail.
+      getSessionRiskPeakMock.mockResolvedValue({ crisis_flagged: true, peak_severity: 'high', peak_risk_score: 88 });
+      createMock.mockResolvedValueOnce(truncatedResponse()).mockResolvedValueOnce(truncatedResponse());
+      await generateSessionInsights('s1');
+      const summary = upsertSessionInsightsMock.mock.calls[0][2];
+      expect(summary).toMatchObject({
+        incomplete: true,
+        crisis_flagged: true,
+        peak_severity: 'high',
+        peak_risk_score: 88,
+      });
+      expect(summary.safety).toBe(
+        'Safety: this session recorded a crisis flag, highest severity high, peak risk score 88. Review the session record.',
+      );
+    });
+
+    it('a crisis-flagged session gets the deterministic safety line when the model leaves it empty', async () => {
+      getSessionRiskPeakMock.mockResolvedValue({ crisis_flagged: true, peak_severity: 'medium', peak_risk_score: 55 });
+      createMock.mockResolvedValue(llmResponse({ summary: { ...BASIC_SUMMARY, safety: '' }, soap: BASIC_SOAP }));
+      await generateSessionInsights('s1');
+      // The row flag reaches the summarizer even with no crisis_events rows.
+      const userMessage = createMock.mock.calls[0][0].messages[1].content as string;
+      expect(userMessage).toContain('SAFETY EVENTS');
+      expect(userMessage).toContain('session crisis flag (severity: medium) (risk score: 55)');
+      expect(upsertSessionInsightsMock.mock.calls[0][2].safety).toMatch(/crisis flag, highest severity medium/);
+    });
+
+    it('a stored fallback row is not final: the next run regenerates over it', async () => {
+      getSessionInsightsMock.mockResolvedValue({ summary: { headline: INCOMPLETE_HEADLINE, incomplete: true } });
+      createMock.mockResolvedValue(llmResponse({ summary: BASIC_SUMMARY, soap: BASIC_SOAP }));
+      await generateSessionInsights('s1');
+      expect(upsertSessionInsightsMock.mock.calls[0][2]).toEqual(BASIC_SUMMARY);
+    });
+
+    it('bounds a very long session: opening plus the end, middle omitted', async () => {
+      const long = Array.from({ length: 400 }, (_, i) => [
+        { role: 'user', content: `participant turn ${i} ${'x'.repeat(40)}` },
+        { role: 'assistant', content: `assistant turn ${i}` },
+      ]).flat();
+      getSessionMessagesMock.mockResolvedValue(long);
+      createMock.mockResolvedValue(llmResponse({ summary: BASIC_SUMMARY, soap: BASIC_SOAP }));
+      await generateSessionInsights('s1');
+      const content = createMock.mock.calls[0][0].messages[1].content as string;
+      expect(content.length).toBeLessThan(12200);
+      expect(content).toContain('participant turn 0 ');
+      expect(content).toContain('assistant turn 399');
+      expect(content).toMatch(/characters from the middle of the session omitted/);
+    });
   });
 
   describe('safety context (ai-therapist-256)', () => {
@@ -233,6 +391,7 @@ describe('generateSessionInsights', () => {
 
       const userMessage = createMock.mock.calls[0][0].messages[1].content as string;
       expect(userMessage).not.toContain('PRIOR CASE PROFILE');
+      expect(createMock.mock.calls[0][0].response_format.json_schema.schema.required).toContain('case_profile');
       expect(upsertUserCaseProfileMock).toHaveBeenCalledWith(42, freshProfile);
     });
 
