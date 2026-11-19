@@ -1262,3 +1262,72 @@ describe('a conditional exaggeration with a joke marker does not page by itself'
     expect((await analyzeMessageRisk(turn(QUIZ), [])).riskScore).toBe(85);
   });
 });
+
+// PR #86 review: the session risk context is now also treated as failed when
+// it does not answer within 2 s. An unread context reads as a calm session
+// (recentPeak 0, not flagged), and the two caps that hold a turn at 64 "in a
+// session with no medium-or-higher risk" would then hold a turn in a session
+// that is in fact flagged high: no page. Unknown fails toward paging.
+// PR #86 review: the pipeline pages from onScored, so the hook must see the
+// verdict AFTER every cap and guard, never the assessor's raw score. If it fired
+// on the raw verdict, each capped case below would become a page.
+describe('onScored carries the final verdict (caps applied), the one the pipeline pages on', () => {
+  it('a conditional joke assessed 80 reaches the hook as 64 (medium)', async () => {
+    createMock.mockResolvedValue(assess(80, 'genuine', ['stated intent']));
+    const seen: Array<{ riskScore: number; severity: string }> = [];
+    const result = await analyzeMessageRisk(turn("I'm literally going to kill myself if I fail this quiz lol"), [], {
+      onScored: (r) => seen.push({ riskScore: r.riskScore, severity: r.severity }),
+    });
+    expect(seen).toEqual([{ riskScore: 64, severity: 'medium' }]);
+    expect(result.riskScore).toBe(64);
+  });
+
+  it('a help step assessed 65 in a passive-ideation session reaches the hook as 64 (medium)', async () => {
+    queryMock.mockImplementation(async (sql: unknown) =>
+      String(sql).includes('session-risk-context')
+        ? {
+            rows: [
+              {
+                crisis_flagged: true,
+                crisis_severity: 'medium',
+                recent: [{ risk_score: 55, score_factors: { method: 'llm_assessed' } }],
+              },
+            ],
+          }
+        : { rows: [] },
+    );
+    createMock.mockResolvedValue(assess(65, 'genuine', ['stated intent']));
+    const seen: number[] = [];
+    await analyzeMessageRisk(turn("I'm going to do it, I'll text my sister tonight."), [], {
+      onScored: (r) => seen.push(r.riskScore),
+    });
+    expect(seen).toEqual([64]);
+  });
+});
+
+describe('the help-step and joke caps apply only when the session is known to be calm', () => {
+  const contextUnreadable = (): void => {
+    queryMock.mockImplementation(async (sql: unknown) => {
+      if (String(sql).includes('session-risk-context')) throw new Error('timeout exceeded when trying to connect');
+      return { rows: [] };
+    });
+  };
+
+  it('a stated plan beside a help step is not capped when the context cannot be read', async () => {
+    contextUnreadable();
+    createMock.mockResolvedValue(assess(70, 'genuine', ['stated intent']));
+    const result = await analyzeMessageRisk(turn("I'm going to do it, I'll text my sister tonight."), []);
+    expect(result.riskScore).toBe(70);
+    expect(result.severity).toBe('high');
+    expect(riskRow().help_step_cap).toBeUndefined();
+  });
+
+  it('a conditional joke is not capped when the context cannot be read', async () => {
+    contextUnreadable();
+    createMock.mockResolvedValue(assess(80, 'genuine', ['stated intent']));
+    const result = await analyzeMessageRisk(turn("I'm literally going to kill myself if I fail this quiz lol"), []);
+    expect(result.riskScore).toBe(80);
+    expect(result.severity).toBe('high');
+    expect(riskRow().conditional_joke_cap).toBeUndefined();
+  });
+});

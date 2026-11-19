@@ -171,7 +171,34 @@ export default function logsRoutes(): Router {
     }
   });
 
-  async function scoreUnsavedTurns(unsaved: InsertMessageInput[]): Promise<void> {
+  // The browser keeps a batch that got a 5xx and re-sends it, together with
+  // everything logged since, on every later flush (ai-therapist-369). Once the
+  // buffer holds FLUSH_SIZE records, every new record triggers a flush, so
+  // during an outage the same unsaved turns would be screened again on every
+  // request: an assessor call per turn per flush, and pipelines piling up
+  // faster than a slow database lets them finish (PR #86 review). Each unsaved
+  // turn is screened once here, keyed by what the browser sent (its session,
+  // timestamp and words). The turn is still scored once more when the batch
+  // is finally stored, as the client change intends.
+  const screenedUnsaved = new Map<string, true>();
+  const SCREENED_UNSAVED_MAX = 5000;
+  const unsavedKey = (msg: InsertMessageInput): string =>
+    `${msg.session_id}\u0000${msg.created_at instanceof Date ? msg.created_at.getTime() : ''}\u0000${msg.content ?? ''}`;
+
+  async function scoreUnsavedTurns(all: InsertMessageInput[]): Promise<void> {
+    const unsaved = all.filter((msg) => {
+      const key = unsavedKey(msg);
+      if (screenedUnsaved.has(key)) return false;
+      screenedUnsaved.set(key, true);
+      if (screenedUnsaved.size > SCREENED_UNSAVED_MAX) {
+        for (const old of screenedUnsaved.keys()) {
+          if (screenedUnsaved.size <= SCREENED_UNSAVED_MAX / 2) break;
+          screenedUnsaved.delete(old);
+        }
+      }
+      return true;
+    });
+    if (unsaved.length === 0) return;
     const { runCrisisPipeline } = await import('../../services/crisisPipeline.service.js');
     for (const msg of unsaved) {
       await runCrisisPipeline({ sessionId: msg.session_id, messageId: null, content: msg.content ?? '' }, 'realtime');

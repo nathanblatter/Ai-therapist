@@ -2328,6 +2328,11 @@ export async function analyzeMessageRisk(
     let helpStepCapped = false;
     if (
       riskScore >= RISK_BANDS.high &&
+      // Only when the session's risk is KNOWN to be below high. An unread
+      // context (failed, or past its read deadline) reads as calm, and the cap
+      // would then hold a stated plan in a session flagged high at 64: no
+      // page (PR #86 review). Unknown fails toward paging.
+      !sessionContext.lookupFailed &&
       sessionContext.recentPeak < RISK_BANDS.high &&
       !(sessionContext.flagged && sessionContext.flaggedSeverity === 'high') &&
       keywordAnalysis.keywordScore === 0 &&
@@ -2357,6 +2362,9 @@ export async function analyzeMessageRisk(
     if (
       riskScore >= RISK_BANDS.high &&
       keywordAnalysis.keywordScore > 0 &&
+      // Known calm only: an unread context is not "no medium-or-higher risk"
+      // (PR #86 review), and holding the turn at 64 there could cost a page.
+      !sessionContext.lookupFailed &&
       !contextIsMediumOrAbove(sessionContext) &&
       // The assessor's own reading outranks the screen when it is specific:
       // a plan, a time or an attempt observed, or the top of the range.

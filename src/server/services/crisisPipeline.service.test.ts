@@ -342,6 +342,23 @@ describe('a high turn the re-flag rule let pass (handleHighTurnWithoutReflag)', 
     expect(draftAdverseEventFromCrisisMock).not.toHaveBeenCalled();
   });
 
+  // PR #86 review: the pipeline already paged this turn when it scored
+  // (respondToHighVerdict); the hand-on must not request it a second time.
+  it('page already requested when it scored: a critical turn in a real high flag is not paged again', async () => {
+    await handleHighTurnWithoutReflag(TURN, { riskScore: 95, factors: ['attempt'] }, 'realtime', {
+      pageAlreadyRequested: true,
+    });
+    expect(pageHighRiskMock).not.toHaveBeenCalled();
+  });
+
+  it('page already requested when it scored: a recovery disclosure is recorded but not paged again', async () => {
+    recordRecoveryDisclosureMock.mockResolvedValue(recordedAs);
+    await handleHighTurnWithoutReflag(TURN, HIGH, 'realtime', { pageAlreadyRequested: true });
+    expect(pageHighRiskMock).not.toHaveBeenCalled();
+    expect(logInterventionActionMock).toHaveBeenCalledWith('chat_1', 'auto_flag', expect.any(Object));
+    expect(draftAdverseEventFromCrisisMock).toHaveBeenCalledTimes(1);
+  });
+
   it('a real high flag and an attempt in progress scored below 90: still requested, with what it says', async () => {
     await handleHighTurnWithoutReflag(TURN, { riskScore: 85, factors: [], acute: 'attempt' }, 'realtime');
     expect(pageHighRiskMock).toHaveBeenCalledWith('chat_1', 85, {

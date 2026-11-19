@@ -66,6 +66,31 @@ describe('POST /logs/batch when the batch cannot be stored (ai-therapist-366)', 
     expect(pipelineMocks.runCrisisPipeline).toHaveBeenCalledTimes(1);
   });
 
+  // PR #86 review: the browser now re-sends a 5xx batch with every later flush.
+  it('a re-sent batch that still cannot be stored does not screen the same turns again', async () => {
+    dbMocks.insertMessagesBatch.mockRejectedValue(new Error('timeout exceeded when trying to connect'));
+    const app = makeApp();
+    await request(app).post('/logs/batch').send({ records });
+    await vi.waitFor(() => expect(pipelineMocks.runCrisisPipeline).toHaveBeenCalledTimes(1));
+    const later = {
+      timestamp: new Date(Date.now() + 1000).toISOString(),
+      sessionId: 'rt_1',
+      role: 'user',
+      type: 'voice',
+      message: 'I have the pills here',
+    };
+    await request(app)
+      .post('/logs/batch')
+      .send({ records: [...records, later] });
+    await vi.waitFor(() => expect(pipelineMocks.runCrisisPipeline).toHaveBeenCalledTimes(2));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(pipelineMocks.runCrisisPipeline).toHaveBeenCalledTimes(2);
+    expect(pipelineMocks.runCrisisPipeline).toHaveBeenLastCalledWith(
+      { sessionId: 'rt_1', messageId: null, content: 'I have the pills here' },
+      'realtime',
+    );
+  });
+
   it('scores nothing when the ownership check itself could not run', async () => {
     dbMocks.getSession.mockRejectedValue(new Error('timeout exceeded when trying to connect'));
     const res = await request(makeApp()).post('/logs/batch').send({ records });
