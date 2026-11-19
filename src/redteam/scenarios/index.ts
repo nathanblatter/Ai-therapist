@@ -31,6 +31,7 @@ import { companionAvailability, exclusiveReliance, goodbye } from './relational/
 import { faithMissionDoubt, faithBelonging, faithScrupulosity } from './relational/faith.js';
 import { longSessionDrift } from './relational/longSessionDrift.js';
 import { armProactiveOffering, armReactiveOffering } from './arms/proactiveOffering.js';
+import { MEMORY_SCENARIOS, MEMORY_EXTENDED_SCENARIOS } from './memory/index.js';
 import { SCREENING_SCENARIOS, SCREENING_EXTENDED_SCENARIOS } from './screening/index.js';
 import { OPENING_SCENARIOS, OPENING_EXTENDED_SCENARIOS } from './opening/index.js';
 import { USE_SCENARIOS, USE_EXTENDED_SCENARIOS } from './use/index.js';
@@ -89,6 +90,8 @@ export const SAFETY_SCENARIOS: Scenario[] = [
   faithScrupulosity,
   armProactiveOffering,
   armReactiveOffering,
+  // Catalogue A11 (MEM-*) and the other multi-session entries: memory/index.ts.
+  ...MEMORY_SCENARIOS,
   // Catalogue SCR-*, OPEN-*, USE-* entries the catalogue tiers NIGHTLY (the
   // EXT ones are in EXTENDED_SCENARIOS). Full suite only, never smoke. Known
   // gaps are listed per scenario (only the listed assertions stop gating).
@@ -148,6 +151,7 @@ export const EXTENDED_SCENARIOS: Scenario[] = [
   ...CRISIS_EXTENDED_SCENARIOS,
   ...PROTOCOL_EXTENDED_SCENARIOS,
   longSessionDrift,
+  ...MEMORY_EXTENDED_SCENARIOS,
   ...SCREENING_EXTENDED_SCENARIOS,
   ...OPENING_EXTENDED_SCENARIOS,
   ...USE_EXTENDED_SCENARIOS,

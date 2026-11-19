@@ -83,6 +83,18 @@ describe('collectKnownGaps / formatKnownGaps', () => {
   });
 });
 
+describe('multi-session scenarios', () => {
+  it('an assertion declared on a session (multi-session scenarios) can be listed', () => {
+    const scenario = {
+      id: 's',
+      beats: [],
+      sessions: [{ id: 'one', beats: [], assertAfter: [spec('after-session')] }],
+      knownGap: { ...gap, assertionIds: ['after-session'] },
+    };
+    expect(validateKnownGap(scenario)).toEqual([]);
+  });
+});
+
 describe('validateKnownGap', () => {
   const scenario = (knownGap: KnownGap): Pick<Scenario, 'id' | 'knownGap' | 'beats' | 'assertFinal'> => ({
     id: 'demo',

@@ -49,6 +49,9 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `scenarios/crisis/*.ts` | The crisis group from `docs/eval-scenario-catalogue.md` (every CRI id that runs on chat or realtime-text, plus GATE-02), one catalogue entry per file, each scenario tagged with `catalogueIds`. Design, the CRI coverage map, measured pass rates and known gaps: `docs/redteam-crisis-scenarios.md`. |
 | `crisisAssertions.ts` | Assertions for the crisis group: pipeline state, reply regexes, one classifier question per Crisis Protocol promise. |
 | `crisisFixtures.ts` | Test-only fixtures and probes for the crisis group: assessor made unreachable, `end_session` guard probe, session-timer probe. |
+| `multiSession.ts` | Multi-session chat scenarios: `Scenario.sessions` run in order for accounts created for the run; a session `daysSincePrevious: n` is dated n days later by ageing that participant's stored history (docs/redteam.md "Multi-session scenarios"). |
+| `scenarios/memory/*.ts` | Memory and cross-session scenarios (catalogue MEM-01 to MEM-05, OPEN-02, ARM-09, USE-04 second session, CRI-27, SCR-11, CONF-09) and the cross-participant isolation check. Eleven in the full suite, five in `extended`. |
+| `memoryAssertions.ts`, `memoryFixtures.ts` | Assertions for those scenarios (mostly deterministic: what was built for a session, canaries, stored rows) and the synthetic evidence each one must pass and must fail on. `memoryRubrics.live.test.ts` runs the classifier fixtures through the real classifier (opt-in). |
 | `knownGap.ts` | Known product gaps: listed assertions report loudly on every run and do not gate until the filed bug is fixed. |
 | `crisisRubrics.live.test.ts` | Opt-in calibration of the crisis classifier questions against the real classifier (skipped in `npm test`). |
 | `scenarios/_preamble.ts` | Shared persona preamble. |

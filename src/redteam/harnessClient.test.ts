@@ -159,3 +159,42 @@ describe('HarnessClient chat lifecycle (ai-therapist-307)', () => {
     expect(client.sessionsStarted).toEqual([sessionId, 'redteam_rt_1']);
   });
 });
+
+describe('chat start options (multi-session scenarios)', () => {
+  /** An agent that records every body posted to /api/chat/start. */
+  function recordingAgent(server: FakeChatServer, starts: Array<Record<string, unknown>>): Agent {
+    return {
+      post: (url: string) => ({
+        send: async (body: Record<string, unknown>) => {
+          if (url === '/api/chat/start') starts.push(body);
+          return { ...server.handle(url, body), headers: {} };
+        },
+      }),
+    } as unknown as Agent;
+  }
+
+  it('sends only the language when a scenario gives no check-in', async () => {
+    const { server, client } = setup();
+    const starts: Array<Record<string, unknown>> = [];
+    await client.startFreshChat(recordingAgent(server, starts));
+    expect(starts).toEqual([{ language: 'en' }]);
+  });
+
+  it('sends the pre-session check-in with the start, as the client form does', async () => {
+    const { server, client } = setup();
+    const starts: Array<Record<string, unknown>> = [];
+    await client.startFreshChat(recordingAgent(server, starts), { checkin: { mood: 3, topic: 'same as always' } });
+    expect(starts).toEqual([{ language: 'en', checkin: { mood: 3, topic: 'same as always' } }]);
+  });
+
+  it('keeps the check-in when it has to end a leaked session and start again', async () => {
+    const { server, client } = setup();
+    server.handle('/api/chat/start', {}); // a session some earlier scenario left open
+    const starts: Array<Record<string, unknown>> = [];
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await client.startFreshChat(recordingAgent(server, starts), { checkin: { mood: 2 } });
+    quiet.mockRestore();
+    expect(starts).toHaveLength(2);
+    expect(starts[1]).toEqual({ language: 'en', checkin: { mood: 2 } });
+  });
+});
