@@ -6,9 +6,11 @@
 // Pure functions over summary.json (+ diff.json); older summaries without the
 // variant / progression / judge-stat fields still render.
 import { formatDiffMarkdown, type RunDiff } from './diff.js';
-import { judgeStats } from './report.js';
+import { costNoteLines, judgeStats } from './report.js';
+import type { CostBreakdown } from './config.js';
 import { aggregateProgression, computeProgression, type ProgressionMetrics } from './progression.js';
 import type { Pipeline, Turn } from './types.js';
+import { WEEKDAY_NAMES, weekdayIndex, type NightlySample } from './sampling.js';
 
 /** The subset of summary.json this module reads (report.ts buildSummaryJson). */
 export interface SummaryFile {
@@ -17,6 +19,8 @@ export interface SummaryFile {
   gitSha?: string | null;
   judgeModel?: string;
   startedAt?: string;
+  /** Sampled nightly (sampling.ts); absent when the whole suite ran. */
+  sampling?: NightlySample | null;
   scenarios?: Array<{
     id: string;
     passed: boolean;
@@ -26,8 +30,20 @@ export interface SummaryFile {
     progression?: ProgressionMetrics | null;
     pipeline?: Pipeline;
     transcript?: Turn[];
+    /** Generated variants (--generated-variants): count toward the verdict
+     *  only when gating. */
+    generated?: { gating?: boolean } | null;
   }>;
-  totals?: { estCostUsd?: number };
+  totals?: {
+    estCostUsd?: number;
+    /** Since 2026-11-18: the breakdown behind estCostUsd plus its caveats. */
+    cost?: Partial<CostBreakdown> & { estimated?: string[]; excluded?: string[] };
+  };
+}
+
+/** A non-gating generated variant never turns a run red. */
+function counts(s: { generated?: { gating?: boolean } | null }): boolean {
+  return !s.generated || s.generated.gating === true;
 }
 
 export interface RunVerdict {
@@ -42,7 +58,7 @@ export interface RunVerdict {
 }
 
 export function verdict(summary: SummaryFile): RunVerdict {
-  const scenarios = summary.scenarios ?? [];
+  const scenarios = (summary.scenarios ?? []).filter(counts);
   const failedAssertions = scenarios.reduce(
     (n, s) => n + (s.assertions ?? []).filter((a) => !a.passed && a.gating !== false).length,
     0,
@@ -78,6 +94,87 @@ export interface JobSummaryInput {
   title?: string;
 }
 
+const COST_LABELS: Record<string, string> = {
+  'chat-reply': 'Chat replies (therapy model)',
+  'in-session': 'In-session app calls (crisis assessor, eligibility, rerank)',
+  'post-session': 'Post-session jobs (redaction, insights)',
+  persona: 'Persona driver',
+  classifier: 'Assertion classifiers',
+  judge: 'Judge',
+  assistant: 'Admin assistant',
+  generation: 'Generated-variant generation',
+  voice: 'Voice minutes',
+  tts: 'Persona speech',
+  other: 'Other',
+};
+
+/** The run's cost: total, recorded vs estimated per category, and what is
+ *  estimated or left out. Older summaries (no breakdown) get nothing extra. */
+export function formatCost(summary: SummaryFile): string[] {
+  const cost = summary.totals?.cost;
+  if (!cost?.byCategory) return [];
+  const lines = ['### Cost', ''];
+  const total = summary.totals?.estCostUsd ?? cost.totalUsd ?? 0;
+  lines.push(
+    `Total $${total.toFixed(2)}: recorded $${(cost.recordedUsd ?? 0).toFixed(2)}, estimated $${(cost.estimatedUsd ?? 0).toFixed(2)}. ` +
+      "Recorded means token counts from the API response or the app's own usage table; both are priced from the harness rate table, not read from the invoice.",
+    '',
+  );
+  const rows = Object.entries(cost.byCategory)
+    .filter(([, l]) => l && l.usd > 0)
+    .sort(([, a], [, b]) => (b?.usd ?? 0) - (a?.usd ?? 0));
+  if (rows.length) {
+    lines.push('| Category | Cost | Recorded | Estimated | Calls |', '|---|---|---|---|---|');
+    for (const [cat, l] of rows) {
+      if (!l) continue;
+      lines.push(
+        `| ${COST_LABELS[cat] ?? cat} | $${l.usd.toFixed(4)} | $${l.recordedUsd.toFixed(4)} | $${l.estimatedUsd.toFixed(4)} | ${l.calls} |`,
+      );
+    }
+    lines.push('');
+  }
+  const notes = costNoteLines({ estimated: cost.estimated ?? [], excluded: cost.excluded ?? [] });
+  if (notes.length) lines.push(...notes.map((n) => `- ${cell(n, 400)}`), '');
+  return lines;
+}
+
+/** The sampled-run note: which night, N of M, and when the rest are next due. */
+export function formatSampling(summary: SummaryFile): string[] {
+  const s = summary.sampling;
+  if (!s) return [];
+  const day = WEEKDAY_NAMES[s.weekday] ?? `day ${s.weekday}`;
+  const lines = ['### Sampled run', ''];
+  lines.push(
+    `**Sampled**: ${s.run.length} of ${s.total} scenarios ran (${day} ${s.date}, ${s.week}, nightly cap ${s.cap}): ` +
+      `${s.primaries.length} assigned to tonight, ${s.catchUp.length} catch-up, ${s.repeats.length} repeats. ` +
+      'Every scenario in the suite is scheduled at least once per Monday-to-Sunday UTC week (docs/redteam.md "Sampled nightly").',
+    '',
+  );
+  if (!s.historyAvailable)
+    lines.push('No previous results were found, so catch-up for missed nights was off tonight.', '');
+  if (s.catchUp.length)
+    lines.push(`Catch-up (missed earlier this week): ${s.catchUp.map((id) => `\`${id}\``).join(', ')}`, '');
+  if (s.deferred.length)
+    lines.push(
+      `**Deferred** (missed this week, no slot left tonight): ${s.deferred.map((id) => `\`${id}\``).join(', ')}`,
+      '',
+    );
+  const byDate = new Map<string, string[]>();
+  for (const [id, date] of Object.entries(s.nextDue ?? {})) byDate.set(date, [...(byDate.get(date) ?? []), id]);
+  if (byDate.size) {
+    lines.push(`<details><summary>Not run tonight (${s.total - s.run.length}): next due</summary>`, '');
+    lines.push('| Next due | Count | Scenarios |', '|---|---|---|');
+    for (const date of [...byDate.keys()].sort()) {
+      const ids = byDate.get(date)!.sort();
+      lines.push(
+        `| ${WEEKDAY_NAMES[weekdayIndex(date)]} ${date} | ${ids.length} | ${ids.map((id) => `\`${id}\``).join(', ')} |`,
+      );
+    }
+    lines.push('', '</details>', '');
+  }
+  return lines;
+}
+
 export function formatJobSummary(input: JobSummaryInput): string {
   const title = input.title ?? 'Red-team';
   const { summary } = input;
@@ -103,28 +200,34 @@ export function formatJobSummary(input: JobSummaryInput): string {
   const meta = [
     summary.gitSha ? `commit \`${summary.gitSha.slice(0, 7)}\`` : null,
     summary.judgeModel ? `judge \`${summary.judgeModel}\`` : null,
-    typeof summary.totals?.estCostUsd === 'number' ? `est. cost $${summary.totals.estCostUsd.toFixed(2)}` : null,
+    typeof summary.totals?.estCostUsd === 'number' ? `cost $${summary.totals.estCostUsd.toFixed(2)}` : null,
   ].filter(Boolean);
   if (meta.length) lines.push(meta.join(', '), '');
+  lines.push(...formatSampling(summary));
+  lines.push(...formatCost(summary));
 
   const scenarios = summary.scenarios ?? [];
-  const failing = scenarios.flatMap((s) =>
-    (s.assertions ?? [])
-      .filter((a) => !a.passed && a.gating !== false)
-      .map((a) => `| \`${s.id}\` | \`${a.id}\` | ${cell(a.detail ?? '')} |`),
-  );
+  const failing = scenarios
+    .filter(counts)
+    .flatMap((s) =>
+      (s.assertions ?? [])
+        .filter((a) => !a.passed && a.gating !== false)
+        .map((a) => `| \`${s.id}\` | \`${a.id}\` | ${cell(a.detail ?? '')} |`),
+    );
   if (failing.length) {
     lines.push('### Failing scenarios', '');
     lines.push('| Scenario | Assertion | Detail |', '|---|---|---|', ...failing, '');
   }
-  const errored = scenarios.filter((s) => s.error);
+  const errored = scenarios.filter((s) => s.error && counts(s));
   if (errored.length) {
     lines.push('### Errored scenarios', '');
     lines.push(...errored.map((s) => `- \`${s.id}\`: ${cell(s.error ?? '', 500)}`), '');
   }
+  // A non-gating generated variant's failures are leads, listed with the
+  // other non-gating results.
   const nonGating = scenarios.flatMap((s) =>
     (s.assertions ?? [])
-      .filter((a) => !a.passed && a.gating === false)
+      .filter((a) => !a.passed && (a.gating === false || !counts(s)))
       .map((a) => `- \`${s.id}\` / \`${a.id}\`: ${cell(a.detail ?? '', 200)}`),
   );
   if (nonGating.length)

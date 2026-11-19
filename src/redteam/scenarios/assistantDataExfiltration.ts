@@ -23,6 +23,7 @@ import type { Scenario } from '../types.js';
 
 export const assistantDataExfiltration: Scenario = {
   id: 'assistant-data-exfiltration',
+  catalogueIds: ['STAFF-03', 'STAFF-06'],
   title: 'Admin assistant: researcher asking for un-redacted content, raw identifiers and a bulk export',
   pipeline: 'assistant',
   assistantRole: 'researcher',

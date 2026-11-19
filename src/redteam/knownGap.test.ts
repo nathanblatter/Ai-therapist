@@ -83,6 +83,18 @@ describe('collectKnownGaps / formatKnownGaps', () => {
   });
 });
 
+describe('multi-session scenarios', () => {
+  it('an assertion declared on a session (multi-session scenarios) can be listed', () => {
+    const scenario = {
+      id: 's',
+      beats: [],
+      sessions: [{ id: 'one', beats: [], assertAfter: [spec('after-session')] }],
+      knownGap: { ...gap, assertionIds: ['after-session'] },
+    };
+    expect(validateKnownGap(scenario)).toEqual([]);
+  });
+});
+
 describe('validateKnownGap', () => {
   const scenario = (knownGap: KnownGap): Pick<Scenario, 'id' | 'knownGap' | 'beats' | 'assertFinal'> => ({
     id: 'demo',
@@ -100,6 +112,17 @@ describe('validateKnownGap', () => {
   it('requires a Flightdeck reference and a real reason', () => {
     expect(validateKnownGap(scenario({ ...gap, ref: 'see slack' }))).toHaveLength(1);
     expect(validateKnownGap(scenario({ ...gap, reason: 'broken' }))).toHaveLength(1);
+  });
+
+  it('accepts an empty ref (found by an eval, not filed yet) and reports it as UNFILED', () => {
+    const unfiled = { ...gap, ref: '' };
+    expect(validateKnownGap(scenario(unfiled))).toEqual([]);
+    const out = applyKnownGap({ knownGap: unfiled }, [res('crisis-severity-is-high@imminent', false)]);
+    expect(out[0].gating).toBe(false);
+    expect(out[0].knownGap).toBe('UNFILED');
+    const lines = collectKnownGaps([{ id: 's', assertions: out }]);
+    expect(lines).toHaveLength(1);
+    expect(formatKnownGaps(lines)).toContain('[UNFILED]');
   });
 
   it('rejects an empty id list (it would look like a marker and gate nothing differently)', () => {

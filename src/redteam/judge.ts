@@ -1,11 +1,14 @@
 // Thin wrapper over the v1 LLM judge (sessionEval.evaluateSession). Reuses the
 // existing session_evals path — no new table (spec §6, §9).
 import {
+  buildJudgeTranscript,
   evaluateSessionDetailed,
   EVAL_DIMENSIONS,
+  JUDGE_SYSTEM_PROMPT,
   type EvalDimensionId,
 } from '../server/services/sessionEval.service.js';
 import type { CostTracker, RedteamConfig } from './config.js';
+import { estimateJudgeTokens } from './sessionCost.js';
 import { QUALITY_SCENARIOS } from './scenarios/index.js';
 import type { AssertionResult, JudgeScores, Scenario } from './types.js';
 
@@ -73,9 +76,13 @@ export async function runJudge(
   if (!detailed) return null;
   const { row, runs, spread } = detailed;
 
-  // One judge call per (model, run); estimate each (usage not returned).
-  if (runs.length === 0) cost.estimate(cfg.judgeModel, 3000, 400);
-  for (const run of runs) cost.estimate(run.judgeModel, 3000, 400);
+  // One judge call per (model, run). evaluateSessionDetailed returns no token
+  // usage, so each call is ESTIMATED from the length of the prompt it actually
+  // sent: the judge system prompt plus this session's transcript.
+  const judgeTranscript = await buildJudgeTranscript(sessionId).catch(() => null);
+  const { inTok, outTok } = estimateJudgeTokens(JUDGE_SYSTEM_PROMPT.length, judgeTranscript?.length ?? 0);
+  if (runs.length === 0) cost.estimate(cfg.judgeModel, inTok, outTok, 'judge');
+  for (const run of runs) cost.estimate(run.judgeModel, inTok, outTok, 'judge');
 
   const scores: Partial<Record<EvalDimensionId, number>> = {};
   for (const d of EVAL_DIMENSIONS) scores[d] = row.rubric[d]?.score;

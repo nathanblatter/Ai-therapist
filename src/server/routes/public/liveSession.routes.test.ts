@@ -255,3 +255,53 @@ describe('POST /api/live/session delegation request body', () => {
     expect(mintedSession().delegation).toEqual({ type: 'client' });
   });
 });
+
+// What a recovery session is created with (ai-therapist-293): its speak-first
+// instruction rides in the session's startup input as a developer message (the
+// documented greeting recipe), so the assistant comes back talking. It names
+// the crisis line, says nothing about a dropped connection, and carries none of
+// the conversation that was cut.
+describe('POST /api/live/session recovery speak-first', () => {
+  const healthy = () => upstream(200, { session: { id: 'sess_live_4' }, transport: { sdp: 'answer' } });
+  const mintedSession = () =>
+    JSON.parse((mocks.upstreamFetch.mock.calls[0][1] as RequestInit).body as string).session as {
+      instructions: string;
+      input?: Array<{ type: string; role: string; content: Array<{ type: string; text: string }> }>;
+    };
+
+  it('a recovery start is minted with one developer message: speak first, the crisis line, the truth', async () => {
+    mocks.systemConfig = {
+      crisis_contact: { hotline: '988 Suicide & Crisis Lifeline', phone: '988', text: 'HOME to 741741', enabled: true },
+    };
+    mocks.upstreamFetch.mockResolvedValue(healthy());
+    await request(makeApp()).post('/api/live/session').send({ sdp: 'v=0 offer', recovery: true }).expect(201);
+
+    const session = mintedSession();
+    expect(session.input).toHaveLength(1);
+    const [message] = session.input!;
+    expect(message).toMatchObject({ type: 'message', role: 'developer' });
+    const text = message.content[0].text;
+    expect(message.content[0].type).toBe('input_text');
+    expect(text).toMatch(/Speak first, immediately/);
+    expect(text).toContain('988');
+    expect(text).toContain('HOME to 741741');
+    expect(text).not.toMatch(/connection (just )?dropped|technical drop/i);
+    // The recovery prompt itself says the same thing and asks for the line aloud.
+    expect(session.instructions).not.toMatch(/connection dropped/i);
+    expect(session.instructions).toMatch(/say the crisis line out loud/);
+  });
+
+  it('falls back to the national lines when no crisis contact is configured', async () => {
+    mocks.upstreamFetch.mockResolvedValue(healthy());
+    await request(makeApp()).post('/api/live/session').send({ sdp: 'v=0 offer', recovery: true }).expect(201);
+    const text = mintedSession().input![0].content[0].text;
+    expect(text).toContain('988');
+    expect(text).toContain('HOME to 741741');
+  });
+
+  it('an ordinary start has no startup input from this path', async () => {
+    mocks.upstreamFetch.mockResolvedValue(healthy());
+    await start().expect(201);
+    expect(mintedSession()).not.toHaveProperty('input');
+  });
+});

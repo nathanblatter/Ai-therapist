@@ -48,6 +48,56 @@ import WebSocket from 'ws';
 import { pool } from '../config/db.js';
 import { insertMessagesBatch } from '../db/index.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
+import { emitCrisisResources } from './crisisResources.js';
+import { buildRecoverySpeakFirstNudge, type RecoveryCrisisContact } from '../../shared/recoveryPrompt.js';
+
+/**
+ * When the server re-sends the speak-first instruction to a recovery session
+ * that has not spoken, in ms after `session.started`. A healthy recovery
+ * session starts speaking 0.6 to 1.6 s after `session.started` (up to 3.2 s
+ * for a browser still on the older instructions-append delivery; measured
+ * 2026-11-18), so the first re-send waits out that range before acting.
+ */
+export const RECOVERY_SPEAK_RETRY_MS = [4_000, 8_000] as const;
+
+/**
+ * A steer must never leave the participant in silence (ai-therapist-313).
+ *
+ * `session.instructions.append` "can interrupt speech in progress and apply a
+ * new instruction" (voice-server-controls, "Redirect the conversation"). Our
+ * crisis steers arrive about a second after a disclosure, which is exactly
+ * when the voice model is in the middle of answering it, and nothing in them
+ * told the model to go on: measured 2026-11-18, the reply stopped mid-sentence
+ * in about 7 of 8 voice-layer answers to a passive disclosure, and in
+ * continuous calls the participant then sat through 68 to 105 s of silence.
+ *
+ * Two layers. Every clinical steer is delivered with LIVE_STEER_KEEP_SPEAKING
+ * appended, so the interruption is followed by speech. And the sideband
+ * watches: if a steer landed while a reply was owed and the assistant has
+ * still said nothing STEER_RESUME_CHECK_MS later (and the participant is not
+ * talking), it tells the model to speak, once per check.
+ */
+export const CLINICAL_STEER_MARKER = '[Clinical guidance';
+export const LIVE_STEER_KEEP_SPEAKING =
+  'This guidance does not end your turn. If you were speaking when it arrived, or the participant is waiting for ' +
+  'your reply, speak again now and follow it; do not go silent.';
+export const LIVE_STEER_RESUME_COMMENTARY =
+  'The participant is waiting and you have stopped speaking. Speak now: respond to what they just said, following ' +
+  'the guidance you were given. Do not stay silent.';
+export const STEER_RESUME_CHECK_MS = [3_000, 7_000] as const;
+/** A reply is owed if the assistant spoke, or the participant finished speaking, this recently before the steer. */
+const STEER_REPLY_OWED_WINDOW_MS = 6_000;
+/** Fragments of the interrupted sentence keep arriving for about this long after a steer. */
+const STEER_INTERRUPT_TAIL_MS = 1_200;
+/** The participant counts as still talking if a fragment of theirs arrived this recently. */
+const STEER_PARTICIPANT_TALKING_MS = 1_500;
+
+/** A clinical steer as delivered to a live voice model: the text, then the keep-speaking line, inside the append cap. */
+export function withKeepSpeaking(text: string): string {
+  if (!text.startsWith(CLINICAL_STEER_MARKER) || text.includes(LIVE_STEER_KEEP_SPEAKING)) return text;
+  const room = 1600 - LIVE_STEER_KEEP_SPEAKING.length - 1;
+  return `${text.length > room ? text.slice(0, room) : text} ${LIVE_STEER_KEEP_SPEAKING}`;
+}
 
 /** A transcript fragment as delivered by session.*_transcript.delta. */
 interface TranscriptDelta {
@@ -193,6 +243,23 @@ interface LiveSessionState {
   finalized: boolean;
   keepalive: NodeJS.Timeout | null;
   phaseTimers: NodeJS.Timeout[];
+  /** True once any assistant speech has been transcribed on this attach. */
+  assistantSpoke: boolean;
+  /** Arrival time of the newest assistant / participant transcript fragment (0 = none). */
+  lastAssistantDeltaAt: number;
+  lastUserDeltaAt: number;
+  /** Pending "you went silent after a steer" checks. */
+  steerResumeTimers: NodeJS.Timeout[];
+  /**
+   * This state was built by the route's opening attach (connectAndWait), not
+   * by a reconnect or a post-deploy reattach. Unlike `initialAttach` it is
+   * never cleared. The recovery speak-first watchdog arms only on it: a
+   * sideband that rejoins a recovery conversation already in progress must
+   * never tell the model to announce "I'm back" in the middle of it.
+   */
+  openingAttach: boolean;
+  /** Recovery sessions only: pending "you have not spoken yet" re-nudges. */
+  speakFirstTimers: NodeJS.Timeout[];
   /** Mid-session re-grounding interval (config-gated, off by default). */
   regrounding: NodeJS.Timeout | null;
   /** Pending restore of delegation tool_choice after an admin-forced tool. */
@@ -409,6 +476,12 @@ export class SidebandManager {
       finalized: false,
       keepalive: null,
       phaseTimers: [],
+      assistantSpoke: false,
+      lastAssistantDeltaAt: 0,
+      lastUserDeltaAt: 0,
+      steerResumeTimers: [],
+      openingAttach: initialAttach,
+      speakFirstTimers: [],
       regrounding: null,
       toolChoiceReset: null,
       userTurnIndex: 0,
@@ -712,8 +785,15 @@ export class SidebandManager {
       global.io?.to(`session:${sessionId}`).emit('session:moderation-terminated', {
         sessionId,
         reason: cause,
-        message: 'The connection ended unexpectedly. That was not your fault, and nothing you said was wrong.',
+        message: 'The call was cut off. That was not your fault, and nothing you said was wrong.',
       });
+      // The resource card too, on the same tick (ai-therapist-293). The cut can
+      // land before our own pipeline has scored the turn (or on a turn it
+      // scored below high), and until now the card depended on that score: in
+      // 2 of 2 instrumented baseline cuts no card event went out at all.
+      // Normally a no-op here, because the `error` that precedes the close
+      // already sent it about half a second earlier.
+      emitCrisisResources(sessionId, { reason: cause === 'content_filter' ? 'vendor_cut' : 'vendor_ceiling' });
     };
 
     // 1. Participant-facing. For the filter this goes out before anything
@@ -792,6 +872,101 @@ export class SidebandManager {
         },
         sessionId,
       );
+    }
+  }
+
+  /**
+   * A recovery session that does not speak (ai-therapist-293).
+   *
+   * GPT-Live never speaks unprompted, so a recovery session depends on its
+   * speak-first instruction: placed in the session's startup input by the
+   * route and sent again by the browser at `session.started`. The docs are
+   * plain that such an instruction does "not guarantee that the model will
+   * speak", and it does not always: on 2026-11-18, when it was delivered as a
+   * single instructions append, 4 of 17 measured recovery starts stayed
+   * silent for 11 s or more (one for the whole 90 s the harness waited).
+   * Delivered the documented way it spoke within 1.6 s in 8 of 8, but 8 runs
+   * do not make a guarantee. For a participant who has just disclosed
+   * suicidal intent and been cut off, that silence is the harm the recovery
+   * exists to prevent.
+   *
+   * So the server watches its own recovery sessions: if no assistant speech
+   * has been transcribed RECOVERY_SPEAK_RETRY_MS after `session.started`, it
+   * sends the speak-first instruction itself, and once more after that. It
+   * does not depend on the browser, and it is harmless when the model has
+   * already spoken (the timers do nothing).
+   *
+   * Recovery sessions only (client delegation): an ordinary session's opening
+   * is the disclosure preamble, which is not this module's to resend. And only
+   * on the opening attach: a reconnect or a post-deploy reattach joins a
+   * conversation already under way.
+   */
+  private armRecoverySpeakWatchdog(sessionId: string): void {
+    const state = this.sessions.get(sessionId);
+    if (!state || !state.openingAttach || state.delegationMode !== 'client' || state.speakFirstTimers.length > 0) {
+      return;
+    }
+    RECOVERY_SPEAK_RETRY_MS.forEach((delayMs, index) => {
+      const timer = setTimeout(() => {
+        void this.resendRecoverySpeakFirst(sessionId, index + 1, delayMs);
+      }, delayMs);
+      timer.unref?.();
+      state.speakFirstTimers.push(timer);
+    });
+  }
+
+  private async resendRecoverySpeakFirst(sessionId: string, attempt: number, afterMs: number): Promise<void> {
+    const state = this.sessions.get(sessionId);
+    if (!state || state.assistantSpoke || state.finalized || !this.isConnected(sessionId)) return;
+    const short = sessionId.substring(0, 12);
+    try {
+      let contact: RecoveryCrisisContact | undefined;
+      try {
+        const { getSystemConfig } = await import('../utils/sessionHelpers.js');
+        contact = (await getSystemConfig()).crisis_contact as RecoveryCrisisContact | undefined;
+      } catch (err) {
+        // The national defaults stand in: a missing config must not cost the re-nudge.
+        console.error(`[Live] Could not read the crisis contact for ${short}...; using the defaults:`, err);
+      }
+      // Re-checked after the await: the model may have started in the meantime.
+      if (state.assistantSpoke || state.finalized) return;
+      console.warn(
+        `[Live] RECOVERY SESSION SILENT for ${short}...: no assistant speech ${afterMs} ms after session.started; ` +
+          `re-sending the speak-first instruction (attempt ${attempt}/${RECOVERY_SPEAK_RETRY_MS.length}).`,
+      );
+      // Commentary, as the browser's own speak-first is: the documented way to
+      // have GPT-Live open a conversation, and in the measurements the one
+      // that reliably made it speak (an instructions re-send did not: one
+      // session stayed silent for 21 s through two of them).
+      await this.appendCommentary(sessionId, buildRecoverySpeakFirstNudge(contact));
+      if (global.io) {
+        void broadcastAdminEventForSession(
+          global.io,
+          'live:recovery-silent',
+          { sessionId, attempt, afterMs, timestamp: new Date() },
+          sessionId,
+        );
+      }
+    } catch (err) {
+      console.error(`[Live] Could not re-send the speak-first instruction for ${short}...:`, err);
+    }
+  }
+
+  /**
+   * Record that the vendor's moderation stopped a generation, so how often a
+   * reply is cut WITHOUT the session closing is a number rather than an
+   * anecdote (a closed session is already recorded by
+   * handleModerationTermination). Best-effort.
+   */
+  private async recordModerationStop(sessionId: string): Promise<void> {
+    try {
+      const { logInterventionAction } = await import('./crisisDetection.service.js');
+      await logInterventionAction(sessionId, 'external_api_called', {
+        event: 'moderation_stopped_generation',
+        vendor: 'openai',
+      });
+    } catch (err) {
+      console.error(`[Live] Failed to record a moderation stop for ${sessionId.substring(0, 12)}...:`, err);
     }
   }
 
@@ -892,6 +1067,7 @@ export class SidebandManager {
     switch (event.type) {
       case 'session.started':
       case 'session.updated':
+        if (event.type === 'session.started') this.armRecoverySpeakWatchdog(sessionId);
         if (global.io) {
           void broadcastAdminEventForSession(
             global.io,
@@ -910,6 +1086,7 @@ export class SidebandManager {
       case 'session.input_transcript.delta': {
         const state = this.sessions.get(sessionId);
         if (!state) break;
+        state.lastUserDeltaAt = Date.now();
         state.userTranscript.add({
           delta: String(event.delta ?? ''),
           start_ms: Number(event.start_ms ?? 0),
@@ -922,6 +1099,8 @@ export class SidebandManager {
       case 'session.output_transcript.delta': {
         const state = this.sessions.get(sessionId);
         if (!state) break;
+        state.assistantSpoke = true;
+        state.lastAssistantDeltaAt = Date.now();
         state.assistantTranscript.add({
           delta: String(event.delta ?? ''),
           start_ms: Number(event.start_ms ?? 0),
@@ -1047,6 +1226,18 @@ export class SidebandManager {
       case 'error': {
         const err = event.error as { code?: string; message?: string; client_event_id?: string } | undefined;
         console.error(`[Live] API error for ${sessionId.substring(0, 12)}...:`, err);
+        // OpenAI's moderation stopped the assistant mid-reply. The docs give
+        // two outcomes ("Some moderation events end the session. Others cut
+        // off assistant audio for the remainder of its current speech and emit
+        // an `error` event without ending the session"), and in both the
+        // participant has just heard a reply stop partway. In the measured
+        // runs this error arrived 0.5 to 0.7 s BEFORE `session.closed`, so it
+        // is the earliest moment the server can put crisis resources on their
+        // screen, and it is done before anything that can stall.
+        if (err?.code === 'content_filter') {
+          emitCrisisResources(sessionId, { reason: 'vendor_moderation_stop' });
+          void this.recordModerationStop(sessionId);
+        }
         await this.logError(sessionId, err);
         if (global.io) {
           void broadcastAdminEventForSession(global.io, 'sideband:error', { sessionId, error: err }, sessionId);
@@ -1430,6 +1621,31 @@ export class SidebandManager {
   }
 
   /**
+   * Queue the participant's TYPED text for the delegated backend and continue
+   * it (ai-therapist-214). The browser used to send this pair on its own data
+   * channel; the channel is now locked to `session.close`, because
+   * `response.item.create` from the browser also accepts developer-role
+   * messages and tool outputs. Here the item is always a user-role message
+   * built from plain text, so the participant keeps the participant's voice
+   * and nothing more.
+   *
+   * Returns false when there is no sideband, and on a client-delegated
+   * (recovery) session, which has no Responses backend to queue text for.
+   */
+  sendParticipantText(sessionId: string, text: string): boolean {
+    const state = this.sessions.get(sessionId);
+    if (!state || state.delegationMode === 'client' || state.ws.readyState !== WebSocket.OPEN) return false;
+    const stamp = Date.now();
+    this.sendEvent(sessionId, {
+      type: 'response.item.create',
+      event_id: `typed_${stamp}`,
+      item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
+    });
+    this.sendEvent(sessionId, { type: 'response.create', event_id: `typed_continue_${stamp}` });
+    return true;
+  }
+
+  /**
    * Best-effort steer. Mirrors sidebandManager.tryInject so the shared crisis
    * code can treat both channels identically: false means the guidance could NOT
    * be delivered, which the caller records as an undelivered intervention rather
@@ -1445,10 +1661,93 @@ export class SidebandManager {
     if (delegate) return delegate.tryInject(sessionId, _role, text, _respond);
     if (!this.isConnected(sessionId)) return false;
     try {
-      await this.appendInstructions(sessionId, text);
+      await this.appendInstructions(sessionId, withKeepSpeaking(text));
+      this.armSteerResume(sessionId, text);
       return true;
     } catch (err) {
       console.error(`[Live] tryInject failed for ${sessionId.substring(0, 12)}...:`, err);
+      return false;
+    }
+  }
+
+  /**
+   * After a clinical steer, make sure the assistant is not left silent
+   * (ai-therapist-313; see LIVE_STEER_KEEP_SPEAKING). Armed only when a reply
+   * was owed at the moment the steer landed: the assistant was speaking, or
+   * the participant had just finished. A steer that arrives while the
+   * assistant is quietly listening must not make it talk over the participant.
+   */
+  private armSteerResume(sessionId: string, text: string): void {
+    const state = this.sessions.get(sessionId);
+    if (!state || !text.startsWith(CLINICAL_STEER_MARKER)) return;
+    const steeredAt = Date.now();
+    const lastActivity = Math.max(state.lastAssistantDeltaAt, state.lastUserDeltaAt);
+    if (lastActivity === 0 || steeredAt - lastActivity > STEER_REPLY_OWED_WINDOW_MS) return;
+    // One watch per session at a time: a second steer restarts it.
+    state.steerResumeTimers.forEach((t) => clearTimeout(t));
+    state.steerResumeTimers = STEER_RESUME_CHECK_MS.map((delayMs, index) => {
+      const timer = setTimeout(() => {
+        void this.resumeAfterSteer(sessionId, steeredAt, index + 1, delayMs);
+      }, delayMs);
+      timer.unref?.();
+      return timer;
+    });
+  }
+
+  private async resumeAfterSteer(
+    sessionId: string,
+    steeredAt: number,
+    attempt: number,
+    afterMs: number,
+  ): Promise<void> {
+    const state = this.sessions.get(sessionId);
+    if (!state || state.finalized || !this.isConnected(sessionId)) return;
+    // The assistant has spoken since the steer: nothing to do, and no later
+    // check either. "Since" starts after a short tail: the last fragments of
+    // the interrupted sentence still arrive for a moment after the append,
+    // and counting them as "carried on" is how a reply cut at "It sounds"
+    // was left unprompted in the first measured run of this watch.
+    if (state.lastAssistantDeltaAt > steeredAt + STEER_INTERRUPT_TAIL_MS) {
+      state.steerResumeTimers.forEach((t) => clearTimeout(t));
+      state.steerResumeTimers = [];
+      return;
+    }
+    // The participant is talking: the assistant should be listening.
+    if (Date.now() - state.lastUserDeltaAt < STEER_PARTICIPANT_TALKING_MS) return;
+    const short = sessionId.substring(0, 12);
+    try {
+      console.warn(
+        `[Live] SILENT AFTER STEER for ${short}...: no assistant speech ${afterMs} ms after a clinical steer; ` +
+          `telling the model to speak (attempt ${attempt}/${STEER_RESUME_CHECK_MS.length}).`,
+      );
+      await this.appendCommentary(sessionId, LIVE_STEER_RESUME_COMMENTARY);
+      if (global.io) {
+        void broadcastAdminEventForSession(
+          global.io,
+          'live:steer-silent',
+          { sessionId, attempt, afterMs, timestamp: new Date() },
+          sessionId,
+        );
+      }
+    } catch (err) {
+      console.error(`[Live] Could not resume ${short}... after a steer:`, err);
+    }
+  }
+
+  /**
+   * Best-effort commentary append: something the model should say aloud now.
+   * False means it could not be sent. GPT-Live only (the Grok proxy has no
+   * commentary channel; it falls back to its own steer).
+   */
+  async tryCommentary(sessionId: string, text: string): Promise<boolean> {
+    const delegate = this.delegateFor(sessionId);
+    if (delegate) return delegate.tryInject(sessionId, 'system', text, true);
+    if (!this.isConnected(sessionId)) return false;
+    try {
+      await this.appendCommentary(sessionId, text);
+      return true;
+    } catch (err) {
+      console.error(`[Live] tryCommentary failed for ${sessionId.substring(0, 12)}...:`, err);
       return false;
     }
   }
@@ -1467,10 +1766,18 @@ export class SidebandManager {
     if (this.sessions.get(sessionId)?.delegationMode === 'client') {
       throw new LiveDelegationUnsupportedError(sessionId, operation);
     }
+    // `delegation.type` is required on an update as well as at creation: the
+    // API reference's session.update example carries it ("The delegation
+    // type must match the current session"), and without it the live API
+    // answers "Missing required parameter: 'session.delegation.type'" and
+    // applies nothing. Until 2026-11-18 it was omitted here, so every
+    // server-side backend update (the admin trigger-tool pin and its 45 s
+    // restore, the admin instructions update, switch_language) was rejected
+    // (seen on stage, ai-therapist-282, and by the voice red-team probes).
     this.sendEvent(sessionId, {
       type: 'session.update',
       event_id: `update_${Date.now()}`,
-      session: { delegation: { responses } },
+      session: { delegation: { type: 'responses', responses } },
     });
   }
 
@@ -1496,7 +1803,8 @@ export class SidebandManager {
   async injectMessage(sessionId: string, _role: 'system' | 'user', text: string, _respond: boolean): Promise<void> {
     const delegate = this.delegateFor(sessionId);
     if (delegate) return delegate.injectMessage(sessionId, _role, text, _respond);
-    await this.appendInstructions(sessionId, text);
+    await this.appendInstructions(sessionId, withKeepSpeaking(text));
+    this.armSteerResume(sessionId, text);
   }
 
   /**
@@ -1763,6 +2071,10 @@ export class SidebandManager {
     if (state.regrounding) clearInterval(state.regrounding);
     if (state.toolChoiceReset) clearTimeout(state.toolChoiceReset);
     state.phaseTimers.forEach((t) => clearTimeout(t));
+    state.speakFirstTimers.forEach((t) => clearTimeout(t));
+    state.speakFirstTimers = [];
+    state.steerResumeTimers.forEach((t) => clearTimeout(t));
+    state.steerResumeTimers = [];
     state.keepalive = null;
     state.regrounding = null;
     state.toolChoiceReset = null;

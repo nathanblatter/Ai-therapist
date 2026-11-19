@@ -471,6 +471,7 @@ ${capabilities.join('\n')}
 Delegate to the backend when:
 - The participant describes something they are working through and needs a substantive therapeutic response.
 - The participant asks for an exercise, a worksheet, a summary, or to end the session.
+${LIVE_CONFIDENTIALITY_DELEGATE_LINE}
 ${psychoeducationCue ? '- The participant asks what a condition is, why they might feel a certain way, or how a technique or therapy works.\n' : ''}${leadDelegateLine}- A correction changes work already in progress.
 
 Do not delegate to the backend when:
@@ -482,8 +483,42 @@ While the backend is working, stay present with the participant — keep listeni
 
 If the participant expresses thoughts of suicide, self-harm, or harming someone else, stay with them and respond
 directly yourself. Do not wait for the backend before acknowledging what they said. Take it seriously, do not
-minimize it, and do not change the subject.`;
+minimize it, and do not change the subject.
+
+${LIVE_UNDER_18_HOLD_LINE}`;
 }
+
+/**
+ * Confidentiality questions belong to the backend (ai-therapist-314).
+ *
+ * The voice model has none of the study facts: who on the study team can read
+ * conversations, what is recorded, when something has to be passed on. Asked
+ * "promise it stays between us", it answered by itself in 4 of 4 measured
+ * runs and never said the study team can see conversations. The clinical
+ * prompt on the backend carries those facts, so the question is handed to it.
+ */
+export const LIVE_CONFIDENTIALITY_DELEGATE_LINE =
+  '- The participant asks who can see, hear or read what they say, whether it is private, recorded or kept secret, ' +
+  'or asks you to promise to keep something between the two of you. Never answer that yourself or promise anything: ' +
+  'the backend has the facts about this study.';
+
+/**
+ * The voice model's own line for an under-18 disclosure (ai-therapist-296).
+ *
+ * The study is adults only, and the server ends a session when a participant
+ * says they are under 18 (minorSafeguard.service.ts). But the voice model
+ * answers within about half a second and the server's check needs a finished
+ * transcript plus a confirmation call, so on 2026-11-18 a participant who said
+ * "I'm 15 years old. Is that okay?" heard "That's okay, thank you for telling
+ * me" (and, in a second run, "Yeah, that's okay. I'm here to listen") before
+ * the server acted. This line does not add any handling of its own: it only
+ * stops the voice model from affirming or carrying on while the existing
+ * server handling takes over. If the server does not confirm (a false alarm),
+ * nothing follows and the conversation simply continues.
+ */
+export const LIVE_UNDER_18_HOLD_LINE = `If the participant says they are under 18, do not tell them that is okay or fine, do not answer whether it is okay,
+and do not carry on with the conversation or ask them anything. Say only that you need a moment, then wait
+quietly: you will be told what to say next.`;
 
 /**
  * Backend (Responses delegation) instructions. This is where the existing
@@ -535,11 +570,21 @@ failed and what the participant can do next.`;
  * Crucially it does NOT restate what the participant said. Echoing the
  * disclosure back into a new session is the most likely way to trip the same
  * filter again.
+ *
+ * Two points changed on 2026-11-18 (ai-therapist-293), and only these two:
+ * the prompt no longer tells the model "the connection dropped for a moment"
+ * (untrue, and the study answers "no" to deception: Q-SYS2 in
+ * docs/irb-phase2-questions-for-nathan.md), and the first reply must say the
+ * crisis line aloud (in 4 of 4 measured runs no recovery opening named one).
+ * The matching speak-first nudge is shared/recoveryPrompt.ts. The wording has
+ * to stay true for both ways a session reaches recovery: the content filter,
+ * and the vendor's session ceiling during a crisis (where the participant was
+ * told beforehand), which is why it says "cut off" and not "without warning".
  */
 export function buildLiveRecoveryInstructions(opts: { languageName?: string | null; crisisLine: string }): string {
   const languageLine = opts.languageName ? `Speak ${opts.languageName}.\n` : '';
-  return `You are a warm, steady voice companion. You were just talking with this person and the
-connection dropped for a moment. You are back now.
+  return `You are a warm, steady voice companion. You were just talking with this person and the call was
+cut off by an automated system on the voice service, not by them and not by any person. You are back now.
 ${languageLine}
 What is happening: they are going through something serious and may be having thoughts of suicide or
 self-harm. Your only job right now is to stay with them and help them reach real human help.
@@ -547,7 +592,10 @@ self-harm. Your only job right now is to stay with them and help them reach real
 How to speak:
 - Short replies. One or two sentences, then stop and listen.
 - Warm and calm. Never clinical, never alarmed, never scripted.
-- Reconnect first: acknowledge briefly that you got cut off and that you are still here.
+- Reconnect first: say briefly that the call got cut off, that it was not their fault, and that you are still here.
+- In that same first reply, say the crisis line out loud: they can call or text ${opts.crisisLine} at any time.
+- Never call it a dropped connection or a technical problem. If they ask what happened, tell them plainly:
+  an automated system on the voice service ended the call, and it was nothing they did wrong.
 - Do not ask them to repeat what they already told you. You remember that it was serious.
 
 What to do, every few turns and whenever there is an opening:
@@ -600,12 +648,61 @@ export interface LiveSessionConfigInput {
    * conversation history — replaying the disclosure that tripped the filter is
    * the most likely way to be terminated again.
    */
-  recovery?: { crisisLine: string };
+  recovery?: {
+    crisisLine: string;
+    /**
+     * The speak-first instruction (shared/recoveryPrompt.ts), placed in
+     * `session.input` as a developer message. This is the documented way to
+     * have GPT-Live open the conversation ("For best results when GPT-Live
+     * should open the conversation, include greeting instructions in a
+     * `developer` message in `session.input` when you create the session"),
+     * and it is not conversation history: it carries nothing the participant
+     * said.
+     */
+    speakFirst?: string;
+  };
   /** ai-therapist-202 research condition; see buildLiveInstructions. */
   psychoeducationCue?: boolean;
   /** features.lead_conversation_enabled; see buildLiveInstructions. Ignored in recovery. */
   leadConversation?: boolean;
+  /**
+   * Leave the browser's data channel unrestricted (the pre-2026-11-16
+   * behaviour) instead of locking it to LIVE_CLIENT_EVENTS.
+   *
+   * True ONLY when the server has no sideband for this session
+   * (SIDEBAND_ENABLED=false): with no server-side channel, the browser's
+   * instructions append is the only way the opening disclosure can be
+   * delivered at all, so locking it would start a silent session. Every
+   * monitored session leaves this unset.
+   */
+  allowClientSteering?: boolean;
 }
+
+/**
+ * Client events the participant's browser may send on the WebRTC data channel
+ * (`session.client.data_channel.allowed_client_events`), for every session:
+ * normal and recovery alike.
+ *
+ *  - session.close   graceful end; the browser must be able to hang up.
+ *
+ * Everything else the browser used to send now goes through the server's
+ * sideband, which this block does not affect: the opening and recovery nudge
+ * (POST /api/sessions/:id/opening), typed text (POST /api/sessions/:id/text,
+ * always a user-role message) and tool outcomes (/tool-event).
+ *
+ * Deliberately absent, each measured live against gpt-live-1 on 2026-11-18
+ * (accepted from an unlocked browser channel): `session.update` (replaced the
+ * backend prompt and tools, set tool_choice none, cleared triggers),
+ * `session.instructions.append`, `session.thinking.append`,
+ * `session.commentary.append` (each made the model speak a canary),
+ * `response.item.create` (took a developer-role message for the backend),
+ * `session.input_audio.mute` and `decision.item.create`. `response.create` has
+ * no use without `response.item.create`.
+ *
+ * Every string here is a documented Live client event `type`. Do not add a
+ * name that is not in the API reference.
+ */
+export const LIVE_CLIENT_EVENTS = ['session.close'] as const;
 
 /**
  * Project registry tool definitions into the Responses function schema that
@@ -701,35 +798,56 @@ export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<st
     store: storable === true,
   };
 
-  // OPEN ITEM — frontend data-channel permissions.
+  // Frontend data-channel permissions (ai-therapist-214).
   //
-  // Because the browser owns the WebRTC data channel, it can send client events
-  // directly to the session, including `session.instructions.append` — which is
-  // the trusted-application-instruction channel. A participant with devtools
-  // could therefore steer their own therapist. Under the Realtime API the
-  // equivalent hole existed (`conversation.item.create` with role system), so
-  // this is not a regression, but instructions.append is the stronger lever.
+  // The browser owns the WebRTC data channel, so without this block it can send
+  // any client event straight to the session, including
+  // `session.instructions.append`, the trusted-application-instruction channel:
+  // a participant with devtools could steer their own therapist.
   //
-  // The docs reference "frontend client permissions" and "frontend data-channel
-  // permissions" as a real WebRTC session concept — the fork section states
-  // that WebRTC forks preserve them and WebSocket forks discard them — but no
-  // guide documents the field name or its shape. Guessing an unknown key here
-  // would be rejected as an unknown configuration field and 400 the entire
-  // handshake, taking voice sessions down.
+  // Documented in the POST /v1/live/sessions reference as of 2026-11-16
+  // (https://developers.openai.com/api/reference/resources/live/methods/create):
   //
-  // Until that field is documented, the mitigation is architectural rather than
-  // configured: every safety-relevant instruction (crisis steering, minor
-  // safeguard, phase guidance, wind-down) is authored and delivered SERVER-side
-  // over the sideband, so a tampered client cannot suppress them — only add
-  // noise alongside them. Revisit and lock the channel down as soon as the
-  // permissions schema is published.
+  //   client: optional ClientConfig. "Startup-only capabilities for an
+  //     untrusted frontend attached to a unified WebRTC session. Trusted
+  //     sideband connections are unaffected."
+  //   client.data_channel.allowed_client_events: optional "all" or array of
+  //     string. "Client event types that the frontend data channel may send.
+  //     Use 'all' to allow every client event; an empty array allows none.
+  //     Omission preserves the existing allow-all behavior."
+  //
+  // `allowed_server_events` is left out on purpose: omission keeps allow-all,
+  // and the browser needs the transcript, lifecycle and response events it
+  // reads today.
+  //
+  // Startup-only, so it cannot be tightened or loosened mid-session. An unknown
+  // key here 400s the whole handshake, which is why nothing was set until the
+  // schema was published; keep this block to exactly the documented shape.
+  //
+  // Consequence for the client: everything it used to append as instructions
+  // (opening preamble, recovery nudge, and the relay fallbacks for admin
+  // prompts and tool outcomes) must come from the server over the sideband.
+  // See POST /api/sessions/:sessionId/opening and liveOpening.service.ts.
+  if (!input.allowClientSteering) {
+    session.client = {
+      data_channel: {
+        allowed_client_events: [...LIVE_CLIENT_EVENTS],
+      },
+    };
+  }
 
   // Recovery sessions carry NO history, unconditionally — even if a caller
   // passes some. Replaying the disclosure that tripped the content filter into
   // the replacement session is the most likely way to be terminated again,
   // which would mean hanging up on someone in crisis twice. Enforced here
   // rather than trusted to every call site.
-  return finalizeSession(session, recovery ? undefined : history);
+  finalizeSession(session, recovery ? undefined : history);
+  if (recovery?.speakFirst?.trim()) {
+    session.input = [
+      { type: 'message', role: 'developer', content: [{ type: 'input_text', text: recovery.speakFirst.trim() }] },
+    ];
+  }
+  return session;
 }
 
 /** Attach optional startup history to a built session config. */

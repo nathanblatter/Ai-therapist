@@ -16,8 +16,6 @@
 // Only the explanatory prose below is hand-written. Bump PREPARED when the
 // prompt text changes and the attachment is re-submitted.
 
-import { readFileSync } from 'node:fs';
-
 import {
   DEFAULT_SYSTEM_PROMPT,
   DEFAULT_MODALITY_PRESETS,
@@ -70,7 +68,7 @@ import {
 } from '../utils/sessionAutoTerminate.js';
 import { SCALE_MIN_INTERVAL_DAYS } from '../utils/scales.js';
 import { DEFAULT_VENDOR_CEILING_MINUTES } from '../../shared/systemConfig.js';
-import { openingDeliveryInstruction } from '../../shared/openingPrompt.js';
+import { liveOpeningInstruction } from '../../shared/openingPrompt.js';
 import {
   CHAT_SAFETY_PROTOCOL_GUIDANCE,
   CRISIS_WIND_DOWN_GUIDANCE,
@@ -94,8 +92,15 @@ import {
   MINOR_CONFIRM_PROMPT,
   MINOR_ELIGIBILITY_MESSAGE,
   REALTIME_MINOR_GUIDANCE,
+  REALTIME_MINOR_SPEAK_NOW,
   buildMinorConfirmUserMessage,
 } from '../services/minorSafeguard.service.js';
+import {
+  RECOVERY_INTERIM_SPOKEN_LINE,
+  RECOVERY_INTERIM_SPOKEN_LINE_NO_VOICE,
+  buildRecoverySpeakFirstNudge,
+} from '../../shared/recoveryPrompt.js';
+import { LIVE_STEER_KEEP_SPEAKING, LIVE_STEER_RESUME_COMMENTARY } from '../services/sidebandManager.service.js';
 import { REDACTION_BATCH_INSTRUCTIONS, REDACTION_MODEL, REDACTION_PROMPT } from '../services/redaction.service.js';
 import {
   SESSION_NAME_MODEL,
@@ -114,9 +119,6 @@ export const ATTACHMENT_PATH = 'docs/irb-phase2-instruments/prompts.html';
 
 /** Absolute URL of the committed attachment. */
 export const ATTACHMENT_URL = new URL('../../../docs/irb-phase2-instruments/prompts.html', import.meta.url);
-
-/** Browser source that authors the GPT-Live opening line (checked, not imported). */
-const CLIENT_APP_URL = new URL('../../client/main/components/App.tsx', import.meta.url);
 
 /**
  * The crisis contact migration 090 writes to system_config.crisis_contact,
@@ -218,49 +220,17 @@ function toolGuidanceToolNames(): string[] {
 }
 
 /**
- * Under GPT-Live the opening instruction and the recovery speak-first nudge are
- * sent by the participant's browser (App.tsx), not by the server. The opening
- * shares its wording with the server-built Grok opening, so the client source
- * is checked for every fixed fragment of it; the nudge is read from the client
- * source. Either way a client-side edit fails the check instead of drifting.
+ * Under GPT-Live the server sends the opening instruction and the recovery
+ * speak-first nudge over its sideband (ai-therapist-214: the browser's data
+ * channel is locked), built by shared/openingPrompt.ts. The Grok opening is
+ * built separately in grokVoiceConfig.ts, so the two are checked for equality
+ * here: an edit to one fails the attachment build instead of drifting.
  */
-function readClientApp(): string {
-  return readFileSync(CLIENT_APP_URL, 'utf8');
-}
-
-function verifyClientOpening(opening: string, leadConversation: boolean): void {
-  const prefix = "Say this phrase exactly: '";
-  const parts = opening.slice(prefix.length).split(buildGrokCrisisPhrase(PLACEHOLDER_CRISIS_CONTACT));
-  if (!opening.startsWith(prefix) || parts.length !== 2) {
-    throw new Error('irb prompts attachment: opening line shape changed');
+function verifyLiveOpening(opening: string, leadConversation: boolean): void {
+  const live = liveOpeningInstruction('en', PLACEHOLDER_CRISIS_CONTACT, leadConversation).text;
+  if (live !== opening) {
+    throw new Error('irb prompts attachment: the GPT-Live opening no longer matches the Grok opening');
   }
-  const [before, after] = parts;
-  const quote = after.lastIndexOf("'");
-  const [voiceNote, thanks] = after.slice(1, quote).split(' Thanks again');
-  // The delivery instruction after the quoted phrase comes from
-  // shared/openingPrompt.ts, which the browser imports too.
-  if (after.slice(quote + 1) !== ' ' + openingDeliveryInstruction(leadConversation)) {
-    throw new Error('irb prompts attachment: opening delivery instruction changed shape');
-  }
-  const fragments = [
-    "Say this phrase exactly: '${basePrompt}'",
-    before,
-    voiceNote,
-    ' Thanks again' + thanks,
-    '`${initialPrompt} ${openingDeliveryInstruction(leadConversationRef.current)}`',
-  ];
-  const client = readClientApp();
-  for (const fragment of fragments) {
-    if (!fragment || thanks === undefined || !client.includes(fragment)) {
-      throw new Error(`irb prompts attachment: App.tsx no longer contains ${JSON.stringify(fragment)}`);
-    }
-  }
-}
-
-function clientRecoveryNudge(): string {
-  const match = readClientApp().match(/sendInvisiblePrompt\(\s*'(The voice connection just dropped[^'\\]*)'/);
-  if (!match) throw new Error('irb prompts attachment: recovery speak-first nudge not found in App.tsx');
-  return match[1];
 }
 
 function buildItems(): Item[] {
@@ -587,14 +557,14 @@ function buildItems(): Item[] {
       '<language name>:" instead.',
   );
   const voiceOpening = buildGrokOpeningPrompt('en', PLACEHOLDER_CRISIS_CONTACT);
-  verifyClientOpening(voiceOpening, false);
+  verifyLiveOpening(voiceOpening, false);
   const voiceOpeningLead = buildGrokOpeningPrompt('en', PLACEHOLDER_CRISIS_CONTACT, { leadConversation: true });
-  verifyClientOpening(voiceOpeningLead, true);
+  verifyLiveOpening(voiceOpeningLead, true);
   add('h3', 'Voice sessions — instruction to the voice model');
   add(
     'p',
-    "Identical on both voice backends: under GPT-Live the participant's browser sends it, under Grok Voice the " +
-      'server injects it.',
+    'Identical on both voice backends, and sent by the server on both: under GPT-Live over its monitoring ' +
+      "connection once the participant's audio is connected, under Grok Voice as the first instruction it injects.",
   );
   add('pre', voiceOpening);
   add('note', CONDITIONAL_LEAD_CONVERSATION);
@@ -624,8 +594,29 @@ function buildItems(): Item[] {
       'configured text line (988 when none is configured).',
   );
   add('pre', buildLiveRecoveryInstructions({ languageName: '<language name>', crisisLine: '<crisis line>' }));
-  add('note', "As the session starts, the participant's browser sends this instruction so the model speaks first:");
-  add('pre', clientRecoveryNudge());
+  add(
+    'note',
+    'So that the model speaks first, this instruction is placed in the replacement session when it is created and ' +
+      'sent again by the server as the session starts; the server re-sends it if the model has not spoken after 4 ' +
+      'and 8 seconds. <phone> and <text line> are the configured crisis contact (988 and HOME to 741741 when none ' +
+      'is configured):',
+  );
+  add('pre', buildRecoverySpeakFirstNudge({ enabled: true, phone: '<phone>', text: '<text line>' }));
+  add('h3', 'Voice recovery — what the participant hears and sees while reconnecting');
+  add(
+    'p',
+    "While the replacement session connects, the participant's browser shows the crisis lines and a message " +
+      'beginning "The call was cut off — that wasn\'t your fault, and nothing you said was wrong." In English ' +
+      "sessions it also speaks this fixed line aloud through the browser's own speech synthesis (not the AI model), " +
+      'stopping as soon as the replacement session can carry audio:',
+  );
+  add('pre', RECOVERY_INTERIM_SPOKEN_LINE);
+  add(
+    'note',
+    'When no replacement voice session follows (the voice attempts are used up and the conversation continues in ' +
+      'typed chat), the same line is spoken without its last sentence:',
+  );
+  add('pre', RECOVERY_INTERIM_SPOKEN_LINE_NO_VOICE);
   add('h3', 'Typed-chat continuation — guidance attached for the chat model');
   add(
     'p',
@@ -657,6 +648,20 @@ function buildItems(): Item[] {
       'mention or acknowledge them. In typed chat, guidance is attached to the next model call. The trigger ' +
       'conditions are stated with each text.',
   );
+
+  add(
+    'note',
+    'Delivery in GPT-Live voice sessions. Guidance in B.1 to B.5 reaches the voice model as an instruction that can ' +
+      'interrupt what it is saying. So that the participant is not left in silence, this sentence is appended to ' +
+      'each such instruction when it is delivered:',
+  );
+  add('pre', LIVE_STEER_KEEP_SPEAKING);
+  add(
+    'note',
+    'If the model has still said nothing 3 seconds (and again 7 seconds) after such an instruction, while a reply ' +
+      'was owed and the participant is not speaking, the server sends this:',
+  );
+  add('pre', LIVE_STEER_RESUME_COMMENTARY);
 
   add('h2', 'B.1 Risk-adaptive de-escalation steering');
   add(
@@ -715,6 +720,12 @@ function buildItems(): Item[] {
   );
   add('h3', 'Voice sessions — guidance injected to the model');
   add('pre', REALTIME_MINOR_GUIDANCE);
+  add(
+    'note',
+    'In voice sessions this sentence is appended to the guidance when it is delivered, so that the ' +
+      'model says the goodbye straight away instead of waiting for the participant to speak again:',
+  );
+  add('pre', REALTIME_MINOR_SPEAK_NOW);
   add('h3', 'Typed-chat sessions — fixed message shown to the participant');
   add('pre', MINOR_ELIGIBILITY_MESSAGE);
 
@@ -772,11 +783,28 @@ function buildItems(): Item[] {
     'p',
     'Runs when a keyword screen flags possible crisis language in a participant message, and additionally as a ' +
       `periodic sweep after every ${SWEEP_EVERY} participant messages without an assessment (so unusual phrasing is ` +
-      'not missed). System prompt, verbatim:',
+      'not missed). It also runs on a message that matched no crisis keyword when the conversation around it calls ' +
+      'for it: every participant message in a session that is already flagged or had a recent risk-bearing message, ' +
+      'and any message that states intent, a goodbye or a question about dangerous amounts with its subject left ' +
+      'unsaid (for example "I\'m going to do it tonight"). System prompt, verbatim:',
   );
   add('pre', RISK_ASSESSMENT_PROMPT);
   add('note', 'The accompanying user message is, verbatim:');
   add('pre', buildRiskAssessmentUserMessage('<recent transcript>', '<flagged participant message>'));
+  add(
+    'note',
+    'For a message that matched no crisis keyword in a session with earlier risk, the user message is, verbatim ' +
+      '(the session risk context line is omitted when the session has no earlier risk):',
+  );
+  add(
+    'pre',
+    buildRiskAssessmentUserMessage('<recent transcript>', '<latest participant message>', {
+      sessionContext:
+        '<one sentence: the highest severity band assessed earlier in this session, how many participant turns ago, ' +
+        'the factors noted then, and whether the session is currently flagged>',
+      keywordFree: true,
+    }),
+  );
 
   add('h2', `C.2 Minor-eligibility confirmation prompt (${CONFIRM_MODEL})`);
   add(

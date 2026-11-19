@@ -1,6 +1,7 @@
 import { pool } from '../config/db.js';
 import { logInterventionAction } from './crisisDetection.service.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
+import { emitCrisisResources, clearCrisisResourceState } from './crisisResources.js';
 
 // ============================================
 // RISK-ADAPTIVE LIVE STEERING (ai-therapist-42)
@@ -205,6 +206,7 @@ export function shouldSteer(sessionId: string, riskScore: number, force = false)
 export function clearSteeringState(sessionId: string): void {
   steeringLastSent.delete(sessionId);
   riskCheckRequiredAt.delete(sessionId);
+  clearCrisisResourceState(sessionId);
 }
 
 // ============================================
@@ -265,7 +267,15 @@ export function _suppressedSteeringCountForTests(): number {
  * steered at all. Now recorded as an undelivered risk_steering action (once per
  * session) so delivery rate is measurable rather than assumed.
  */
-export async function maybeSteerSession(sessionId: string, riskScore: number, severity: string): Promise<void> {
+export async function maybeSteerSession(
+  sessionId: string,
+  riskScore: number,
+  severity: string,
+  /** Skip the cooldown check. Defaults to the long-standing rule (high
+   *  severity always forces); the pipeline passes false for a context-wake
+   *  turn in a session already flagged high (see runCrisisPipeline). */
+  force: boolean = severity === 'high',
+): Promise<void> {
   try {
     if (riskScore < STEER_MIN_SCORE) return;
 
@@ -303,7 +313,7 @@ export async function maybeSteerSession(sessionId: string, riskScore: number, se
       return;
     }
 
-    if (!shouldSteer(sessionId, riskScore, severity === 'high')) return;
+    if (!shouldSteer(sessionId, riskScore, force)) return;
 
     await sidebandManager.injectMessage(sessionId, 'system', steeringGuidance(riskScore, severity), false);
     await logInterventionAction(sessionId, 'risk_steering', { riskScore, severity, delivered: true });
@@ -523,6 +533,13 @@ export async function pageOnCall(message: string, session?: { sessionId: string;
  */
 async function executeHighRiskResponse(sessionId: string, riskScore: number): Promise<void> {
   try {
+    // Crisis resources to the participant FIRST, before anything that can
+    // stall (ai-therapist-293): on GPT-Live the vendor's filter can close the
+    // voice session within half a second of the model starting its reply, and
+    // the resource card is the one response that does not depend on the
+    // session surviving. Deduplicated against the pipeline's own early emit.
+    emitCrisisResources(sessionId, { reason: 'high_risk', severity: 'high', riskScore });
+
     await logInterventionAction(sessionId, 'high_risk_emergency', {
       riskScore,
       emergencyProtocol: 'activated',
@@ -552,11 +569,8 @@ async function executeHighRiskResponse(sessionId: string, riskScore: number): Pr
     }
 
     if (global.io) {
-      global.io.to(`session:${sessionId}`).emit('session:crisis-emergency', {
-        severity: 'high',
-        riskScore,
-      });
-
+      // The participant's copy of this event went out at the top of this
+      // function (emitCrisisResources); what follows is the admin dashboards'.
       void broadcastAdminEventForSession(
         global.io,
         'session:crisis-emergency',

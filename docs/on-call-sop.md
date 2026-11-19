@@ -108,6 +108,17 @@ On acknowledging a page:
 - **Launch blocker (ai-therapist-147):** the prod crisis-paging env vars are
   currently UNSET — paging must be wired and test-fired before the first
   participant onboards.
+- **Risk assessor outage page (ai-therapist-190):** a page beginning "the AI risk
+  assessor is failing" is a system alert, not a participant crisis. The assessor has
+  failed at least twice in a row for a reason other than the spend limit (the page
+  names it: `timeout`, `overloaded`, `other` with a code such as `model_not_found`).
+  Until it recovers, crisis detection runs on the keyword screen only, so risk stated
+  without a crisis keyword can be missed; explicit and passive-ideation phrases still
+  flag and page. Check status.openai.com, the API key, and the `crisis.risk_model`
+  setting in System Config (a mistyped model id causes exactly this). One page per
+  outage, at most one an hour; there is no all-clear page. Sessions touched by the
+  outage show an "external api called" intervention with `degraded: risk_assessor`;
+  consider watching any live session until it is resolved.
 - **OpenAI spend limit page (ai-therapist-190):** a page beginning "OpenAI is
   rejecting requests because the account spend or usage limit has been
   reached" is a system alert, not a participant crisis. While it lasts, crisis

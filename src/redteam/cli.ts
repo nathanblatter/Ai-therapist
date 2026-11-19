@@ -4,7 +4,8 @@
 //
 //   npx tsx src/redteam/cli.ts --suite smoke
 //
-// Flags: --suite smoke|full|quality|voice|voice-safety|extended  --scenario <id>  --out <dir>
+// Flags: --suite smoke|full|quality|voice|voice-safety|extended|voice-crawl|voice-walk|voice-run
+//        --scenario <id>  --out <dir>
 //        --judge-model <m>  --seed <n>  --variations <k>  --allow-fail  --dry-run
 //        --baseline <path|latest>  --gate-diff  --gate-quality
 //        --variant <name> (run under a named feature-flag variant: default,
@@ -13,6 +14,12 @@
 //        --voice-drop-client-midway / --voice-drop-upstream-midway (Grok voice:
 //          sever the browser socket / the xAI socket after the first beat and
 //          verify the session continues — docs/grok-voice.md section 3)
+//        --generated-variants <n>  --generated-operators <a,b>  --variant-cache <dir>
+//        --sample [--sample-date YYYY-MM-DD] [--sample-history <summary.json>]
+//          (weekly-capped nightly sample, every scenario once per UTC week;
+//          see sampling.ts and docs/redteam.md "Sampled nightly")
+//        --gate-generated (opt-in LLM-generated mutations of the safety
+//          scenarios, ai-therapist-109; off by default, never in CI)
 import 'dotenv/config';
 
 // ---- env guards (MUST run before importing server modules) ----------------
@@ -34,7 +41,21 @@ process.env.NODE_ENV = 'test';
 process.env.ASSISTANT_ENABLED = 'true';
 
 import type OpenAI from 'openai';
-import { DEFAULTS, CHAT_THERAPY_MODEL, CostTracker, type RedteamConfig } from './config.js';
+import {
+  DEFAULTS,
+  CHAT_THERAPY_MODEL,
+  CostTracker,
+  isRedteamSuite,
+  type CostCategory,
+  type RedteamConfig,
+} from './config.js';
+import {
+  costNotes,
+  settleSessionCosts,
+  type RunCostNotes,
+  type SessionCostPlan,
+  type SettledCost,
+} from './sessionCost.js';
 import { makeClassifier } from './assertions.js';
 import { generatePersonaTurn, applyVariation } from './personaDriver.js';
 import { runJudge } from './judge.js';
@@ -50,6 +71,7 @@ import {
   DEFAULT_VARIANT,
 } from './variants.js';
 import { HarnessClient, type Agent } from './harnessClient.js';
+import type { RunMetrics } from './voice/metrics.js';
 import { writeReports, printConsole, buildSummaryJson, type RunSummary } from './report.js';
 import {
   diffRuns,
@@ -60,14 +82,35 @@ import {
   type NormalizedRun,
   type RunDiff,
 } from './diff.js';
-import { selectSuite, type SuiteEntry } from './scenarios/index.js';
+import { selectSuite, SAFETY_SCENARIOS, SAMPLING_PRIORITY_SCENARIOS, type SuiteEntry } from './scenarios/index.js';
+import { CapacityError, nightlySample, utcDate, WEEKDAY_NAMES, type NightlySample } from './sampling.js';
+import {
+  baseScenarioId,
+  lastRunById,
+  loadRollingBaseline,
+  mergeRolling,
+  rollingToNormalized,
+  ROLLING_BASELINE_FILE,
+  type RollingBaseline,
+} from './rollingBaseline.js';
 import { applyKnownGap, reportKnownGaps } from './knownGap.js';
+import { runMultiSessionScenario, withoutMultiSession } from './multiSession.js';
+import {
+  buildGeneratedVariants,
+  clampVariantCount,
+  isOperatorId,
+  MAX_GENERATED_VARIANTS,
+  OPERATOR_IDS,
+  type DiscardedVariant,
+  type GeneratorClient,
+} from './generatedVariants.js';
 import type {
   AssertionContext,
   AssertionResult,
   AssertionSpec,
   AssistantRole,
   Beat,
+  GeneratedVariantMeta,
   Scenario,
   ScenarioResult,
   Turn,
@@ -104,6 +147,10 @@ function parseArgs(argv: string[]): RedteamConfig {
     voiceDropClientMidway: DEFAULTS.voiceDropClientMidway,
     voiceDropUpstreamMidway: DEFAULTS.voiceDropUpstreamMidway,
     variant: DEFAULTS.variant,
+    generatedVariants: DEFAULTS.generatedVariants,
+    variantCacheDir: DEFAULTS.variantCacheDir,
+    gateGenerated: DEFAULTS.gateGenerated,
+    generatorModel: DEFAULTS.generatorModel,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -111,8 +158,7 @@ function parseArgs(argv: string[]): RedteamConfig {
     switch (a) {
       case '--suite': {
         const v = next();
-        cfg.suite =
-          v === 'smoke' || v === 'quality' || v === 'voice' || v === 'voice-safety' || v === 'extended' ? v : 'full';
+        cfg.suite = isRedteamSuite(v) ? v : 'full';
         break;
       }
       case '--scenario':
@@ -143,6 +189,15 @@ function parseArgs(argv: string[]): RedteamConfig {
       case '--gate-diff':
         cfg.gateDiff = true;
         break;
+      case '--sample':
+        cfg.sample = true;
+        break;
+      case '--sample-date':
+        cfg.sampleDate = next();
+        break;
+      case '--sample-history':
+        cfg.sampleHistory = next();
+        break;
       case '--gate-quality':
         cfg.gateQuality = true;
         break;
@@ -157,6 +212,30 @@ function parseArgs(argv: string[]): RedteamConfig {
         break;
       case '--variant':
         cfg.variant = next();
+        break;
+      case '--generated-variants': {
+        const requested = Number(next());
+        cfg.generatedVariants = clampVariantCount(requested);
+        if (requested > MAX_GENERATED_VARIANTS)
+          console.warn(`[redteam] --generated-variants capped at ${MAX_GENERATED_VARIANTS} (asked for ${requested})`);
+        break;
+      }
+      case '--generated-operators': {
+        const ops = (next() ?? '')
+          .split(',')
+          .map((o) => o.trim())
+          .filter(Boolean);
+        const unknown = ops.filter((o) => !isOperatorId(o));
+        if (unknown.length)
+          throw new Error(`unknown mutation operator(s): ${unknown.join(', ')} (known: ${OPERATOR_IDS.join(', ')})`);
+        cfg.generatedOperators = ops;
+        break;
+      }
+      case '--variant-cache':
+        cfg.variantCacheDir = next();
+        break;
+      case '--gate-generated':
+        cfg.gateGenerated = true;
         break;
       default:
         break;
@@ -184,6 +263,24 @@ async function loadCanaries(): Promise<string[]> {
   return Array.from(new Set(headings)).filter((h) => h.length >= 6);
 }
 
+/** Length of the tool definitions every chat call carries (chatTherapy
+ *  sends the enabled chat tools), for estimated replies. 0 if unreadable. */
+async function chatToolChars(): Promise<number> {
+  try {
+    const { toolRegistry } = await import('../server/services/toolRegistry.service.js');
+    return JSON.stringify(await toolRegistry.getEnabledToolDefinitions({ channel: 'chat' })).length;
+  } catch {
+    return 0;
+  }
+}
+
+/** Length of the base chat system prompt: the cost pass's fallback when a
+ *  session has no stored assembled prompt. */
+async function baseChatPromptChars(): Promise<number> {
+  const { getSystemPrompt } = await import('../server/utils/sessionHelpers.js');
+  return (await getSystemPrompt('en', 'chat').catch(() => '')).length;
+}
+
 function buildCtx(
   scenario: Scenario,
   sessionId: string,
@@ -196,7 +293,9 @@ function buildCtx(
   classify: AssertionContext['classify'],
   cfg: RedteamConfig,
   beatId?: string,
-  extra?: Partial<Pick<AssertionContext, 'chatSessionEnded' | 'lastMessageStatus' | 'lastMessageBody' | 'assistant'>>,
+  extra?: Partial<
+    Pick<AssertionContext, 'chatSessionEnded' | 'lastMessageStatus' | 'lastMessageBody' | 'assistant' | 'http'>
+  >,
 ): AssertionContext {
   return {
     scenarioId: scenario.id,
@@ -255,61 +354,65 @@ async function runChatScenario(
   const agent: Agent = client.newAgent();
   await client.loginParticipant(agent, scenario.participant);
   await client.acceptConsent(agent);
-  const { sessionId, opening } = await client.startChat(agent);
+  // Always a brand-new session, and always ended, even when a turn throws
+  // (ai-therapist-307): every chat scenario is the same participant, so a
+  // session left open would carry its risk history into the next scenario.
+  const { sessionId, opening } = await client.startFreshChat(agent, { checkin: scenario.checkin });
   const transcript: Turn[] = [];
+  sessionTranscripts.set(sessionId, transcript);
   // The server-authored opening is the first assistant turn the participant
   // reads, so it heads the transcript; disclaimer-exactly-once-at-start
   // asserts on it rather than on whatever the model improvises.
   if (opening) transcript.push({ role: 'assistant', text: opening, beatId: 'opening' });
   const assertions: AssertionResult[] = [];
 
-  for (const beat of beats) {
-    const utter = await generatePersonaTurn(openai as OpenAI, cost, cfg, scenario, beat, transcript);
-    transcript.push({ role: 'user', text: utter, beatId: beat.id });
+  await client.driveChatSession(agent, sessionId, async () => {
+    for (const beat of beats) {
+      const utter = await generatePersonaTurn(openai as OpenAI, cost, cfg, scenario, beat, transcript);
+      transcript.push({ role: 'user', text: utter, beatId: beat.id });
 
-    let reply = '';
-    let sessionEnded = false;
-    let extra: Partial<Pick<AssertionContext, 'chatSessionEnded' | 'lastMessageStatus' | 'lastMessageBody'>> = {};
+      let reply = '';
+      let sessionEnded = false;
+      let extra: Partial<Pick<AssertionContext, 'chatSessionEnded' | 'lastMessageStatus' | 'lastMessageBody'>> = {};
 
-    if (beat.expectInactive) {
-      // Expect the session to already be ended (e.g. by the eligibility gate).
-      if (cfg.dryRun) {
-        extra = { lastMessageStatus: 400, lastMessageBody: { error: 'Session is not active' } };
+      if (beat.expectInactive) {
+        // Expect the session to already be ended (e.g. by the eligibility gate).
+        if (cfg.dryRun) {
+          extra = { lastMessageStatus: 400, lastMessageBody: { error: 'Session is not active' } };
+        } else {
+          const raw = await client.chatMessageRaw(agent, sessionId, utter);
+          extra = { lastMessageStatus: raw.status, lastMessageBody: raw.body };
+        }
+        // No assistant turn is recorded — the message was rejected.
+      } else if (cfg.dryRun) {
+        reply = `[dry-run assistant] I'm an AI, not a licensed therapist, and I can't diagnose. I can listen and share coping ideas.`;
+        transcript.push({ role: 'assistant', text: reply, beatId: beat.id });
       } else {
-        const raw = await client.chatMessageRaw(agent, sessionId, utter);
-        extra = { lastMessageStatus: raw.status, lastMessageBody: raw.body };
+        const res = await client.chatMessage(agent, sessionId, utter);
+        reply = res.response;
+        sessionEnded = res.sessionEnded;
+        extra = { chatSessionEnded: sessionEnded };
+        // Priced after the run from the app's own usage rows (sessionCost.ts).
+        transcript.push({ role: 'assistant', text: reply, beatId: beat.id });
       }
-      // No assistant turn is recorded — the message was rejected.
-    } else if (cfg.dryRun) {
-      reply = `[dry-run assistant] I'm an AI, not a licensed therapist, and I can't diagnose. I can listen and share coping ideas.`;
-      transcript.push({ role: 'assistant', text: reply, beatId: beat.id });
-    } else {
-      const res = await client.chatMessage(agent, sessionId, utter);
-      reply = res.response;
-      sessionEnded = res.sessionEnded;
-      extra = { chatSessionEnded: sessionEnded };
-      cost.estimate(await chatModelUnderTest(), 700, 260);
-      transcript.push({ role: 'assistant', text: reply, beatId: beat.id });
+
+      const ctx = buildCtx(
+        scenario,
+        sessionId,
+        reply,
+        transcript,
+        client,
+        {},
+        canaries,
+        pool,
+        classify,
+        cfg,
+        beat.id,
+        extra,
+      );
+      assertions.push(...(await runAssertions(beat.assertAfter, ctx)));
     }
-
-    const ctx = buildCtx(
-      scenario,
-      sessionId,
-      reply,
-      transcript,
-      client,
-      {},
-      canaries,
-      pool,
-      classify,
-      cfg,
-      beat.id,
-      extra,
-    );
-    assertions.push(...(await runAssertions(beat.assertAfter, ctx)));
-  }
-
-  await client.endChat(agent, sessionId);
+  });
 
   const finalCtx = buildCtx(
     scenario,
@@ -387,36 +490,46 @@ async function runRealtimeScenario(
   const agent: Agent = client.newAgent();
   await client.acceptConsent(agent);
   const sessionId = `redteam_rt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  client.noteSession(sessionId);
   const transcript: Turn[] = [];
+  sessionTranscripts.set(sessionId, transcript);
   const assertions: AssertionResult[] = [];
   const beatPostTimes: Record<string, Date> = {};
+  const { updateSessionStatus } = await import('../server/db/index.js');
 
-  for (const beat of beats) {
-    const utter = beat.verbatim ?? (await generatePersonaTurn(openai as OpenAI, cost, cfg, scenario, beat, transcript));
-    beatPostTimes[beat.id] = new Date();
-    await client.postParticipantTurn(agent, sessionId, utter);
-    await client.postAssistantStub(agent, sessionId, SAFE_ASSISTANT_STUB);
-    transcript.push({ role: 'user', text: utter, beatId: beat.id });
-    transcript.push({ role: 'assistant', text: SAFE_ASSISTANT_STUB, beatId: beat.id });
+  // End the session even when a beat throws, so nothing is left active.
+  try {
+    for (const beat of beats) {
+      const utter =
+        beat.verbatim ?? (await generatePersonaTurn(openai as OpenAI, cost, cfg, scenario, beat, transcript));
+      beatPostTimes[beat.id] = new Date();
+      await client.postParticipantTurn(agent, sessionId, utter);
+      await client.postAssistantStub(agent, sessionId, SAFE_ASSISTANT_STUB);
+      transcript.push({ role: 'user', text: utter, beatId: beat.id });
+      transcript.push({ role: 'assistant', text: SAFE_ASSISTANT_STUB, beatId: beat.id });
 
-    const ctx = buildCtx(
-      scenario,
-      sessionId,
-      '',
-      transcript,
-      client,
-      beatPostTimes,
-      canaries,
-      pool,
-      classify,
-      cfg,
-      beat.id,
-    );
-    assertions.push(...(await runAssertions(beat.assertAfter, ctx)));
+      const ctx = buildCtx(
+        scenario,
+        sessionId,
+        '',
+        transcript,
+        client,
+        beatPostTimes,
+        canaries,
+        pool,
+        classify,
+        cfg,
+        beat.id,
+      );
+      assertions.push(...(await runAssertions(beat.assertAfter, ctx)));
+    }
+  } catch (err) {
+    // The session row exists only once a batch landed; best-effort either way.
+    await updateSessionStatus(sessionId, 'ended', 'user').catch(() => undefined);
+    throw err;
   }
 
   // End the realtime session so the judge (which requires status='ended') runs.
-  const { updateSessionStatus } = await import('../server/db/index.js');
   await updateSessionStatus(sessionId, 'ended', 'user');
 
   const finalCtx = buildCtx(scenario, sessionId, '', transcript, client, beatPostTimes, canaries, pool, classify, cfg);
@@ -476,6 +589,7 @@ async function runAssistantScenario(
 
   const startedAt = new Date();
   await ensureAssistantFixtures(pool);
+  if (scenario.setup) await scenario.setup(pool);
   const canaries = assistantPromptCanaries();
   const defaultRole: AssistantRole = scenario.assistantRole ?? 'researcher';
   const sessions = new Map<AssistantRole, StaffSession>();
@@ -487,7 +601,8 @@ async function runAssistantScenario(
     const existing = sessions.get(role);
     if (existing) return existing;
     const agent = client.newAgent();
-    const userId = await client.loginStaff(agent, ASSISTANT_STAFF[role], ASSISTANT_STAFF_PASSWORD);
+    const username = scenario.assistantStaff?.[role] ?? ASSISTANT_STAFF[role];
+    const userId = await client.loginStaff(agent, username, ASSISTANT_STAFF_PASSWORD);
     const s: StaffSession = { agent, userId, history: [] };
     sessions.set(role, s);
     callers.push({ role, userId });
@@ -518,12 +633,8 @@ async function runAssistantScenario(
         [s.userId, startedAt],
       );
       const u = rows[0];
-      if (u)
-        cost.add(ASSISTANT_MODEL, {
-          prompt_tokens: Number(u.input_tokens ?? 0),
-          completion_tokens: Number(u.output_tokens ?? 0),
-        });
-      else cost.estimate(ASSISTANT_MODEL, 2500, 300);
+      if (u) cost.addRecorded(ASSISTANT_MODEL, Number(u.input_tokens ?? 0), Number(u.output_tokens ?? 0), 'assistant');
+      else cost.estimate(ASSISTANT_MODEL, 2500, 300, 'assistant');
     }
     s.history.push({ role: 'assistant', content: answer });
     transcript.push({ role: 'assistant', text: answer, beatId: beat.id });
@@ -557,6 +668,39 @@ async function runAssistantScenario(
   return { assertions, judge: null, judgeBreaches: false, sessionId: '', transcript };
 }
 
+/**
+ * HTTP pipeline (docs/eval-scenario-catalogue.md A2 gates, STAFF-10): no
+ * persona, no model, no judge. The scenario's probe drives the real routes on
+ * accounts and rows it seeded itself, and its final assertions read what the
+ * probe recorded. Identical with and without --dry-run: nothing here can call
+ * a model, so there is nothing to stub.
+ */
+async function runHttpScenario(
+  scenario: Scenario,
+  _beats: Beat[],
+  _runJudgeFlag: boolean,
+  client: HarnessClient,
+  _openai: OpenAI | null,
+  cfg: RedteamConfig,
+  _cost: CostTracker,
+  canaries: string[],
+  pool: AssertionContext['pool'],
+  classify: AssertionContext['classify'],
+): Promise<{
+  assertions: AssertionResult[];
+  judge: null;
+  judgeBreaches: false;
+  sessionId: string;
+  transcript?: Turn[];
+}> {
+  if (!scenario.httpProbe) throw new Error(`${scenario.id}: http pipeline scenario has no httpProbe`);
+  if (scenario.setup) await scenario.setup(pool);
+  const http = await scenario.httpProbe({ client, pool, dryRun: cfg.dryRun });
+  const ctx = buildCtx(scenario, '', '', [], client, {}, canaries, pool, classify, cfg, undefined, { http });
+  const assertions = await runAssertions(scenario.assertFinal, ctx);
+  return { assertions, judge: null, judgeBreaches: false, sessionId: '' };
+}
+
 async function runEntry(
   entry: SuiteEntry,
   client: HarnessClient,
@@ -565,6 +709,7 @@ async function runEntry(
   canaries: string[],
   pool: AssertionContext['pool'],
   variation = 0,
+  generated?: { meta: GeneratedVariantMeta; generationCostUsd: number },
 ): Promise<ScenarioResult> {
   // Variation v>0: styled persona + shifted seed; ids get a #v2/#v3 suffix so
   // reports and the DB keep each variation as its own row.
@@ -574,8 +719,19 @@ async function runEntry(
   const beats = entry.beatIds ? scenario.beats.filter((b) => entry.beatIds!.includes(b.id)) : scenario.beats;
   const runJudgeFlag = entry.judge ?? scenario.runJudge;
   const cost = new CostTracker();
+  // A freshly generated variant carries its generation + guard spend.
+  if (generated?.generationCostUsd) cost.addUsd(generated.generationCostUsd, 'generation', 'recorded');
   const classify = makeClassifier(openai, vcfg, cost);
   const start = Date.now();
+  const sessionsBefore = client.sessionsStarted.length;
+  // Book the app-side spend of every session this scenario created, errored
+  // or not, once the run is over (settleRunCosts).
+  const ledger = (result: ScenarioResult): ScenarioResult => {
+    const ids = client.sessionsStarted.slice(sessionsBefore);
+    costLedger.push({ result, cost, sessionIds: ids, pipeline: scenario.pipeline });
+    result.cost = cost.breakdown();
+    return result;
+  };
 
   try {
     if (scenario.requiresReservedParticipant && !cfg.dryRun) {
@@ -585,14 +741,23 @@ async function runEntry(
     // Voice needs a live OpenAI client (persona TTS) and a real voice backend;
     // in dry-run it falls back to the realtime-text flow so the offline
     // pipeline completes.
-    const runner =
-      scenario.pipeline === 'chat'
+    const runner: typeof runChatScenario = scenario.sessions
+      ? // Two or more sessions for the same participant (multiSession.ts).
+        (sc, _beats, _judge, cl, oa, c, co, can, po, cls) =>
+          runMultiSessionScenario(sc, cl, oa, c, co, po, cls, {
+            runAssertions,
+            noteTranscript: (id, t) => sessionTranscripts.set(id, t),
+            canaries: can,
+          })
+      : scenario.pipeline === 'chat'
         ? runChatScenario
         : scenario.pipeline === 'assistant'
           ? runAssistantScenario
-          : scenario.pipeline === 'voice' && !cfg.dryRun
-            ? (await import('./voiceClient.js')).runVoiceScenario
-            : runRealtimeScenario;
+          : scenario.pipeline === 'http'
+            ? runHttpScenario
+            : scenario.pipeline === 'voice' && !cfg.dryRun
+              ? (await import('./voiceClient.js')).runVoiceScenario
+              : runRealtimeScenario;
     // Scenario fixture (test-only fault injection): installed around the run
     // and always undone, so a failed scenario cannot leak its fault into the next.
     const undoFixture = await scenario.fixture?.({ pool, dryRun: cfg.dryRun });
@@ -608,13 +773,18 @@ async function runEntry(
       pool,
       classify,
     ).finally(async () => {
+      // Backstop for ai-therapist-307: no chat session outlives its scenario,
+      // whichever runner started it and however it ended.
+      const leftover = await client.endOpenChats();
+      if (leftover.length) console.error(`[redteam] ${label}: ended leftover chat session(s) ${leftover.join(', ')}`);
       await undoFixture?.();
       await scenario.teardown?.(pool);
     });
     const { judge, judgeBreaches, sessionId, transcript } = res;
     const assertions = applyKnownGap(scenario, res.assertions);
+    const voiceMetrics = (res as { voiceMetrics?: RunMetrics }).voiceMetrics;
     const gatingFail = assertions.some((a) => !a.passed && a.gating) || judgeBreaches;
-    return {
+    return ledger({
       id: label,
       title: scenario.title,
       pipeline: scenario.pipeline,
@@ -628,9 +798,12 @@ async function runEntry(
       progression: computeProgression(scenario.pipeline, transcript),
       costUsd: cost.usd,
       durationMs: Date.now() - start,
-    };
+      generated: generated?.meta,
+      ...(voiceMetrics ? { voiceMetrics } : {}),
+      ...(scenario.knownGap ? { knownGap: scenario.knownGap } : {}),
+    });
   } catch (err) {
-    return {
+    return ledger({
       id: label,
       title: scenario.title,
       pipeline: scenario.pipeline,
@@ -641,8 +814,79 @@ async function runEntry(
       costUsd: cost.usd,
       durationMs: Date.now() - start,
       error: (err as Error).message,
-    };
+      generated: generated?.meta,
+      ...(scenario.knownGap ? { knownGap: scenario.knownGap } : {}),
+    });
   }
+}
+
+/** Per-scenario spend awaiting the app-side usage pass (settleRunCosts). */
+const costLedger: Array<{ result: ScenarioResult; cost: CostTracker; sessionIds: string[]; pipeline: string }> = [];
+/** Transcripts by session id, kept even when a scenario throws, so an errored
+ *  scenario's estimated replies can still be priced. */
+const sessionTranscripts = new Map<string, Turn[]>();
+
+/**
+ * Book what the app spent on this run's sessions (chat replies, crisis
+ * assessor, redaction, insights) from session_llm_usage into each scenario,
+ * then refresh every result's cost. Waits (bounded) for the post-session jobs
+ * /api/chat/end starts. Skipped under --dry-run, which makes no model calls.
+ */
+async function settleRunCosts(
+  cfg: RedteamConfig,
+  pool: AssertionContext['pool'],
+  defaultPromptChars: number,
+): Promise<RunCostNotes> {
+  let settled: SettledCost | null = null;
+  if (!cfg.dryRun) {
+    const chatModel = await chatModelUnderTest();
+    const plans: SessionCostPlan[] = costLedger.flatMap((e) =>
+      // The voice runners price voice minutes and delegation tokens
+      // themselves (sessionCost.ts skips those purposes). They do not register
+      // their sessions with client.noteSession yet, so a voice scenario has no
+      // ids here; once they do, its crisis assessor and post-session jobs are
+      // counted by this same pass.
+      e.pipeline === 'chat' || e.pipeline === 'realtime-text' || e.pipeline === 'voice'
+        ? e.sessionIds.map((sessionId) => ({
+            scenarioId: e.result.id,
+            sessionId,
+            pipeline: e.result.pipeline,
+            transcript: sessionTranscripts.get(sessionId) ?? e.result.transcript ?? [],
+            chatModel,
+            expectPostSession: e.pipeline !== 'realtime-text',
+            cost: e.cost,
+          }))
+        : [],
+    );
+    if (plans.length) {
+      console.log(`[redteam] cost: reading app usage for ${plans.length} session(s), waiting for post-session jobs...`);
+      try {
+        settled = await settleSessionCosts(pool, plans, { defaultPromptChars, toolSchemaChars: await chatToolChars() });
+      } catch (err) {
+        console.warn(`[redteam] cost: app usage not read (${(err as Error).message}); app-side spend excluded`);
+      }
+    } else {
+      settled = { sessions: 0, waitedMs: 0, estimatedChatReplies: 0, estimatedRows: 0, pending: [] };
+    }
+  }
+  for (const e of costLedger) {
+    e.result.costUsd = e.cost.usd;
+    e.result.cost = e.cost.breakdown();
+  }
+  const estimatedCategories = [
+    ...new Set(
+      costLedger.flatMap((e) =>
+        Object.entries(e.result.cost?.byCategory ?? {})
+          .filter(([, l]) => (l?.estimatedUsd ?? 0) > 0)
+          .map(([c]) => c as CostCategory),
+      ),
+    ),
+  ];
+  return {
+    appUsageRead: !!settled,
+    postSessionWaitMs: settled?.waitedMs ?? 0,
+    ...costNotes(settled, estimatedCategories, cfg.dryRun),
+  };
 }
 
 async function main(): Promise<void> {
@@ -654,10 +898,58 @@ async function main(): Promise<void> {
     console.error(`[redteam] ${(err as Error).message}`);
     process.exit(2);
   }
-  const entries = selectSuite(cfg.suite, cfg.scenarioId);
+  const selected = withoutMultiSession(selectSuite(cfg.suite, cfg.scenarioId), process.env.REDTEAM_TRIGGER);
+  let entries = selected.kept;
+  if (selected.skipped.length)
+    console.warn(
+      `[redteam] not run here: ${selected.skipped.join(', ')} (multi-session scenarios create accounts and age their ` +
+        'rows, so they need a disposable database; this run was started by the in-app runner)',
+    );
   if (entries.length === 0) {
     console.error(`No scenarios matched (suite=${cfg.suite}, scenario=${cfg.scenarioId ?? 'all'})`);
     process.exit(2);
+  }
+  const suiteIds = new Set(selectSuite(cfg.suite).map((e) => e.scenario.id));
+
+  // The previous results (rolling-baseline.json next to the --baseline
+  // summary.json, else that summary.json), read before anything is written
+  // into --out: the diff baseline, and the sampler's record of what ran.
+  const prior = cfg.baseline && cfg.baseline !== 'latest' ? loadRollingBaseline(cfg.baseline) : null;
+
+  // --sample: tonight's slice of the weekly plan (sampling.ts).
+  let sampling: NightlySample | undefined;
+  if (cfg.sample) {
+    if (cfg.scenarioId) {
+      console.error('[redteam] --sample cannot be combined with --scenario');
+      process.exit(2);
+    }
+    const historySrc = cfg.sampleHistory ? loadRollingBaseline(cfg.sampleHistory) : prior;
+    const history = historySrc && historySrc.rolling.suite === cfg.suite ? lastRunById(historySrc.rolling) : null;
+    const date = cfg.sampleDate ?? utcDate(new Date());
+    try {
+      sampling = nightlySample(
+        entries.map((e) => e.scenario.id),
+        new Set(SAMPLING_PRIORITY_SCENARIOS.map((s) => s.id)),
+        date,
+        history,
+      );
+      const runSet = new Set(sampling.run);
+      entries = entries.filter((e) => runSet.has(e.scenario.id));
+      console.log(
+        `[redteam] sampled run ${sampling.week} ${WEEKDAY_NAMES[sampling.weekday]} ${sampling.date}: ` +
+          `${sampling.run.length} of ${sampling.total} scenarios (cap ${sampling.cap}; ${sampling.primaries.length} assigned, ` +
+          `${sampling.catchUp.length} catch-up, ${sampling.repeats.length} repeats` +
+          `${sampling.deferred.length ? `, ${sampling.deferred.length} deferred` : ''})` +
+          (sampling.historyAvailable ? '' : '; no previous results found, catch-up off'),
+      );
+    } catch (err) {
+      if (!(err instanceof CapacityError)) {
+        console.error(`[redteam] --sample: ${(err as Error).message}`);
+        process.exit(2);
+      }
+      // Never silently drop scenarios: over capacity, run everything.
+      console.error(`[redteam] --sample: ${err.message} Running the whole suite unsampled tonight.`);
+    }
   }
 
   console.log(
@@ -709,12 +1001,24 @@ async function main(): Promise<void> {
       console.log(`\n[redteam] running ${entry.scenario.id}${vLabel} (${entry.scenario.pipeline})...`);
       const r = await runEntry(entry, client, openai, cfg, canaries, pool, v);
       console.log(
-        `[redteam] ${r.id}: ${r.passed ? 'PASS' : 'FAIL'} (${(r.durationMs / 1000).toFixed(1)}s, $${r.costUsd.toFixed(4)})`,
+        `[redteam] ${r.id}: ${r.passed ? 'PASS' : 'FAIL'} (${(r.durationMs / 1000).toFixed(1)}s, harness calls $${r.costUsd.toFixed(4)}; app-side spend is added at the end of the run)`,
       );
       results.push(r);
     }
   }
+
+  // Generated adversarial variants (ai-therapist-109): opt-in, after the
+  // scripted scenarios so they can never delay or perturb a scripted result.
+  let discardedVariants: DiscardedVariant[] | undefined;
+  if (cfg.generatedVariants > 0) {
+    const gen = await runGeneratedVariants(entries, client, openai, cfg, canaries, pool);
+    results.push(...gen.results);
+    discardedVariants = gen.discarded;
+  }
   const finishedAt = new Date().toISOString();
+  // The per-scenario figures above are the harness's own calls; the app-side
+  // spend of each session (replies, assessor, post-session jobs) lands now.
+  const costNotesForRun = await settleRunCosts(cfg, pool, await baseChatPromptChars());
 
   let gitSha: string | null = process.env.GITHUB_SHA ?? null;
   if (!gitSha) {
@@ -742,6 +1046,9 @@ async function main(): Promise<void> {
     judgeModel: judgeLabel,
     gitSha,
     scenarios: results,
+    discardedVariants,
+    costNotes: costNotesForRun,
+    sampling,
   };
   const { junitPath, summaryPath } = writeReports(cfg, summary);
   // A diff from an earlier run in the same --out dir must never be mistaken
@@ -771,20 +1078,25 @@ async function main(): Promise<void> {
       gitSha,
       trigger,
       dryRun: cfg.dryRun,
-      scenarios: results.map((r) => ({
-        scenarioId: r.id.replace(/#v\d+$/, ''),
-        variation: r.variation,
-        pipeline: r.pipeline,
-        passed: r.passed,
-        assertionFailures: r.assertions
-          .filter((a) => !a.passed && a.gating)
-          .map((a) => ({ id: a.id, detail: a.detail })),
-        judgeScores: r.judge ? (r.judge.scores as Record<string, number>) : null,
-        sessionId: r.sessionId ?? null,
-        error: r.error ?? null,
-        durationMs: r.durationMs,
-        costUsd: r.costUsd,
-      })),
+      // Generated variants stay out of harness_runs: the Simulation Runs panel
+      // and `--baseline latest` read it as the scripted record. Their record is
+      // summary.json plus the persisted scripts under <out>/variants/.
+      scenarios: results
+        .filter((r) => !r.generated)
+        .map((r) => ({
+          scenarioId: r.id.replace(/#v\d+$/, ''),
+          variation: r.variation,
+          pipeline: r.pipeline,
+          passed: r.passed,
+          assertionFailures: r.assertions
+            .filter((a) => !a.passed && a.gating)
+            .map((a) => ({ id: a.id, detail: a.detail })),
+          judgeScores: r.judge ? (r.judge.scores as Record<string, number>) : null,
+          sessionId: r.sessionId ?? null,
+          error: r.error ?? null,
+          durationMs: r.durationMs,
+          costUsd: r.costUsd,
+        })),
     });
     console.log(`[redteam] persisted as harness run #${persistedRunId}`);
   } catch (err) {
@@ -798,7 +1110,7 @@ async function main(): Promise<void> {
   // appended to the GitHub job summary when running in Actions.
   let diffRegressions = false;
   if (cfg.baseline) {
-    const diff = await runBaselineDiff(cfg, summary, persistedRunId);
+    const diff = await runBaselineDiff(cfg, summary, persistedRunId, prior?.rolling ?? null, prior?.file, suiteIds);
     if (diff) {
       diffRegressions = diff.hasRegressions;
       if (diffRegressions && cfg.gateDiff) console.log('[redteam] --gate-diff: regressions vs baseline -> exit 1');
@@ -812,14 +1124,86 @@ async function main(): Promise<void> {
   // flight; ending the pool would make them log "pool after end". process.exit
   // tears everything down cleanly.
   const gateFailed = !passed && !cfg.allowFail;
+  // Carry each scenario's most recent result forward for tomorrow's diff and
+  // sampler (rollingBaseline.ts). Written on every run, sampled or not.
+  try {
+    const current = normalizeSummary(buildSummaryJson(summary) as Parameters<typeof normalizeSummary>[0], 'this run');
+    const rolling = mergeRolling(prior?.rolling ?? null, current, suiteIds);
+    const nodeFs = await import('node:fs');
+    nodeFs.writeFileSync(`${cfg.outDir}/${ROLLING_BASELINE_FILE}`, JSON.stringify(rolling, null, 2));
+    console.log(
+      `[redteam] wrote ${cfg.outDir}/${ROLLING_BASELINE_FILE} (${Object.keys(rolling.scenarios).length} scenarios)`,
+    );
+  } catch (err) {
+    console.warn(`[redteam] ${ROLLING_BASELINE_FILE} not written (${(err as Error).message})`);
+  }
+
   const diffFailed = diffRegressions && cfg.gateDiff;
   await flushAndExit(gateFailed || diffFailed ? 1 : 0);
 }
 
+/** Plan, generate (or load from cache), guard and run this run's generated
+ *  variants. Each runs once (no --variations) under the run seed. */
+async function runGeneratedVariants(
+  entries: SuiteEntry[],
+  client: HarnessClient,
+  openai: OpenAI | null,
+  cfg: RedteamConfig,
+  canaries: string[],
+  pool: AssertionContext['pool'],
+): Promise<{ results: ScenarioResult[]; discarded: DiscardedVariant[] }> {
+  console.log(
+    `\n[redteam] generated variants: up to ${cfg.generatedVariants} (seed=${cfg.seed}, cache=${cfg.variantCacheDir}, ${cfg.gateGenerated ? 'GATING' : 'non-gating'})`,
+  );
+  const { variants, discarded } = await buildGeneratedVariants(
+    entries,
+    cfg.generatedVariants,
+    cfg.seed,
+    cfg.generatedOperators?.filter(isOperatorId),
+    {
+      // The OpenAI client satisfies the structural GeneratorClient surface.
+      client: openai as unknown as GeneratorClient | null,
+      dryRun: cfg.dryRun,
+      generatorModel: cfg.generatorModel,
+      guardModel: cfg.classifierModel,
+      cacheDir: cfg.variantCacheDir,
+      runDir: cfg.outDir,
+      cost: new CostTracker(),
+      safetyIds: new Set(SAFETY_SCENARIOS.map((s) => s.id)),
+      log: (m) => console.log(m),
+    },
+  );
+  const results: ScenarioResult[] = [];
+  for (const v of variants) {
+    const meta: GeneratedVariantMeta = {
+      parentId: v.file.parentId,
+      operator: v.file.operator,
+      seed: v.file.seed,
+      gating: cfg.gateGenerated,
+      cached: v.cached,
+      scriptFile: v.runFile,
+    };
+    console.log(`\n[redteam] running ${v.file.variantId} (${v.entry.scenario.pipeline})...`);
+    const r = await runEntry(v.entry, client, openai, cfg, canaries, pool, 0, {
+      meta,
+      generationCostUsd: v.costUsd,
+    });
+    console.log(
+      `[redteam] ${r.id}: ${r.passed ? 'PASS' : meta.gating ? 'FAIL' : 'MISS (non-gating)'} (${(r.durationMs / 1000).toFixed(1)}s, $${r.costUsd.toFixed(4)})`,
+    );
+    results.push(r);
+  }
+  return { results, discarded };
+}
+
 /** Load the baseline named by --baseline: a summary.json path, or `latest`
  *  (newest persisted non-dry run of the same suite, excluding this one). */
-async function loadBaseline(cfg: RedteamConfig, persistedRunId: number | null): Promise<NormalizedRun | null> {
-  const fs = await import('node:fs');
+async function loadBaseline(
+  cfg: RedteamConfig,
+  persistedRunId: number | null,
+  prior: RollingBaseline | null,
+  priorFile: string | undefined,
+): Promise<NormalizedRun | null> {
   if (cfg.baseline === 'latest') {
     try {
       const { getLatestHarnessRunForSuite } = await import('../server/db/index.js');
@@ -834,25 +1218,25 @@ async function loadBaseline(cfg: RedteamConfig, persistedRunId: number | null): 
       return null;
     }
   }
-  const path = cfg.baseline as string;
-  if (!fs.existsSync(path)) {
-    console.warn(`[redteam] baseline ${path} not found — skipping diff`);
+  // A file baseline was read at startup (main): rolling-baseline.json when the
+  // baseline run wrote one, so each scenario is compared with its own most
+  // recent prior result even when last night ran a different sample.
+  if (!prior) {
+    console.warn(`[redteam] baseline ${cfg.baseline} not found or unreadable — skipping diff`);
     return null;
   }
-  try {
-    return normalizeSummary(JSON.parse(fs.readFileSync(path, 'utf8')), path);
-  } catch (err) {
-    console.warn(`[redteam] baseline ${path} unreadable (${(err as Error).message}) — skipping diff`);
-    return null;
-  }
+  return rollingToNormalized(prior, priorFile ?? String(cfg.baseline));
 }
 
 async function runBaselineDiff(
   cfg: RedteamConfig,
   summary: RunSummary,
   persistedRunId: number | null,
+  prior: RollingBaseline | null,
+  priorFile: string | undefined,
+  suiteIds: ReadonlySet<string>,
 ): Promise<RunDiff | null> {
-  const baseline = await loadBaseline(cfg, persistedRunId);
+  const baseline = await loadBaseline(cfg, persistedRunId, prior, priorFile);
   if (!baseline) return null;
   const current = normalizeSummary(buildSummaryJson(summary) as Parameters<typeof normalizeSummary>[0], 'this run');
   // A variant only diffs against a baseline of the same variant: comparing a
@@ -864,7 +1248,14 @@ async function runBaselineDiff(
     );
     return null;
   }
-  const diff = diffRuns(baseline, current);
+  // Sampled night: a baseline scenario that is still in the suite but was not
+  // scheduled tonight is "not sampled", never "missing".
+  const diff = diffRuns(
+    baseline,
+    current,
+    undefined,
+    summary.sampling ? { notRunByDesign: (label) => suiteIds.has(baseScenarioId(label)) } : {},
+  );
 
   const fs = await import('node:fs');
   const path = await import('node:path');

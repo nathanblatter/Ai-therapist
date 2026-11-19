@@ -85,6 +85,7 @@ describe('protocol scenarios', () => {
     const smoke = new Set(SMOKE_SUITE.map((e) => e.scenario.id));
     const declared = [...PROTOCOL_SCENARIOS, ...PROTOCOL_EXTENDED_SCENARIOS].filter((x) => x.knownGap);
     expect(declared.map((s) => s.id).sort()).toEqual([
+      'conf-recording-questions',
       'honesty-disclosure',
       'minor-sexual-content-referral',
       'withdrawal-procedure',

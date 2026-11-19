@@ -22,7 +22,9 @@ import type { AssertionResult, Scenario, ScenarioResult } from './types.js';
 export interface KnownGap {
   /** What the product does today and which protocol or prompt line it breaks. */
   reason: string;
-  /** Flightdeck item for the product bug, e.g. `ai-therapist-301`. */
+  /** Flightdeck item for the product bug, e.g. `ai-therapist-301`; empty
+   *  when the gap was found by an eval and is not filed yet (reported as
+   *  UNFILED). */
   ref: string;
   /** Assertion ids (exact) that report without gating until the bug is fixed.
    *  Omitted: the scenario is only labelled and every assertion still gates. */
@@ -31,17 +33,25 @@ export interface KnownGap {
 
 export const FLIGHTDECK_REF = /^ai-therapist-\d+$/;
 
+/** How a gap with an empty `ref` (found, not yet filed) is labelled in reports. */
+export const UNFILED_REF = 'UNFILED';
+
 /** Problems with a knownGap declaration; empty when it is well formed. */
-export function validateKnownGap(scenario: Pick<Scenario, 'id' | 'knownGap' | 'beats' | 'assertFinal'>): string[] {
+export function validateKnownGap(
+  scenario: Pick<Scenario, 'id' | 'knownGap' | 'beats' | 'assertFinal' | 'sessions'>,
+): string[] {
   const gap = scenario.knownGap;
   if (!gap) return [];
   const problems: string[] = [];
-  if (!FLIGHTDECK_REF.test(gap.ref)) problems.push(`${scenario.id}: flightdeck ref '${gap.ref}'`);
+  // An empty ref is allowed: a gap found by an eval and not filed yet. It is
+  // still reported on every run, labelled UNFILED, so it cannot be forgotten.
+  if (gap.ref !== '' && !FLIGHTDECK_REF.test(gap.ref)) problems.push(`${scenario.id}: flightdeck ref '${gap.ref}'`);
   if (gap.reason.trim().length < 20) problems.push(`${scenario.id}: reason too short to be useful`);
   if (!gap.assertionIds) return problems;
   if (gap.assertionIds.length === 0) problems.push(`${scenario.id}: assertionIds is empty`);
   const declared = new Set<string>();
   for (const beat of scenario.beats) for (const a of beat.assertAfter ?? []) declared.add(a.id);
+  for (const session of scenario.sessions ?? []) for (const a of session.assertAfter ?? []) declared.add(a.id);
   for (const a of scenario.assertFinal ?? []) declared.add(a.id);
   for (const id of gap.assertionIds) {
     // Judge floors are gated inside the runner on a precomputed flag, so a
@@ -62,11 +72,12 @@ export function applyKnownGap(scenario: Pick<Scenario, 'knownGap'>, assertions: 
   const gap = scenario.knownGap;
   if (!gap?.assertionIds?.length) return assertions;
   const listed = new Set(gap.assertionIds);
+  const ref = gap.ref || UNFILED_REF;
   return assertions.map((a) => {
     if (!listed.has(a.id)) return a;
     return a.passed
-      ? { ...a, knownGap: gap.ref, detail: `KNOWN GAP ${gap.ref} PASSED THIS RUN: ${a.detail}` }
-      : { ...a, gating: false, knownGap: gap.ref, detail: `KNOWN GAP ${gap.ref}: ${a.detail}` };
+      ? { ...a, knownGap: ref, detail: `KNOWN GAP ${ref} PASSED THIS RUN: ${a.detail}` }
+      : { ...a, gating: false, knownGap: ref, detail: `KNOWN GAP ${ref}: ${a.detail}` };
   });
 }
 
