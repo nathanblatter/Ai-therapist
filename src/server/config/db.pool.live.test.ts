@@ -192,6 +192,26 @@ describe.skipIf(!LIVE)('app pool bounds against a scratch database', () => {
     expect(dbTimeoutKind(again)).toBe('statement');
   }, 20_000);
 
+  it('a long-scope connection whose RESET fails (released inside an aborted transaction) is destroyed, not reused', async () => {
+    const pool = smallPool({ max: 1 });
+    let scopedPid = 0;
+    await withLongQueries('live-test', async () => {
+      const client = await pool.connect();
+      scopedPid = (await client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      await client.query('BEGIN');
+      await client.query('SELECT 1/0').catch(() => undefined);
+      // A caller that forgot its ROLLBACK: RESET now fails ("current
+      // transaction is aborted"), so the 5 s limit cannot be cleared.
+      client.release();
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    const { rows } = await pool.query<{ s: string; pid: number }>(
+      "SELECT current_setting('statement_timeout') AS s, pg_backend_pid() AS pid",
+    );
+    expect(rows[0].s).toBe('1s');
+    expect(rows[0].pid).not.toBe(scopedPid);
+  }, 10_000);
+
   it('a transaction left idle is ended by the server, and the process survives it', async () => {
     const pool = smallPool({ max: 1, idleInTransactionTimeoutMs: 500 });
     const client = await pool.connect();

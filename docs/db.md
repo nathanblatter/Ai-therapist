@@ -329,6 +329,11 @@ settings with defaults (`.env.example`, "Pool bounds"); 0 disables a timeout.
 - `psql -f` migrations are not affected. The legacy per-number runners
   (`runMigrationNNN.js`, `rollbackMigration*.js`) were not wrapped: they are
   historical, and would run under the default limits.
+- Every connection has a permanent `error` listener, so a connection that dies
+  while checked out no longer crashes the process. Code that holds a
+  connection for the life of the process must release it when it ends, or
+  the slot is never freed: the socket.io adapter's `LISTEN` client goes
+  through `releaseOnEnd` (`src/server/config/dbHeldClient.ts`) for this.
 - `GET /health/deep` reports the pool's size, in-use and waiting counts and the
   timeouts counted since start.
 - `pg_stat_activity.application_name` is `ai-therapist/<script>@<host>`, so

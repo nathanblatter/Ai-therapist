@@ -363,11 +363,19 @@ export async function runCrisisPipeline(
       // (the text hand-off's stamp when the incident's risk could not be read)
       // it would otherwise let a medium turn rewrite the session to medium.
       // Seen live in the PR #77 review.
+      // An unreadable state flags a HIGH turn only. flagSessionCrisis writes
+      // the turn's severity unconditionally, so a medium turn flagged "as if
+      // unflagged" would rewrite a session that is in fact flagged high down
+      // to medium (monitoring 'critical' to 'high', and the next high turn
+      // treated as a first flag) whenever the read failed but the write got
+      // through. A high turn cannot lower the severity, and it must page.
       const flagByLevel =
         (severity === 'high' || severity === 'medium') &&
-        (!state?.crisis_flagged ||
-          SEVERITY_RANK[severity] > currentRank ||
-          (SEVERITY_RANK[severity] >= currentRank && risk.riskScore > currentScore + 10));
+        (stateError
+          ? severity === 'high'
+          : !state?.crisis_flagged ||
+            SEVERITY_RANK[severity] > currentRank ||
+            (SEVERITY_RANK[severity] >= currentRank && risk.riskScore > currentScore + 10));
       // A high turn about someone this session's high flags have not been
       // about. The level rule above compares numbers only, and a third party's
       // active crisis scores 80-100: after "my roommate is going to kill
