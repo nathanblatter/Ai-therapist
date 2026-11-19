@@ -180,6 +180,31 @@ describe('updateMessage', () => {
     expect(releaseMock).toHaveBeenCalledTimes(1);
   });
 
+  it('therapist edit: the redaction model call finishes before a connection is taken or BEGIN runs (ai-therapist-366)', async () => {
+    const order: string[] = [];
+    redactMock.mockImplementation(async () => {
+      order.push('redact');
+      return '[NAME] said hi';
+    });
+    connectMock.mockImplementationOnce(async () => {
+      order.push('connect');
+      return { query: clientQueryMock, release: releaseMock };
+    });
+    clientQueryMock.mockImplementation(async (sql: string) => {
+      order.push(sql.trim().split(/\s+/)[0]);
+      return sql.startsWith('UPDATE') ? { rows: [ROW] } : { rows: [] };
+    });
+    await updateMessage(5, 'Alice said hi', 'content', {});
+    expect(order).toEqual(['redact', 'connect', 'BEGIN', 'UPDATE', 'COMMIT']);
+  });
+
+  it('therapist edit: a failed redaction writes nothing and takes no connection', async () => {
+    redactMock.mockRejectedValue(new Error('model down'));
+    await expect(updateMessage(5, 'Alice said hi', 'content', {})).rejects.toThrow('model down');
+    expect(connectMock).not.toHaveBeenCalled();
+    expect(clientQueryMock).not.toHaveBeenCalled();
+  });
+
   it('researcher edit: writes only content_redacted and never runs redaction', async () => {
     clientQueryMock.mockImplementation(async (sql: string) =>
       sql.startsWith('UPDATE') ? { rows: [ROW] } : { rows: [] },

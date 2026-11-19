@@ -13,6 +13,7 @@
 import { pool } from '../config/db.js';
 import { deleteObject } from '../config/objectStorage.js';
 import { createLogger } from '../utils/logger.js';
+import { withLongQueries } from '../config/dbLongQueries.js';
 
 const log = createLogger('demoCleanup');
 
@@ -28,7 +29,7 @@ export interface DemoCleanupResult {
 }
 
 /** Delete demo users (and everything they own) older than maxAgeDays. */
-export async function runDemoCleanup(maxAgeDays = DEMO_MAX_AGE_DAYS): Promise<DemoCleanupResult> {
+async function runDemoCleanupUnbounded(maxAgeDays = DEMO_MAX_AGE_DAYS): Promise<DemoCleanupResult> {
   const expired = await pool.query<{ userid: number }>(
     `SELECT userid FROM users
      WHERE role = 'demo' AND created_at < NOW() - ($1 || ' days')::INTERVAL`,
@@ -86,3 +87,8 @@ export function stopDemoCleanupScheduler(): void {
     sweepTimer = null;
   }
 }
+
+// Bulk work: these run under the long statement limit instead of the pool's
+// default (config/dbLongQueries.ts, ai-therapist-366).
+export const runDemoCleanup: typeof runDemoCleanupUnbounded = (...args) =>
+  withLongQueries('demo_cleanup', () => runDemoCleanupUnbounded(...args));

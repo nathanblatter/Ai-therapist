@@ -917,6 +917,19 @@ export default function App() {
         throw new Error(errorData?.message || 'Chat session start was forbidden (403)');
       }
 
+      // Any other failure (a 500, or a 503 when the database did not answer
+      // in time) is a failed start with a retry message, never a "session"
+      // with no id (ai-therapist-366).
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        if (response.status === 503 && typeof errorData?.message === 'string') {
+          toast.error(errorData.message);
+          setIsConnecting(false);
+          return;
+        }
+        throw new Error(`Chat session start failed (${response.status})`);
+      }
+
       const data = await response.json();
       console.log('Chat session started:', data);
 
@@ -3099,6 +3112,15 @@ export default function App() {
                 text: errorData.message || 'This conversation is no longer available. Please start a new session.',
               },
             ]);
+            return;
+          }
+        }
+        // The database did not answer in time (ai-therapist-366): the
+        // server's retry message, which also carries the crisis line.
+        if (response.status === 503) {
+          const errorData = await response.json().catch(() => null);
+          if (errorData?.error === 'database_unavailable' && typeof errorData.message === 'string') {
+            setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'system', text: errorData.message }]);
             return;
           }
         }

@@ -137,6 +137,11 @@ export async function updateMessage(
     throw new Error('fieldToUpdate must be either "content" or "content_redacted"');
   }
 
+  // The redaction is a model call: made before the transaction opens, so the
+  // transaction never sits idle while it runs (the pool's
+  // idle_in_transaction_session_timeout would end it, ai-therapist-366).
+  const redactedContent = fieldToUpdate === 'content' ? await redactPHI(newContent) : null;
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -145,8 +150,6 @@ export async function updateMessage(
 
     if (fieldToUpdate === 'content') {
       // Therapist edit: update content and regenerate content_redacted.
-      const redactedContent = await redactPHI(newContent);
-
       result = await client.query<MessageRow>(
         `UPDATE messages
          SET content = $1,

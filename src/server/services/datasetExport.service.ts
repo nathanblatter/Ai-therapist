@@ -31,6 +31,7 @@ import {
 } from '../db/datasetExport.queries.js';
 import { getSurveyResponsesExport, getSurveyAnswersForExport } from '../db/qualtricsResponses.queries.js';
 import { scoreInstruments, weeklyMetrics, surveyParadata } from './qualtricsScoring.service.js';
+import { withLongQueries } from '../config/dbLongQueries.js';
 
 export interface DatasetColumn {
   name: string;
@@ -849,7 +850,13 @@ function renderCodebook(
 // ---------------------------------------------------------------------------
 // Build the in-memory dataset (CSVs + codebook). Assigns pseudonyms first.
 // ---------------------------------------------------------------------------
-export async function buildDataset(asOf: string, opts: BuildOptions = {}): Promise<BuildResult> {
+export function buildDataset(asOf: string, opts: BuildOptions = {}): Promise<BuildResult> {
+  // Whole-study reads (every message for the transcripts and the semantic
+  // metrics): the long statement limit, not the pool's default (ai-therapist-366).
+  return withLongQueries('dataset_export', () => buildDatasetUnbounded(asOf, opts));
+}
+
+async function buildDatasetUnbounded(asOf: string, opts: BuildOptions): Promise<BuildResult> {
   const generatedAt = opts.generatedAt ?? new Date().toISOString();
   const sha = gitSha();
 

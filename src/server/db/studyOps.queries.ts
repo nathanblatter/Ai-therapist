@@ -6,6 +6,7 @@
 // study_protocol config sets study_start/end, restricts to that window.
 import { pool } from '../config/db.js';
 import { getSystemConfigByKey } from './config.queries.js';
+import { withLongQueries } from '../config/dbLongQueries.js';
 
 export interface StudyProtocol {
   enrollment_target: number;
@@ -315,7 +316,7 @@ export async function deleteDeviation(id: number): Promise<boolean> {
  * ON CONFLICT (auto_key) DO NOTHING, so re-scanning adds nothing. Returns the
  * number of NEW deviation rows created this pass.
  */
-export async function scanForDeviations(): Promise<{ inserted: number }> {
+async function scanForDeviationsUnbounded(): Promise<{ inserted: number }> {
   const protocol = await getStudyProtocol();
   const start = protocol.study_start;
   const end = protocol.study_end;
@@ -430,3 +431,8 @@ export async function scanForDeviations(): Promise<{ inserted: number }> {
 
   return { inserted };
 }
+
+// Bulk work: these run under the long statement limit instead of the pool's
+// default (config/dbLongQueries.ts, ai-therapist-366).
+export const scanForDeviations: typeof scanForDeviationsUnbounded = (...args) =>
+  withLongQueries('deviation_scan', () => scanForDeviationsUnbounded(...args));

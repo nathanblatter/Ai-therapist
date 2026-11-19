@@ -15,6 +15,7 @@ import { randomUUID } from 'crypto';
 import { opsMetricsMiddleware } from './services/opsMetrics.service.js';
 import { createAdapter as createPostgresAdapter } from '@socket.io/postgres-adapter';
 import { pool } from './config/db.js';
+import { releaseOnEnd } from './config/dbHeldClient.js';
 import { requireRole } from './middleware/auth.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { insertMessagesBatch, getSidebandConnectionsByIds, getSessionAccessInfo } from './db/index.js';
@@ -107,8 +108,11 @@ import {
 } from './services/sessionLifecycle.service.js';
 
 import { createLogger } from './utils/logger.js';
+import { installProcessPolicy } from './utils/processPolicy.js';
 
 const log = createLogger('server');
+// Unhandled rejections are logged, not fatal; see utils/processPolicy.ts.
+installProcessPolicy(log);
 const socketLog = createLogger('socketio');
 const cspLog = createLogger('csp');
 
@@ -184,8 +188,10 @@ const io = new Server(httpServer, {
 // The eval harness (redteam cli/replay) boots this app in a CHILD process
 // against the same DB and sets SOCKET_PG_ADAPTER=off — without that, its
 // crisis emissions would fan out through Postgres to real admin dashboards.
+// Its LISTEN client is released when its connection ends, or every reconnect
+// would leave a pool slot taken for good (see config/dbHeldClient.ts).
 if (process.env.SOCKET_PG_ADAPTER !== 'off') {
-  io.adapter(createPostgresAdapter(pool));
+  io.adapter(createPostgresAdapter(releaseOnEnd(pool)));
 }
 pool.on('error', (err) => {
   log.error({ err }, '[Postgres adapter] pool error');
