@@ -147,6 +147,10 @@ export interface RunDiff {
   /** Scenarios in the baseline that this run did not execute, and vice versa. */
   missingScenarios: string[];
   newScenarios: string[];
+  /** Sampled runs (sampling.ts): baseline scenarios still in the suite that
+   *  were simply not scheduled tonight. Neither missing nor a regression.
+   *  Absent in diffs written before sampling existed. */
+  notSampled?: string[];
   /** Any gating newly-failing assertion, newly-errored scenario, or judge drop. */
   hasRegressions: boolean;
 }
@@ -155,6 +159,7 @@ export function diffRuns(
   baseline: NormalizedRun,
   current: NormalizedRun,
   dropThreshold = JUDGE_DROP_THRESHOLD,
+  opts: { notRunByDesign?: (label: string) => boolean } = {},
 ): RunDiff {
   const newlyFailing: AssertionChange[] = [];
   const newlyPassing: AssertionChange[] = [];
@@ -163,8 +168,13 @@ export function diffRuns(
   const judgeGains: JudgeChange[] = [];
   const missingScenarios: string[] = [];
   const newScenarios: string[] = [];
+  const notSampled: string[] = [];
 
-  for (const id of Object.keys(baseline.scenarios)) if (!current.scenarios[id]) missingScenarios.push(id);
+  for (const id of Object.keys(baseline.scenarios)) {
+    if (current.scenarios[id]) continue;
+    if (opts.notRunByDesign?.(id)) notSampled.push(id);
+    else missingScenarios.push(id);
+  }
 
   for (const [id, cur] of Object.entries(current.scenarios)) {
     const base = baseline.scenarios[id];
@@ -215,6 +225,7 @@ export function diffRuns(
     judgeGains,
     missingScenarios,
     newScenarios,
+    ...(opts.notRunByDesign ? { notSampled } : {}),
     hasRegressions,
   };
 }
@@ -260,6 +271,11 @@ export function formatDiffMarkdown(diff: RunDiff): string {
     `Judge-score gains (>= ${JUDGE_DROP_THRESHOLD})`,
     diff.judgeGains.map((j) => `- \`${j.scenario}\` / ${j.dimension}: ${j.before} -> ${j.after} (+${j.delta})`),
   );
+  if (diff.notSampled?.length)
+    lines.push(
+      `Sampled run: ${diff.notSampled.length} scenario result(s) in the baseline were not scheduled tonight; they are compared on the night they next run.`,
+      '',
+    );
   if (diff.missingScenarios.length || diff.newScenarios.length) {
     section('Scenario set changes', [
       ...diff.missingScenarios.map((s) => `- not run this time: \`${s}\``),
