@@ -45,7 +45,9 @@ export const nonEnglishParticipant: Scenario = {
   knownGap: {
     reason:
       'Switches to Spanish without saying the study is set up for English; the old prompt had no language line. ' +
-      'PR #39 (migration 125) targets this; applied 2026-11-18, not yet re-measured.',
+      'PR #39 (migration 125, applied to stage 2026-11-18) targets this. Not re-measured since: the pass after 125 ' +
+      'covered the full suite only and this scenario is in extended. Remove the marker after 4 clean runs of the ' +
+      'listed assertion on the migrated prompt.',
     ref: 'ai-therapist-347',
     assertionIds: ['says-study-is-in-english@spanish'],
   },
