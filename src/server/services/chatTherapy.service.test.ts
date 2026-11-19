@@ -395,6 +395,43 @@ describe('chat tool calling (ai-therapist-118)', () => {
     expect(executeLoggedToolCallMock).toHaveBeenCalledWith(sid, 'show_resource_card', {}, 'call_x', 'chat');
     endChatSession(sid);
   });
+
+  it('returns an overlay only when the call allows it (ai-therapist-367)', async () => {
+    const sid = 'chat_overlay_outcomes';
+    initializeChatSession(sid, 'SYSTEM');
+    const call = (name: string, id: string) => ({ type: 'function_call', call_id: id, name, arguments: '{}' });
+    createMock
+      .mockResolvedValueOnce({
+        output_text: '',
+        output: [
+          call('show_resource_card', 'c1'),
+          call('create_safety_plan', 'c2'),
+          call('create_custom_worksheet', 'c3'),
+          call('administer_scale', 'c4'),
+          call('start_thought_record', 'c5'),
+        ],
+      })
+      .mockResolvedValueOnce({ output_text: 'ok', output: [] });
+    executeLoggedToolCallMock
+      // The resource card errored: it still shows.
+      .mockResolvedValueOnce({ result: { error: 'boom', success: false }, success: false, timedOut: false })
+      // The safety plan's write timed out: shown, marked unconfirmed.
+      .mockResolvedValueOnce({ result: { error: 'late', success: false }, success: false, timedOut: true })
+      // The worksheet's write threw: not shown.
+      .mockResolvedValueOnce({ result: { error: 'db', success: false }, success: false, timedOut: false })
+      // The scale was refused by its weekly cadence: not shown.
+      .mockResolvedValueOnce({ result: { error: 'scale_recently_administered' }, success: true, timedOut: false })
+      // A display tool that worked: shown.
+      .mockResolvedValueOnce({ result: { success: true }, success: true, timedOut: false });
+
+    const { toolEvents } = await sendMessage(sid, 'hi');
+    expect(toolEvents.map((e) => [e.name, e.unconfirmed ?? false])).toEqual([
+      ['show_resource_card', false],
+      ['create_safety_plan', true],
+      ['start_thought_record', false],
+    ]);
+    endChatSession(sid);
+  });
 });
 
 // ai-therapist-222: the in-memory history Map is process-local, so a restart

@@ -9,6 +9,7 @@ import { getOpenAIKey } from '../config/secrets.js';
 import { insertTurnLatency, getActiveSessionIdsAmong } from '../db/index.js';
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
+import { chatOverlayEvent, type ChatToolEvent } from './chatToolOverlays.js';
 dotenv.config();
 
 interface ChatMessage {
@@ -22,12 +23,7 @@ interface ChatMessage {
 // card it already showed. The input array accepts both shapes interleaved.
 type ChatHistoryItem = ChatMessage | Record<string, unknown>;
 
-/** One executed tool call surfaced to the chat client (ai-therapist-118). */
-export interface ChatToolEvent {
-  name: string;
-  args: Record<string, unknown>;
-  result: unknown;
-}
+export type { ChatToolEvent };
 
 /** Result of one chat turn: the assistant text plus any tool calls made. */
 export interface ChatTurnResult {
@@ -36,17 +32,11 @@ export interface ChatTurnResult {
 }
 
 // Overlay tools the participant chat client can render via its fns map
-// (App.tsx). Only these ride back to the browser as toolEvents; data-only
-// tools (memory, RAG, logging) stay server-side.
-const CLIENT_RENDERED_TOOLS = new Set([
-  'show_resource_card',
-  'start_thought_record',
-  'show_journaling_prompt',
-  'display_session_recap',
-  'create_safety_plan',
-  'administer_scale',
-  'create_custom_worksheet',
-]);
+// (App.tsx) ride back to the browser as toolEvents, and only when what the
+// call did allows it (chatToolOverlays.ts: the crisis-resource card always; a
+// safety plan whose write did not confirm is marked "may not have been
+// saved"; the others only on success). Data-only tools (memory, RAG, logging)
+// stay server-side.
 
 // Cap on tool-execution rounds per turn; the final round forces a text reply.
 const MAX_TOOL_ROUNDS = 5;
@@ -550,12 +540,12 @@ export async function sendMessage(
         } catch {
           console.error(`[ChatTherapy] Unparseable arguments for ${call.name}; executing with {}`);
         }
-        const { result } = await executeLoggedToolCall(sessionId, call.name!, args, call.call_id!, 'chat');
+        const executed = await executeLoggedToolCall(sessionId, call.name!, args, call.call_id!, 'chat');
+        const { result } = executed;
         toolCallCount++;
 
-        if (CLIENT_RENDERED_TOOLS.has(call.name!)) {
-          toolEvents.push({ name: call.name!, args, result });
-        }
+        const overlay = chatOverlayEvent(call.name!, args, executed);
+        if (overlay) toolEvents.push(overlay);
 
         const outputItem: Record<string, unknown> = {
           type: 'function_call_output',
