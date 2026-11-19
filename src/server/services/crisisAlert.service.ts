@@ -13,7 +13,8 @@
 // A missing/absent config row (e.g. pre-migration-033 environments) falls back
 // to the legacy CRISIS_ALERT_PHONE env var, enabled by default.
 import { createLogger } from '../utils/logger.js';
-import { splitForSms, toE164 } from '../utils/smsText.js';
+import { splitForSms, splitPageForSms, toE164 } from '../utils/smsText.js';
+import { field, page, pageText, renderPage, type PageMessage } from '../utils/pageMessage.js';
 
 const log = createLogger('crisisAlert');
 
@@ -229,9 +230,10 @@ async function getSmsClient(): Promise<NonNullable<typeof smsClient>> {
 }
 
 /** AWS End User Messaging SMS. Never throws. The page is sent as one SMS, or
- *  as numbered parts in order (utils/smsText splitForSms); the channel is ok
- *  only when every part was accepted. */
-async function sendViaAwsSms(phone: string, message: string): Promise<AlertChannelResult> {
+ *  as numbered parts in order (utils/smsText: splitPageForSms for a
+ *  structured page, whose part 1 stands on its own; splitForSms for plain
+ *  text); the channel is ok only when every part was accepted. */
+async function sendViaAwsSms(phone: string, message: string | PageMessage): Promise<AlertChannelResult> {
   const started = Date.now();
   const result: AlertChannelResult = {
     channel: 'aws_sms',
@@ -248,7 +250,7 @@ async function sendViaAwsSms(phone: string, message: string): Promise<AlertChann
   let parts: string[];
   let destination: string | null;
   try {
-    parts = splitForSms(message);
+    parts = typeof message === 'string' ? splitForSms(message) : splitPageForSms(message);
     destination = toE164(phone);
   } catch (err) {
     result.error = errorCode(err) === 'error' ? 'text_shaping_failed' : errorCode(err);
@@ -358,8 +360,14 @@ function reportChannelFailures(delivery: AlertDelivery): void {
  * what each channel did. Never throws, never rejects: every branch is caught
  * here so a paging failure (config lookup, network, a provider error) cannot
  * propagate into the crisis-detection or session path that called it.
+ *
+ * `message` is plain text (system alerts) or a structured page
+ * (utils/pageMessage: the participant pages of crisisPaging.service). The
+ * bridge gets the page's full text either way; the SMS channel splits a
+ * structured page so that part 1 carries the headline, who is at risk, what
+ * changed, the Why line and the link.
  */
-export async function sendCrisisAlertDetailed(message: string): Promise<AlertDelivery> {
+export async function sendCrisisAlertDetailed(message: string | PageMessage): Promise<AlertDelivery> {
   try {
     const { enabled, phone } = await resolveAlertTarget();
     if (!enabled) {
@@ -369,7 +377,7 @@ export async function sendCrisisAlertDetailed(message: string): Promise<AlertDel
     const sends: Array<Promise<AlertChannelResult>> = [];
     const sendNames: AlertChannelName[] = [];
     if (phone && imessageConfigured()) {
-      sends.push(sendViaImessage(phone, message));
+      sends.push(sendViaImessage(phone, pageText(message)));
       sendNames.push('imessage');
     }
     if (phone && awsSmsConfigured()) {
@@ -413,7 +421,7 @@ export async function sendCrisisAlertDetailed(message: string): Promise<AlertDel
  * the page. No-ops (with a one-line warning) when paging is disabled or no
  * channel is configured, so local dev never tries to send. Never throws.
  */
-export async function sendCrisisAlert(message: string): Promise<boolean> {
+export async function sendCrisisAlert(message: string | PageMessage): Promise<boolean> {
   return (await sendCrisisAlertDetailed(message)).delivered;
 }
 
@@ -432,16 +440,27 @@ export interface TestPageReport {
   channels: AlertChannelResult[];
 }
 
-/** The text of a test page for one channel. Says TEST first, names the
- *  channel so the on-call can tell which ones arrived, and carries nothing
- *  about any participant. Short enough to be one SMS. */
-export function buildTestPageMessage(channel: AlertChannelName, sentAt: Date): string {
+/** A test page for one channel. Says TEST first, names the channel so the
+ *  on-call can tell which ones arrived, and carries nothing about any
+ *  participant. Short enough to be one SMS. */
+export function composeTestPage(channel: AlertChannelName, sentAt: Date): PageMessage {
   const label = channel === 'aws_sms' ? 'AWS SMS' : 'iMessage bridge';
-  return (
-    `TEST PAGE: AI-Therapist on-call paging check. This is NOT a participant event; no action is needed.\n` +
-    `Channel: ${label}. Sent ${sentAt.toISOString()}.\n` +
-    'You should get one TEST text per configured channel. If one is missing, tell the study coordinator.'
+  return page(
+    field(
+      'headline',
+      'TEST PAGE: AI-Therapist on-call paging check. This is NOT a participant event; no action is needed.',
+    ),
+    field('detail', `Channel: ${label}. Sent ${sentAt.toISOString()}.`),
+    field(
+      'action',
+      'You should get one TEST text per configured channel. If one is missing, tell the study coordinator.',
+    ),
   );
+}
+
+/** The bridge text of composeTestPage. */
+export function buildTestPageMessage(channel: AlertChannelName, sentAt: Date): string {
+  return renderPage(composeTestPage(channel, sentAt));
 }
 
 /**
@@ -469,7 +488,7 @@ export async function sendTestPage(now: Date = new Date()): Promise<TestPageRepo
     if (!enabled || !phone) return report;
     const sends: Array<Promise<AlertChannelResult>> = [];
     if (report.configured.imessage) sends.push(sendViaImessage(phone, buildTestPageMessage('imessage', now)));
-    if (report.configured.aws_sms) sends.push(sendViaAwsSms(phone, buildTestPageMessage('aws_sms', now)));
+    if (report.configured.aws_sms) sends.push(sendViaAwsSms(phone, composeTestPage('aws_sms', now)));
     report.channels = await Promise.all(sends);
     report.ok = report.channels.length > 0 && report.channels.every((c) => c.ok);
   } catch (err) {

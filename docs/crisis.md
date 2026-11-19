@@ -513,7 +513,8 @@ that she's going to kill herself tonight" scored 0 with no assessor call.
   labelled everywhere a person reads it, with no schema change:
   - the on-call page's first line reads `URGENT: AI-Therapist HIGH crisis flag (third party)`
     and its second `THIRD PARTY AT RISK: the participant is reporting someone else in crisis,
-    not their own.` (`buildCrisisPageMessage`); the thread-message page carries the same
+    not their own.` (`composeRiskPage`; in a split SMS, part 1 carries the shorter
+    `THIRD PARTY AT RISK: someone else, not the participant.`); the thread-message page carries the same
     sentence;
   - `crisis_events.risk_factors` starts with `third party at risk (reported by participant)`
     and `crisis_events.notes` carries the label;
@@ -722,9 +723,58 @@ Responses are tiered by severity/score:
     `ON-CALL PAGE NOT DELIVERED` at error level, emits `system:on-call-paging-failed` to the
     researcher room and a `session:page-decision` notice ("Page NOT delivered") to Live
     Monitoring; a single failed channel is reported the same way as degraded paging. The SMS
-    copy is the same text: plain 7-bit, one SMS up to 306 characters (two segments), otherwise numbered parts
-    (`(1/2) ...`) with the `Why:` line in the first. `npm run page:test` sends a labelled TEST
+    copy is plain 7-bit: one SMS up to 306 characters (two segments), otherwise numbered parts
+    (`(1/2) ...`). `npm run page:test` sends a labelled TEST
     page through each configured channel; no route, socket event or tool can.
+  - **SMS part 1 stands on its own** (since 2026-11-19). Carriers do not guarantee part order,
+    so each page is built as ordered fields with roles (`utils/pageMessage.ts`;
+    `composeRiskPage`, `composeVendorCutPage`, `composeVendorCutSilencePage`,
+    `composeVendorCeilingPage`, `composeMinimalPage`, `composeTestPage`). The iMessage bridge
+    gets every field's full text, one per line: byte-for-byte the text it got before. A
+    carrier SMS that needs more than one message (`utils/smsText.ts` `splitPageForSms`) puts
+    in part 1, in page order: the **headline** with the severity, **who is at risk** (the
+    subject line, `PARTICIPANT'S OWN RISK`, `ALSO: ...`), **what changed** (`WHAT CHANGED` /
+    `WHAT IT SAYS`), the **`Why:` line** and the **admin link**. When they do not fit at full
+    length the Why line, then the subject lines, the headline and the change line take their
+    shortest accurate form; only if that is still too long is the link replaced by
+    `Open Crisis Management: session <id prefix>...`, and the link then opens part 2. The
+    action line ("Review the transcript ...") joins part 1 when there is room. Parts 2+ carry
+    the rest in page order, including the full Why line when part 1 had the short one. Tests
+    (`utils/pageSms.test.ts`) check every page kind in every combination of its extra lines
+    (over 3,000 pages): part 1 carries every part-1 field and is at most 306 characters.
+    Examples, for a test session id `live_u1234567_ElovAp3oMAnCoQLKWeqEZIendoORid6Q`:
+
+    ```
+    (1/3) URGENT: AI-Therapist HIGH crisis flag
+    WHAT IT SAYS: ATTEMPT IN PROGRESS or act taken.
+    ALSO: harming another person.
+    PARTICIPANT'S OWN RISK (earlier page: someone else).
+    Why: RISK SCORE 100/100 from what the participant said.
+    Open Crisis Management: session live_u1234567_El...
+
+    (2/3) https://ai-therapist.nathanblatter.com/admin#session=live_u1234567_ElovAp3oMAnCoQLKWeqEZIendoORid6Q
+    Session live_u1234567_El...
+    Also: the voice vendor's content filter ended this participant's session 80 s ago.
+
+    (3/3) Follow-up for the same participant: you were paged 14 min ago (high risk score + vendor filter ended a session). This is new or more serious.
+    ```
+
+    The longest page any builder writes (a vendor cut during a high third-party flag, as a
+    follow-up; 837 characters on the bridge):
+
+    ```
+    (1/4) URGENT: AI-Therapist voice session CUT BY VENDOR FILTER at a HIGH flag (third party)
+    Why: VENDOR CUT, not a new risk score. HIGH flag (100/100) was about SOMEONE ELSE; own risk: MEDIUM.
+    https://ai-therapist.nathanblatter.com/admin#session=live_u1234567_ElovAp3oMAnCoQLKWeqEZIendoORid6Q
+
+    (2/4) Review the transcript and consider reaching out.
+    Why: VENDOR CUT, not a new risk score. The participant lost the assistant mid-conversation; the HIGH flag (100/100) was about SOMEONE ELSE the participant was reporting on (third party at risk), not the participant.
+
+    (3/4) The participant's own assessed risk was MEDIUM.
+    Session live_u1234567_El.... The app moves them to typed chat (a new voice call if chat is off) under a new session id; further cuts in the next 15 minutes are recorded, not paged.
+
+    (4/4) Follow-up for the same participant: you were paged 14 min ago (high risk score + vendor filter ended a session). This is new or more serious.
+    ```
   Not covered (unchanged): system alerts (assessor outage, spend cap, lost monitoring
   connection, eval drift) and thread-message alerts, which have their own throttles or none.
 - **Risk score >= 25 (low and up)**: the system injects hidden de-escalation steering

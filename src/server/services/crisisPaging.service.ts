@@ -60,6 +60,7 @@ import {
   INCIDENT_CHAIN_BACKSTOP_MS,
   type PagingRecordRow,
 } from '../db/paging.queries.js';
+import { field, page, renderPage, type PageField, type PageMessage } from '../utils/pageMessage.js';
 
 const log = createLogger('crisisPaging');
 
@@ -136,6 +137,12 @@ export function pageStage(escalation: PageEscalation | null | undefined): 0 | 1 
 export const ESCALATION_WORDS: Record<PageEscalation, string> = {
   plan_or_time: 'STATED INTENT WITH A TIME OR PLAN',
   attempt: 'ATTEMPT IN PROGRESS, or an act already taken',
+};
+
+/** ESCALATION_WORDS in their shortest accurate form (SMS part 1). */
+const ESCALATION_SHORT: Record<PageEscalation, string> = {
+  plan_or_time: 'STATED INTENT WITH A TIME OR PLAN',
+  attempt: 'ATTEMPT IN PROGRESS or act taken',
 };
 
 /**
@@ -298,7 +305,7 @@ interface PageRequest {
   facts: Record<string, unknown>;
   /** One line for the admin dashboards and the audit row. No PHI. */
   summary: string;
-  buildMessage: (ctx: MessageContext) => string;
+  buildMessage: (ctx: MessageContext) => PageMessage;
 }
 
 interface MessageContext {
@@ -463,6 +470,14 @@ export function vendorCutLevel(peak: PeakSeverity): PageLevel | null {
 }
 
 // ---- message copy (PHI-free: a session id prefix and numbers only) ---------
+//
+// Each page is built as a structured PageMessage (utils/pageMessage): ordered
+// fields, each with a role and, where it has one, a shortest accurate form.
+// The iMessage bridge gets every field's full text, one per line (the page as
+// it always read); a carrier SMS puts the headline, who is at risk, what
+// changed, the Why line and the admin link in part 1 whatever else the page
+// carries (utils/smsText splitPageForSms). Each build*Message function is the
+// bridge text of the matching compose*Page.
 
 function adminLink(sessionId: string): string {
   const base = (process.env.APP_BASE_URL ?? 'https://ai-therapist.nathanblatter.com').trim().replace(/\/+$/, '');
@@ -471,6 +486,12 @@ function adminLink(sessionId: string): string {
 
 function shortId(sessionId: string): string {
   return `${sessionId.substring(0, 16)}...`;
+}
+
+/** The admin link field. Its short form, for an SMS part 1 with no room for
+ *  the link, is a stable instruction with the session reference. */
+function linkField(sessionId: string): PageField {
+  return field('link', adminLink(sessionId), `Open Crisis Management: session ${shortId(sessionId)}`);
 }
 
 function ago(now: number, at: number): string {
@@ -484,16 +505,25 @@ const KIND_LABEL: Record<PageKind, string> = {
   vendor_ceiling: 'vendor session ceiling',
 };
 
-function followUpLine(ctx: Pick<MessageContext, 'previousPage' | 'now'>): string | null {
+function followUpLine(ctx: Pick<MessageContext, 'previousPage' | 'now'>): PageField | null {
   if (!ctx.previousPage) return null;
-  return (
+  return field(
+    'detail',
     `Follow-up for the same participant: you were paged ${ago(ctx.now, ctx.previousPage.at)} ` +
-    `(${ctx.previousPage.kinds.map((k) => KIND_LABEL[k]).join(' + ')}). This is new or more serious.`
+      `(${ctx.previousPage.kinds.map((k) => KIND_LABEL[k]).join(' + ')}). This is new or more serious.`,
   );
 }
 
-function lines(...parts: Array<string | null | false>): string {
-  return parts.filter((p): p is string => typeof p === 'string' && p.length > 0).join('\n');
+/** PAGE_SUBJECT_LABEL in its shortest accurate form (SMS part 1). */
+const PAGE_SUBJECT_SHORT: Record<PageSubject, string | undefined> = {
+  own: undefined,
+  third_party: 'THIRD PARTY AT RISK: someone else, not the participant.',
+  harm_to_others: 'RISK TO OTHERS: harming another person, not self-harm.',
+};
+
+/** " (third party)" / " (risk to others)" after a headline. */
+function whoSuffix(subject: PageSubject): string {
+  return subject === 'third_party' ? ' (third party)' : subject === 'harm_to_others' ? ' (risk to others)' : '';
 }
 
 /**
@@ -505,14 +535,14 @@ function lines(...parts: Array<string | null | false>): string {
 export type RiskFlagSource = 'participant_turn' | 'model_escalation';
 
 /** High-risk page (risk pipeline or the model's escalate_to_human at high). */
-export function buildRiskPageMessage(
+export function composeRiskPage(
   sessionId: string,
   riskScore: number,
   ctx: Pick<MessageContext, 'previousPage' | 'unpagedCut' | 'now'>,
   source: RiskFlagSource = 'participant_turn',
   subject: PageSubject = 'own',
   extra: { escalation?: PageEscalation | null; alsoSubject?: PageSubject | null } = {},
-): string {
+): PageMessage {
   const escalation = extra.escalation ?? null;
   const critical = riskScore >= CRITICAL_RISK_SCORE || escalation === 'attempt';
   const previous = ctx.previousPage;
@@ -520,81 +550,140 @@ export function buildRiskPageMessage(
   // after the participant's own 75 is a different person, not an escalation.
   const sameSubject = !!previous && (previous.subject ?? 'own') === subject;
   const previousScore = sameSubject ? previous?.riskScore : null;
-  const who = subject === 'third_party' ? ' (third party)' : subject === 'harm_to_others' ? ' (risk to others)' : '';
-  return lines(
-    `URGENT: AI-Therapist HIGH crisis flag${who}${critical && sameSubject ? ' (ESCALATED)' : ''}`,
-    PAGE_SUBJECT_LABEL[subject],
+  const escalated = critical && sameSubject ? ' (ESCALATED)' : '';
+  const subjectLabel = PAGE_SUBJECT_LABEL[subject];
+  const scoredFrom =
+    source === 'model_escalation'
+      ? null
+      : `from what the participant ${subject === 'third_party' ? 'reported about someone else' : 'said'}`;
+  return page(
+    // The short headline leaves "(third party)" to the subject line under it.
+    field(
+      'headline',
+      `URGENT: AI-Therapist HIGH crisis flag${whoSuffix(subject)}${escalated}`,
+      `URGENT: AI-Therapist HIGH crisis flag${escalated}`,
+    ),
+    subjectLabel ? field('subject', subjectLabel, PAGE_SUBJECT_SHORT[subject]) : null,
     // What changed, in words: the numbers alone do not say "tonight" or "an
-    // attempt is under way" (ai-therapist-353). Kept short, and before the
-    // Why line: a carrier SMS is split into parts of 300 characters, and the
-    // headline, who is at risk, what changed and the Why line must all be in
-    // part 1 (pinned in crisisEscalationLadder.test.ts).
-    escalation ? `${sameSubject ? 'WHAT CHANGED' : 'WHAT IT SAYS'}: ${ESCALATION_WORDS[escalation]}.` : null,
+    // attempt is under way" (ai-therapist-353).
+    escalation
+      ? field(
+          'change',
+          `${sameSubject ? 'WHAT CHANGED' : 'WHAT IT SAYS'}: ${ESCALATION_WORDS[escalation]}.`,
+          `${sameSubject ? 'WHAT CHANGED' : 'WHAT IT SAYS'}: ${ESCALATION_SHORT[escalation]}.`,
+        )
+      : null,
     // Own risk and someone else in the same message (handled as own risk).
     subject === 'own' && extra.alsoSubject === 'harm_to_others'
-      ? 'ALSO: the same message describes thoughts of harming another person.'
+      ? field(
+          'subject',
+          'ALSO: the same message describes thoughts of harming another person.',
+          'ALSO: harming another person.',
+        )
       : subject === 'own' && extra.alsoSubject === 'third_party'
-        ? "ALSO: the same message reports someone else's crisis."
+        ? field('subject', "ALSO: the same message reports someone else's crisis.", "ALSO: someone else's crisis.")
         : null,
     // The earlier page was about someone else: say that this one is not.
     subject === 'own' && previous && !sameSubject && previous.kinds.includes('risk')
-      ? "PARTICIPANT'S OWN RISK: the earlier page was about someone else; this one is about the participant."
+      ? field(
+          'subject',
+          "PARTICIPANT'S OWN RISK: the earlier page was about someone else; this one is about the participant.",
+          "PARTICIPANT'S OWN RISK (earlier page: someone else).",
+        )
       : null,
-    `Why: RISK SCORE ${riskScore}/100 ` +
-      (source === 'model_escalation'
-        ? 'set by the ASSISTANT asking for a human (escalate tool). It is the fixed score for that request, ' +
-          "not a score of the participant's words"
-        : `from what the participant ${subject === 'third_party' ? 'reported about someone else' : 'said'}`) +
-      // With a WHAT CHANGED line the comparison is already made in words, and
-      // the room in SMS part 1 goes to that line.
-      (critical && !escalation && typeof previousScore === 'number' && previousScore < riskScore
-        ? `, up from ${previousScore} at the last page.`
-        : '.'),
-    `Session ${shortId(sessionId)}`,
+    field(
+      'why',
+      `Why: RISK SCORE ${riskScore}/100 ` +
+        (scoredFrom ??
+          'set by the ASSISTANT asking for a human (escalate tool). It is the fixed score for that request, ' +
+            "not a score of the participant's words") +
+        // With a WHAT CHANGED line the comparison is already made in words.
+        (critical && !escalation && typeof previousScore === 'number' && previousScore < riskScore
+          ? `, up from ${previousScore} at the last page.`
+          : '.'),
+      source === 'model_escalation'
+        ? `Why: ASSISTANT asked for a human (escalate tool); fixed score ${riskScore}/100.`
+        : `Why: RISK SCORE ${riskScore}/100 from ${subject === 'third_party' ? "the participant's report" : 'what the participant said'}.`,
+    ),
+    field('detail', `Session ${shortId(sessionId)}`),
     ctx.unpagedCut
-      ? `Also: the voice vendor's content filter ended this participant's session ${ago(ctx.now, ctx.unpagedCut.at)}.`
+      ? field(
+          'detail',
+          `Also: the voice vendor's content filter ended this participant's session ${ago(ctx.now, ctx.unpagedCut.at)}.`,
+        )
       : null,
     followUpLine(ctx),
-    adminLink(sessionId),
+    linkField(sessionId),
   );
 }
 
+/** The bridge text of composeRiskPage. */
+export function buildRiskPageMessage(...args: Parameters<typeof composeRiskPage>): string {
+  return renderPage(composeRiskPage(...args));
+}
+
 /** The vendor's content filter ended a voice session. */
-export function buildVendorCutMessage(
+export function composeVendorCutPage(
   sessionId: string,
   peak: IncidentPeak,
   ctx: Pick<MessageContext, 'previousPage' | 'now'>,
-): string {
+): PageMessage {
   const score = peak.riskScore === null ? '' : ` (${peak.riskScore}/100)`;
   if (peak.severity === 'high') {
     const subject = peak.subject ?? 'own';
-    return lines(
-      'URGENT: AI-Therapist voice session ENDED BY THE VENDOR FILTER during a HIGH crisis flag' +
-        (subject === 'third_party' ? ' (third party)' : subject === 'harm_to_others' ? ' (risk to others)' : ''),
-      `Why: VENDOR CUT, not a new risk score. The participant lost the assistant mid-conversation; ` +
-        whoseRiskBeforeCut(peak, score),
-      `Session ${shortId(sessionId)}. The app moves them to typed chat (a new voice call if chat is off) ` +
-        'under a new session id; ' +
-        'further cuts in the next 15 minutes are recorded, not paged.',
+    return page(
+      field(
+        'headline',
+        'URGENT: AI-Therapist voice session ENDED BY THE VENDOR FILTER during a HIGH crisis flag' + whoSuffix(subject),
+        `URGENT: AI-Therapist voice session CUT BY VENDOR FILTER at a HIGH flag${whoSuffix(subject)}`,
+      ),
+      field(
+        'why',
+        `Why: VENDOR CUT, not a new risk score. The participant lost the assistant mid-conversation; ` +
+          whoseRiskBeforeCut(peak, score),
+        `Why: VENDOR CUT, not a new risk score. ${shortWhoseRisk(peak, score, 'before the cut was')}`,
+      ),
+      field(
+        'detail',
+        `Session ${shortId(sessionId)}. The app moves them to typed chat (a new voice call if chat is off) ` +
+          'under a new session id; ' +
+          'further cuts in the next 15 minutes are recorded, not paged.',
+      ),
       followUpLine(ctx),
-      'Review the transcript and consider reaching out.',
-      adminLink(sessionId),
+      field('action', 'Review the transcript and consider reaching out.'),
+      linkField(sessionId),
     );
   }
-  return lines(
-    'AI-Therapist: voice session ended by the vendor filter',
+  return page(
+    field('headline', 'AI-Therapist: voice session ended by the vendor filter'),
     peak.severity === 'medium'
-      ? `Why: VENDOR CUT, NOT a high risk score. Risk before the cut was MEDIUM${score}, below the paging ` +
-          "threshold. The filter often cuts the assistant's screening question, so the participant's answer " +
-          'may be what was lost.'
-      : 'Why: VENDOR CUT. The risk level for this session could NOT be read, so treat it as possibly serious.',
-    `Session ${shortId(sessionId)}. The participant lost the voice call mid-conversation; the app moves them ` +
-      'to typed chat (a new voice call if chat is off) under a new session id. You are paged again at once if ' +
-      'their risk rises.',
+      ? field(
+          'why',
+          `Why: VENDOR CUT, NOT a high risk score. Risk before the cut was MEDIUM${score}, below the paging ` +
+            "threshold. The filter often cuts the assistant's screening question, so the participant's answer " +
+            'may be what was lost.',
+          // The reason this pages at all stays in part 1: the lost answer.
+          `Why: VENDOR CUT, NOT a high risk score: MEDIUM${score} before the cut; their answer may be what was lost.`,
+        )
+      : field(
+          'why',
+          'Why: VENDOR CUT. The risk level for this session could NOT be read, so treat it as possibly serious.',
+        ),
+    field(
+      'detail',
+      `Session ${shortId(sessionId)}. The participant lost the voice call mid-conversation; the app moves them ` +
+        'to typed chat (a new voice call if chat is off) under a new session id. You are paged again at once if ' +
+        'their risk rises.',
+    ),
     followUpLine(ctx),
-    'Review the transcript and consider reaching out.',
-    adminLink(sessionId),
+    field('action', 'Review the transcript and consider reaching out.'),
+    linkField(sessionId),
   );
+}
+
+/** The bridge text of composeVendorCutPage. */
+export function buildVendorCutMessage(...args: Parameters<typeof composeVendorCutPage>): string {
+  return renderPage(composeVendorCutPage(...args));
 }
 
 /**
@@ -616,6 +705,16 @@ function whoseRiskBeforeCut(peak: IncidentPeak, score: string): string {
   return `the participant's own risk before the cut was HIGH${score}.`;
 }
 
+/** whoseRiskBeforeCut in its shortest accurate form (SMS part 1). `was` is
+ *  how the participant's own HIGH risk is dated ("before the cut was", "is"). */
+function shortWhoseRisk(peak: IncidentPeak, score: string, was: string): string {
+  const own =
+    peak.ownSeverity === 'high' || peak.ownSeverity === 'medium' ? peak.ownSeverity.toUpperCase() : 'none flagged';
+  if (peak.subject === 'third_party') return `HIGH flag${score} was about SOMEONE ELSE; own risk: ${own}.`;
+  if (peak.subject === 'harm_to_others') return `HIGH flag${score} was about HARMING ANOTHER PERSON; own risk: ${own}.`;
+  return `Their own risk ${was} HIGH${score}.`;
+}
+
 /**
  * A cut that was not paged at the time, and the participant has been silent
  * since. `peak` is their risk as it stands NOW, not at the cut: the turn the
@@ -623,61 +722,111 @@ function whoseRiskBeforeCut(peak: IncidentPeak, score: string): string {
  * flagged" may no longer be true three minutes later, and the text must not
  * say it then.
  */
-export function buildVendorCutSilenceMessage(
+export function composeVendorCutSilencePage(
   sessionId: string,
   silentForMs: number,
   ctx: Pick<MessageContext, 'previousPage' | 'now'>,
   peak: IncidentPeak = { severity: 'none', riskScore: null },
-): string {
+): PageMessage {
   const minutes = Math.max(1, Math.round(silentForMs / 60_000));
   const score = peak.riskScore === null ? '' : ` (${peak.riskScore}/100)`;
+  const cutThenSilence = `Why: VENDOR CUT, then ${minutes} min of silence.`;
   if (peak.severity === 'high') {
     const subject = peak.subject ?? 'own';
-    return lines(
-      'URGENT: AI-Therapist voice session ENDED BY THE VENDOR FILTER at HIGH risk' +
-        (subject === 'third_party' ? ' (third party)' : subject === 'harm_to_others' ? ' (risk to others)' : '') +
-        ', and the participant has NOT come back',
-      `Why: VENDOR CUT, then ${minutes} min of silence. ` +
-        (subject === 'own'
-          ? `Their risk is HIGH${score}; `
-          : `${whoseRiskBeforeCut(peak, score).replace(/\.$/, '')}; `) +
-        'they have not spoken in any session since the cut.',
-      `Session ${shortId(sessionId)}`,
+    return page(
+      field(
+        'headline',
+        'URGENT: AI-Therapist voice session ENDED BY THE VENDOR FILTER at HIGH risk' +
+          whoSuffix(subject) +
+          ', and the participant has NOT come back',
+        `URGENT: AI-Therapist voice session CUT BY VENDOR FILTER at HIGH risk${whoSuffix(subject)}; NOT come back`,
+      ),
+      field(
+        'why',
+        `${cutThenSilence} ` +
+          (subject === 'own'
+            ? `Their risk is HIGH${score}; `
+            : `${whoseRiskBeforeCut(peak, score).replace(/\.$/, '')}; `) +
+          'they have not spoken in any session since the cut.',
+        `${cutThenSilence} ${shortWhoseRisk(peak, score, 'is')}`,
+      ),
+      field('detail', `Session ${shortId(sessionId)}`),
       followUpLine(ctx),
-      'Review the transcript and reach out.',
-      adminLink(sessionId),
+      field('action', 'Review the transcript and reach out.'),
+      linkField(sessionId),
     );
   }
-  return lines(
-    'AI-Therapist: voice session ended by the vendor filter, and the participant has NOT come back',
+  return page(
+    field(
+      'headline',
+      'AI-Therapist: voice session ended by the vendor filter, and the participant has NOT come back',
+      'AI-Therapist: voice session cut by the vendor filter; participant NOT come back',
+    ),
     peak.severity === 'medium'
-      ? `Why: VENDOR CUT, then ${minutes} min of silence. NOT a high risk score: risk was MEDIUM${score}, ` +
-          'but the filter can end a session before their last words reach us, so those may not have been assessed.'
+      ? field(
+          'why',
+          `${cutThenSilence} NOT a high risk score: risk was MEDIUM${score}, ` +
+            'but the filter can end a session before their last words reach us, so those may not have been assessed.',
+          // The caveat is why a silent participant is paged at all; it stays.
+          `${cutThenSilence} Risk MEDIUM${score}; last words may not have been assessed.`,
+        )
       : peak.severity === 'unknown'
-        ? `Why: VENDOR CUT, then ${minutes} min of silence. Their risk level could NOT be read, so treat it as ` +
-          'possibly serious.'
-        : `Why: VENDOR CUT, then ${minutes} min of silence. NOT a high risk score: nothing they said was flagged, ` +
-          'but the filter can end a session before their last words reach us, so those may not have been assessed.',
-    `Session ${shortId(sessionId)}`,
+        ? field(
+            'why',
+            `${cutThenSilence} Their risk level could NOT be read, so treat it as possibly serious.`,
+            `${cutThenSilence} Risk could NOT be read: treat as possibly serious.`,
+          )
+        : field(
+            'why',
+            `${cutThenSilence} NOT a high risk score: nothing they said was flagged, ` +
+              'but the filter can end a session before their last words reach us, so those may not have been assessed.',
+            // "Nothing flagged" without the caveat reads as all clear; it is not.
+            `${cutThenSilence} Nothing flagged; last words may not have been assessed.`,
+          ),
+    field('detail', `Session ${shortId(sessionId)}`),
     followUpLine(ctx),
-    'Review the transcript and consider reaching out.',
-    adminLink(sessionId),
+    field('action', 'Review the transcript and consider reaching out.'),
+    linkField(sessionId),
   );
 }
 
+/** The bridge text of composeVendorCutSilencePage. */
+export function buildVendorCutSilenceMessage(...args: Parameters<typeof composeVendorCutSilencePage>): string {
+  return renderPage(composeVendorCutSilencePage(...args));
+}
+
 /** The vendor's session ceiling ended a session during a high flag. */
-export function buildVendorCeilingMessage(
+export function composeVendorCeilingPage(
   sessionId: string,
   ctx: Pick<MessageContext, 'previousPage' | 'now'>,
-): string {
-  return lines(
-    'URGENT: AI-Therapist voice session hit the vendor session ceiling during a HIGH crisis flag',
-    'Why: VENDOR SESSION LIMIT, not a new risk score. The app moves them to typed chat (a new voice call if ' +
-      'chat is off) under a new session id.',
-    `Session ${shortId(sessionId)}`,
+): PageMessage {
+  return page(
+    field('headline', 'URGENT: AI-Therapist voice session hit the vendor session ceiling during a HIGH crisis flag'),
+    field(
+      'why',
+      'Why: VENDOR SESSION LIMIT, not a new risk score. The app moves them to typed chat (a new voice call if ' +
+        'chat is off) under a new session id.',
+      'Why: VENDOR SESSION LIMIT, not a new risk score.',
+    ),
+    field('detail', `Session ${shortId(sessionId)}`),
     followUpLine(ctx),
-    'Review the transcript and consider reaching out.',
-    adminLink(sessionId),
+    field('action', 'Review the transcript and consider reaching out.'),
+    linkField(sessionId),
+  );
+}
+
+/** The bridge text of composeVendorCeilingPage. */
+export function buildVendorCeilingMessage(...args: Parameters<typeof composeVendorCeilingPage>): string {
+  return renderPage(composeVendorCeilingPage(...args));
+}
+
+/** The page sent when building the real one threw: still the headline, the
+ *  session and the link, never nothing. */
+export function composeMinimalPage(sessionId: string, kind: PageKind): PageMessage {
+  return page(
+    field('headline', `URGENT: AI-Therapist crisis alert (${KIND_LABEL[kind]})`),
+    field('detail', `Session ${shortId(sessionId)}`),
+    linkField(sessionId),
   );
 }
 
@@ -886,12 +1035,12 @@ async function send(
   }
   const kinds: PageKind[] = [kind];
 
-  let message: string;
+  let message: PageMessage;
   try {
     message = request.buildMessage({ previousPage, unpagedCut, now });
   } catch (err) {
     log.error({ err }, '[paging] building the page text failed; sending a minimal page');
-    message = `URGENT: AI-Therapist crisis alert (${KIND_LABEL[kind]})\nSession ${shortId(sessionId)}\n${adminLink(sessionId)}`;
+    message = composeMinimalPage(sessionId, kind);
   }
 
   // Claim before sending, in the same tick as the decision above.
@@ -1047,7 +1196,7 @@ export async function pageHighRisk(
           ? `high risk flag raised by the assistant's escalate tool (fixed score ${riskScore}/100).`
           : `high risk flag${about}, score ${riskScore}/100` +
             (escalation ? `; ${ESCALATION_WORDS[escalation].toLowerCase()}.` : '.'),
-      buildMessage: (ctx) => buildRiskPageMessage(sessionId, riskScore, ctx, source, subject, extra),
+      buildMessage: (ctx) => composeRiskPage(sessionId, riskScore, ctx, source, subject, extra),
     });
   } catch (err) {
     // dispatchPage is written not to throw; if it does, the page still goes.
@@ -1056,7 +1205,7 @@ export async function pageHighRisk(
       sessionId,
       'risk',
       level,
-      buildRiskPageMessage(sessionId, riskScore, bareContext(), source, subject, extra),
+      composeRiskPage(sessionId, riskScore, bareContext(), source, subject, extra),
     );
   }
 }
@@ -1065,7 +1214,12 @@ function bareContext(): MessageContext {
   return { previousPage: null, unpagedCut: null, now: Date.now() };
 }
 
-async function sendDirect(sessionId: string, kind: PageKind, level: PageLevel, message: string): Promise<PageDecision> {
+async function sendDirect(
+  sessionId: string,
+  kind: PageKind,
+  level: PageLevel,
+  message: PageMessage,
+): Promise<PageDecision> {
   let ok = false;
   try {
     const { sendCrisisAlert } = await import('./crisisAlert.service.js');
@@ -1149,7 +1303,7 @@ async function performSilenceCheck(sessionId: string, cutAt: number): Promise<Si
     summary:
       'the vendor content filter ended this voice session and the participant has not spoken in any session ' +
       `for ${Math.round(silentForMs / 1000)} s since; ${peakWords(peak, 'now')}.`,
-    buildMessage: (ctx) => buildVendorCutSilenceMessage(sessionId, silentForMs, ctx, peak),
+    buildMessage: (ctx) => composeVendorCutSilencePage(sessionId, silentForMs, ctx, peak),
   });
   return { outcome: decision.outcome, decision };
 }
@@ -1346,7 +1500,7 @@ export async function sweepSilenceChecks(): Promise<{ ran: number; armed: number
               riskScore: null,
               facts: {},
               summary,
-              buildMessage: () => '',
+              buildMessage: () => page(),
             },
             {
               outcome: undelivered ? 'not_delivered' : 'no_page',
@@ -1517,7 +1671,7 @@ export async function pageVendorTermination(input: {
         riskScore: null,
         facts: { cause, peakSeverity: 'high' },
         summary: 'the voice session hit the vendor session ceiling during a high crisis flag.',
-        buildMessage: (ctx) => buildVendorCeilingMessage(sessionId, ctx),
+        buildMessage: (ctx) => composeVendorCeilingPage(sessionId, ctx),
       });
     }
 
@@ -1535,7 +1689,7 @@ export async function pageVendorTermination(input: {
         riskScore: null,
         facts: {},
         summary,
-        buildMessage: () => '',
+        buildMessage: () => page(),
       };
       const actionId = await record(
         sessionId,
@@ -1581,7 +1735,7 @@ export async function pageVendorTermination(input: {
         ...(peak.subject && peak.subject !== 'own' ? { ownSeverity: peak.ownSeverity ?? 'none' } : {}),
       },
       summary: `the vendor content filter ended this voice session; ${peakWords(peak, 'before the cut')}.`,
-      buildMessage: (ctx) => buildVendorCutMessage(sessionId, peak, ctx),
+      buildMessage: (ctx) => composeVendorCutPage(sessionId, peak, ctx),
     });
   } catch (err) {
     log.error({ err }, '[paging] vendor-termination paging failed unexpectedly; sending directly');
@@ -1590,8 +1744,8 @@ export async function pageVendorTermination(input: {
       cause === 'expired' ? 'vendor_ceiling' : 'vendor_cut',
       PAGE_LEVEL.mediumVendorCut,
       cause === 'expired'
-        ? buildVendorCeilingMessage(sessionId, bareContext())
-        : buildVendorCutMessage(sessionId, { severity: 'unknown', riskScore: null }, bareContext()),
+        ? composeVendorCeilingPage(sessionId, bareContext())
+        : composeVendorCutPage(sessionId, { severity: 'unknown', riskScore: null }, bareContext()),
     );
   }
 }

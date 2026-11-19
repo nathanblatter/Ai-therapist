@@ -403,8 +403,10 @@ describe('vendor-cut pages say whose risk was high', () => {
   });
 });
 
-// PR 76: a carrier SMS is split at line boundaries into parts of at most 300
-// characters, and part 1 is what the on-call reads first.
+// A carrier SMS is split into parts of at most 300 characters, and carriers do
+// not promise their order: part 1 must stand on its own. These run the REAL
+// SMS path (composeRiskPage + splitPageForSms, what sendViaAwsSms sends), not
+// the plain-text splitter on the bridge text (PR 82 review).
 describe('the first SMS part carries who is at risk, what changed and why', () => {
   const previous = (subject: 'own' | 'third_party' | 'harm_to_others') => ({
     actionId: 1,
@@ -428,35 +430,45 @@ describe('the first SMS part carries who is at risk, what changed and why', () =
     ['harm_to_others', 'plan_or_time'],
     ['harm_to_others', 'attempt'],
   ] as const)('%s, escalation %s, as a follow-up at 100', async (subject, escalation) => {
-    const { splitForSms } = await import('../utils/smsText.js');
-    const text = paging.buildRiskPageMessage(
-      'live_0123456789abcdefghijklmnop',
-      100,
-      { previousPage: previous(subject), unpagedCut: null, now: Date.now() },
-      'participant_turn',
-      subject,
-      { escalation },
-    );
-    const first = splitForSms(text)[0];
+    const { splitPageForSms, gsmLength, SMS_SINGLE_MAX } = await import('../utils/smsText.js');
+    const sessionId = 'live_0123456789abcdefghijklmnop';
+    const first = splitPageForSms(
+      paging.composeRiskPage(
+        sessionId,
+        100,
+        { previousPage: previous(subject), unpagedCut: null, now: Date.now() },
+        'participant_turn',
+        subject,
+        { escalation },
+      ),
+    )[0];
+    expect(gsmLength(first)).toBeLessThanOrEqual(SMS_SINGLE_MAX);
     expect(first).toContain('URGENT: AI-Therapist HIGH crisis flag');
     expect(first).toContain('Why: RISK SCORE 100/100');
     if (subject === 'third_party') expect(first).toContain('THIRD PARTY AT RISK');
     if (subject === 'harm_to_others') expect(first).toContain('RISK TO OTHERS');
-    if (escalation) expect(first).toContain(`WHAT CHANGED: ${paging.ESCALATION_WORDS[escalation]}`);
+    if (escalation === 'plan_or_time') expect(first).toContain('WHAT CHANGED: STATED INTENT WITH A TIME OR PLAN');
+    if (escalation === 'attempt') expect(first).toMatch(/WHAT CHANGED: ATTEMPT IN PROGRESS/);
+    expect(first).toMatch(
+      new RegExp(`admin#session=${sessionId}|Open Crisis Management: session ${sessionId.slice(0, 16)}`),
+    );
   });
 
   it("the participant's own page after a third-party page keeps OWN RISK and the Why line in part 1", async () => {
-    const { splitForSms } = await import('../utils/smsText.js');
-    const text = paging.buildRiskPageMessage(
-      'live_0123456789abcdefghijklmnop',
-      75,
-      { previousPage: previous('third_party'), unpagedCut: null, now: Date.now() },
-      'participant_turn',
-      'own',
-      { escalation: 'plan_or_time', alsoSubject: 'harm_to_others' },
-    );
-    const first = splitForSms(text)[0];
+    const { splitPageForSms } = await import('../utils/smsText.js');
+    const first = splitPageForSms(
+      paging.composeRiskPage(
+        'live_0123456789abcdefghijklmnop',
+        75,
+        { previousPage: previous('third_party'), unpagedCut: null, now: Date.now() },
+        'participant_turn',
+        'own',
+        { escalation: 'plan_or_time', alsoSubject: 'harm_to_others' },
+      ),
+    )[0];
     expect(first).toContain("PARTICIPANT'S OWN RISK");
+    expect(first).toMatch(/ALSO: .*harming another person/);
     expect(first).toContain('WHAT IT SAYS: STATED INTENT WITH A TIME OR PLAN');
+    expect(first).toContain('Why: RISK SCORE 75/100');
   });
 });

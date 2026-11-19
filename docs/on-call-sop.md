@@ -105,7 +105,31 @@ configured, at the same time (`docs/on-call-paging-setup.md`):
 With both on, **you get each page twice, once per channel**. That is intended:
 either one failing still reaches you. The two say the same thing. The SMS copy
 of a long page arrives as numbered parts, "(1/2)", "(2/2)"; read all parts. If
-a part is missing, open the dashboard rather than wait for it. Save both
+a part is missing, open the dashboard rather than wait for it.
+
+**What each SMS part contains (since 2026-11-19).** Carriers do not promise to
+deliver the parts in order, or at all, so **part 1 is enough to act on by
+itself**:
+
+- **Part 1** always carries, in this order: the headline with the severity
+  (`URGENT: ... HIGH crisis flag`, or the vendor-cut headline); **who is at
+  risk** when it is not simply the participant (`THIRD PARTY AT RISK`, `RISK TO
+  OTHERS`, `PARTICIPANT'S OWN RISK`, `ALSO: ...`); **what changed** on an
+  escalation (`WHAT CHANGED: ...` / `WHAT IT SAYS: ...`); the **`Why:`** line;
+  and the **admin link** to the session. When the page carries many of these,
+  part 1 uses shorter wording for them (for example `THIRD PARTY AT RISK:
+  someone else, not the participant.`), and if the link still does not fit,
+  part 1 ends with `Open Crisis Management: session <first 16 characters>...`
+  and **the link is the first thing in part 2**. "Review the transcript ..."
+  joins part 1 when there is room, otherwise it opens part 2.
+- **Parts 2 and later**: the link (when part 1 had only the instruction), what
+  to do, the full `Why:` explanation when part 1 had the short one, the session
+  reference, "Also: the voice vendor's content filter ended ...", and the
+  "Follow-up for the same participant" line.
+
+A page short enough for one SMS (306 characters) arrives whole, exactly as the
+iMessage copy. The iMessage copy is never split and its wording did not change.
+Save both
 senders in your contacts and exempt them from Do Not Disturb. **Do not reply
 STOP to the toll-free number**: that opts your phone out and the SMS channel
 stops reaching you until the coordinator has it reversed.
@@ -139,7 +163,9 @@ clinical decision; it does today (`REPAGE_ON_STATED_TIME_OR_PLAN`).]
 
 **Pages that are not about the participant's own risk** are labelled on their
 first two lines: `(third party)` / `THIRD PARTY AT RISK: ...` and
-`(risk to others)` / `RISK TO OTHERS: ...`. What to do for each is in sections
+`(risk to others)` / `RISK TO OTHERS: ...` (in a split SMS, part 1 may drop the
+headline's `(third party)` and keep the shorter `THIRD PARTY AT RISK: someone
+else, not the participant.` line under it). What to do for each is in sections
 4a and 4b below. Both sections are DRAFTS.
 
 ## 2. On-call rotation

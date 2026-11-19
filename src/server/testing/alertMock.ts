@@ -6,8 +6,11 @@
 //     (await import('../testing/alertMock.js')).alertModuleMock(sendCrisisAlertMock));
 //
 // The mock may return a boolean (one channel, accepted or not), or a full
-// AlertDelivery when a test cares about the individual channels.
+// AlertDelivery when a test cares about the individual channels. A structured
+// page (utils/pageMessage) reaches the pager as its bridge text, the text the
+// on-call reads on the iMessage channel.
 import type { AlertChannelResult, AlertDelivery } from '../services/crisisAlert.service.js';
+import { pageText, type PageMessage } from '../utils/pageMessage.js';
 
 /** One channel's result, for tests. */
 export function channelResult(
@@ -28,13 +31,13 @@ export function channelResult(
 }
 
 export function alertModuleMock(pager: (message: string) => unknown): {
-  sendCrisisAlert: (message: string) => Promise<unknown>;
-  sendCrisisAlertDetailed: (message: string) => Promise<AlertDelivery>;
+  sendCrisisAlert: (message: string | PageMessage) => Promise<unknown>;
+  sendCrisisAlertDetailed: (message: string | PageMessage) => Promise<AlertDelivery>;
 } {
   return {
-    sendCrisisAlert: async (message) => pager(message),
+    sendCrisisAlert: async (message) => pager(pageText(message)),
     sendCrisisAlertDetailed: async (message) => {
-      const answer = await pager(message);
+      const answer = await pager(pageText(message));
       if (answer !== null && typeof answer === 'object') return answer as AlertDelivery;
       const ok = answer === true;
       return { delivered: ok, skipped: null, channels: [channelResult('imessage', ok)] };
