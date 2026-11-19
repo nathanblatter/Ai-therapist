@@ -3,7 +3,9 @@ import {
   emitCrisisResources,
   hasEmittedHighRiskResources,
   clearCrisisResourceState,
+  noteParticipantJoined,
   CRISIS_RESOURCE_DEDUPE_MS,
+  CRISIS_RESOURCE_JOIN_REPLAY_MS,
 } from './crisisResources.js';
 
 // The participant-facing crisis resource card event (ai-therapist-293).
@@ -89,5 +91,63 @@ describe('emitCrisisResources', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(emitCrisisResources('live_1', { reason: 'vendor_cut' })).toBe(false);
     spy.mockRestore();
+  });
+});
+
+// Review of PR 65: a pre-session check-in is scored while the session is being
+// started, before the participant's browser has joined the session room.
+describe('a high flag raised before the participant has joined the room', () => {
+  it('REPRODUCTION: the card is held and sent to the first participant socket that joins', () => {
+    emitCrisisResources('chat_checkin', { reason: 'high_risk', severity: 'high', riskScore: 85 }, 1_000);
+    // The room emit went out (to nobody), and the pipeline now believes the card was shown.
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(hasEmittedHighRiskResources('chat_checkin')).toBe(true);
+
+    const send = vi.fn();
+    expect(noteParticipantJoined('chat_checkin', send, 3_000)).toBe(true);
+    expect(send).toHaveBeenCalledWith('session:crisis-emergency', {
+      sessionId: 'chat_checkin',
+      severity: 'high',
+      riskScore: 85,
+      reason: 'high_risk',
+    });
+  });
+
+  it('is sent once: a reconnect does not re-open a card the participant closed', () => {
+    emitCrisisResources('chat_checkin', { reason: 'high_risk', severity: 'high', riskScore: 85 }, 1_000);
+    const send = vi.fn();
+    noteParticipantJoined('chat_checkin', send, 2_000);
+    expect(noteParticipantJoined('chat_checkin', send, 5_000)).toBe(false);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('a high flag raised after the participant joined is not replayed (the room emit reached them)', () => {
+    const send = vi.fn();
+    expect(noteParticipantJoined('live_1', send, 1_000)).toBe(false);
+    emitCrisisResources('live_1', { reason: 'high_risk', severity: 'high', riskScore: 80 }, 2_000);
+    expect(noteParticipantJoined('live_1', send, 3_000)).toBe(false);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('a vendor-only event is not held, and a stale card is not sent', () => {
+    const send = vi.fn();
+    emitCrisisResources('s_vendor', { reason: 'vendor_cut' }, 1_000);
+    expect(noteParticipantJoined('s_vendor', send, 2_000)).toBe(false);
+    emitCrisisResources('s_old', { reason: 'high_risk', severity: 'high', riskScore: 90 }, 1_000);
+    expect(noteParticipantJoined('s_old', send, 1_000 + CRISIS_RESOURCE_JOIN_REPLAY_MS + 1)).toBe(false);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('never throws when the socket does', () => {
+    emitCrisisResources('s_throw', { reason: 'high_risk', severity: 'high', riskScore: 90 }, 1_000);
+    expect(
+      noteParticipantJoined(
+        's_throw',
+        () => {
+          throw new Error('socket closed');
+        },
+        2_000,
+      ),
+    ).toBe(false);
   });
 });

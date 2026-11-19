@@ -23,13 +23,19 @@ import {
   buildChatSteeringGuidance,
   executeGraduatedResponse,
   CHAT_SAFETY_PROTOCOL_GUIDANCE,
+  subjectGuidance,
+  subjectLabel,
 } from './crisisIntervention.service.js';
 import {
   getRecentSessionMessages,
   getSessionAccessInfo,
+  getSessionCheckin,
   getSessionCrisisState,
+  getSessionHighFlagSubjects,
+  getSessionFlagEscalations,
   recordRecoveryDisclosure,
   incidentHasCrisisAdverseEvent,
+  type SessionCheckin,
 } from '../db/index.js';
 import { sessionSuppressesSafetyPipeline } from './suppression.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
@@ -41,6 +47,72 @@ export interface ParticipantTurn {
   sessionId: string;
   messageId: string | number | null;
   content: string;
+  /** 'checkin': `content` is the free text of the pre-session check-in, not a
+   *  chat or voice turn (see runCheckinCrisisScreen). */
+  source?: 'checkin';
+}
+
+/** How many recent turns the assessor is shown. */
+const HISTORY_WINDOW = 10;
+
+/** The check-in's free text (what is on their mind, what they want from
+ *  today), as one string to score; '' when there is none. The mood number is
+ *  not text and is not scored. Pure; exported for tests. */
+export function checkinFreeText(checkin: Pick<SessionCheckin, 'topic' | 'goal'> | null | undefined): string {
+  return [checkin?.topic, checkin?.goal]
+    .map((part) => (typeof part === 'string' ? part.trim() : ''))
+    .filter(Boolean)
+    .join('\n');
+}
+
+/**
+ * Pre-session check-in through the crisis pipeline.
+ *
+ * The check-in ("what's on your mind", "what do you want from today") is
+ * quoted into the model's prompt, and until this existed that was the only
+ * place it went: a participant who wrote "I don't really want to be alive"
+ * and then typed "hi" had no risk row, no flag and no steer (measured
+ * 2026-11-18, 5 of 5 runs, peak risk 0). It is the participant's own words to
+ * the assistant, so it is scored exactly as a first message is: same screen,
+ * same assessor, same flag, page and steering, on the same channel rules. The
+ * risk row has no message id (the check-in is not a `messages` row) and
+ * carries `source: 'checkin'`.
+ *
+ * Call it once, after the session row and its check-in are stored. Never
+ * throws. Chat callers inject the returned `steeringGuidance`.
+ */
+export async function runCheckinCrisisScreen(
+  sessionId: string,
+  checkin: Pick<SessionCheckin, 'topic' | 'goal'> | null | undefined,
+  channel: 'realtime' | 'chat',
+): Promise<CrisisPipelineResult> {
+  const content = checkinFreeText(checkin);
+  if (!content) return NONE_RESULT;
+  return runCrisisPipeline({ sessionId, messageId: null, content, source: 'checkin' }, channel);
+}
+
+/**
+ * The history the risk assessor reads for a turn. While the start of the
+ * session is still inside the window, the check-in's free text is put first,
+ * as the participant's words: after a check-in that said "I don't really want
+ * to be alive", a later "yeah" or "tonight" refers to it, and the assessor can
+ * only resolve that if it can see it. Never throws (a failed read leaves the
+ * history as it was).
+ */
+async function withCheckinContext<T extends { role: string; content?: string | null }>(
+  sessionId: string,
+  history: T[],
+  turn: ParticipantTurn,
+): Promise<Array<T | { role: string; content: string }>> {
+  if (turn.source === 'checkin' || history.length >= HISTORY_WINDOW) return history;
+  try {
+    const text = checkinFreeText(await getSessionCheckin(sessionId));
+    if (!text) return history;
+    return [{ role: 'user', content: `[Written in the pre-session check-in form] ${text}` }, ...history];
+  } catch (err) {
+    console.error('[CrisisPipeline] check-in read failed (non-fatal):', err);
+    return history;
+  }
 }
 
 export type CrisisSeverity = 'none' | 'low' | 'medium' | 'high';
@@ -95,7 +167,7 @@ export async function runCrisisPipeline(
 
     let history: Awaited<ReturnType<typeof getRecentSessionMessages>> = [];
     try {
-      history = await getRecentSessionMessages(turn.sessionId, 10);
+      history = await getRecentSessionMessages(turn.sessionId, HISTORY_WINDOW);
     } catch (err) {
       logDbMiss('history read')(err);
     }
@@ -116,10 +188,15 @@ export async function runCrisisPipeline(
     // Scoring and the age check therefore read the sentence as it was spoken:
     // this turn joined to the participant turn(s) that ended moments before it.
     const stitched =
-      channel === 'realtime' ? stitchSplitTurnParts(turn, history) : { content: turn.content, priorMessageIds: [] };
+      channel === 'realtime' && turn.source !== 'checkin'
+        ? stitchSplitTurnParts(turn, history)
+        : { content: turn.content, priorMessageIds: [] };
     const scoredTurn = stitched.content === turn.content ? turn : { ...turn, content: stitched.content };
 
-    const minorVerdict = channel === 'realtime' ? startRealtimeMinorConfirmation(scoredTurn, history) : null;
+    // Unchanged for the check-in: the age gate has never read it, and whether
+    // it should is not decided here.
+    const minorVerdict =
+      channel === 'realtime' && turn.source !== 'checkin' ? startRealtimeMinorConfirmation(scoredTurn, history) : null;
 
     const risk = await analyzeMessageRisk(
       {
@@ -132,11 +209,20 @@ export async function runCrisisPipeline(
         // own "sudden spike" (a medium statement plus " you know?" scored
         // high, and paged, before this was passed).
         ...(stitched.priorMessageIds.length > 0 ? { stitched_message_ids: stitched.priorMessageIds } : {}),
+        ...(turn.source ? { source: turn.source } : {}),
       },
-      history,
+      await withCheckinContext(turn.sessionId, history, turn),
     );
 
     const severity = risk.severity as CrisisSeverity;
+    // Not the participant's own suicide or self-harm risk: someone else's
+    // crisis reported by the participant (ai-therapist-326), or thoughts of
+    // harming another person (ai-therapist-330). Same flag, same page; the
+    // label, the steer and the ladder differ.
+    const subject = risk.subject ?? (risk.thirdParty === true ? 'third_party' : null);
+    const subjectDetail = subject ? { subject } : {};
+    const label = subjectLabel(subject);
+    const fromCheckin = turn.source === 'checkin';
     let steeringGuidance: string | null = null;
     let flagged = false;
 
@@ -145,7 +231,8 @@ export async function runCrisisPipeline(
     // session from here: a later escalation re-emits from
     // executeHighRiskResponse exactly as before, so a participant who closed
     // the card is not shown it again on every high turn.
-    if (severity === 'high' && !hasEmittedHighRiskResources(turn.sessionId)) {
+    // Not for thoughts of harming someone else (see executeHighRiskResponse).
+    if (severity === 'high' && subject !== 'harm_to_others' && !hasEmittedHighRiskResources(turn.sessionId)) {
       emitCrisisResources(turn.sessionId, { reason: 'high_risk', severity: 'high', riskScore: risk.riskScore });
     }
 
@@ -195,7 +282,20 @@ export async function runCrisisPipeline(
       // ---- Steering ----
       if (channel === 'realtime') {
         // Sideband injection happens inside; realtime ignores the return value.
-        await maybeSteerSession(turn.sessionId, risk.riskScore, severity, forceSteer);
+        // The extra arguments only exist for a labelled subject; every other
+        // turn makes the call it always made.
+        if (subject) {
+          await maybeSteerSession(
+            turn.sessionId,
+            risk.riskScore,
+            severity,
+            forceSteer,
+            subjectGuidance(subject, 'realtime'),
+            subject,
+          );
+        } else {
+          await maybeSteerSession(turn.sessionId, risk.riskScore, severity, forceSteer);
+        }
       } else if (shouldSteer(turn.sessionId, risk.riskScore, forceSteer)) {
         // Chat: same shared cooldown, but the guidance is returned for the
         // caller to inject into this turn's model call. High severity swaps the
@@ -204,16 +304,19 @@ export async function runCrisisPipeline(
         // High severity forces past the cooldown — a crisis escalating within
         // three minutes of a routine steer must still get the safety protocol.
         steeringGuidance =
-          severity === 'high' ? CHAT_SAFETY_PROTOCOL_GUIDANCE : buildChatSteeringGuidance(risk.riskScore, severity);
+          subjectGuidance(subject, 'chat') ??
+          (severity === 'high' ? CHAT_SAFETY_PROTOCOL_GUIDANCE : buildChatSteeringGuidance(risk.riskScore, severity));
         await logInterventionAction(turn.sessionId, 'risk_steering', {
           riskScore: risk.riskScore,
           severity,
           channel: 'chat',
+          ...subjectDetail,
         });
         if (severity === 'high') {
           await logInterventionAction(turn.sessionId, 'safety_protocol', {
             riskScore: risk.riskScore,
             channel: 'chat',
+            ...subjectDetail,
           });
         }
         if (global.io) {
@@ -237,7 +340,13 @@ export async function runCrisisPipeline(
       // this session has logged no ladder step", not on steering cadence. It
       // runs on both channels; realtime delivers over the sideband inside,
       // chat gets a guidance string appended to this turn's model call.
-      const ladderGuidance = await maybeRequireRiskCheck(turn.sessionId, risk.riskScore, severity, channel);
+      // Not for a third party at risk or for risk to others: the ladder asks
+      // the participant about their OWN suicidal thoughts. If the participant
+      // voices thoughts of their own, that turn is scored as theirs and
+      // requires the ladder as usual.
+      const ladderGuidance = subject
+        ? null
+        : await maybeRequireRiskCheck(turn.sessionId, risk.riskScore, severity, channel);
       if (ladderGuidance) {
         steeringGuidance = steeringGuidance ? `${steeringGuidance}\n\n${ladderGuidance}` : ladderGuidance;
       }
@@ -252,17 +361,61 @@ export async function runCrisisPipeline(
       // A re-flag never LOWERS a session's severity. The score clause exists
       // for "same band, clearly worse"; on a high flag stored without a score
       // (the text hand-off's stamp when the incident's risk could not be read)
-      // it would otherwise let a medium turn (e.g. 65 for "Not sure") rewrite
-      // the session to medium. Seen live in the PR #77 review.
-      const shouldFlag =
+      // it would otherwise let a medium turn rewrite the session to medium.
+      // Seen live in the PR #77 review.
+      const flagByLevel =
         (severity === 'high' || severity === 'medium') &&
         (!state?.crisis_flagged ||
           SEVERITY_RANK[severity] > currentRank ||
           (SEVERITY_RANK[severity] >= currentRank && risk.riskScore > currentScore + 10));
+      // A high turn about someone this session's high flags have not been
+      // about. The level rule above compares numbers only, and a third party's
+      // active crisis scores 80-100: after "my roommate is going to kill
+      // herself tonight" (90, paged as THIRD PARTY AT RISK: "not their own"),
+      // the participant's own "I've been thinking about killing myself too"
+      // (75) is neither a higher severity nor 10 points above 90, so it raised
+      // no flag, no crisis event and no page, and the only thing staff had
+      // been told was that the participant was not the one at risk. The same
+      // holds for the other orders (own risk, then credible intent to harm
+      // someone). A change of who is at risk is new information: it flags.
+      const flagBySubject =
+        !flagByLevel && severity === 'high' && alreadyHigh
+          ? await isFirstHighFlagAbout(turn.sessionId, subject)
+          : { first: false, earlier: [] as FlagSubject[] };
+      // An escalation INSIDE the high band (ai-therapist-353). The level rule
+      // re-flags only when a score is more than 10 above the stored one, so a
+      // participant could go from ideation (75) to "tonight" (85) to "I already
+      // took the pills" (95) with one flag event and one text: 85 is not more
+      // than 75 + 10, and 95 is not more than 85 + 10. Two facts flag whatever
+      // the stored score is:
+      //  - the assessor's literal observation that the latest message states a
+      //    time or plan, or an attempt in progress (`acute`), the first time
+      //    the session reaches that stage for that person;
+      //  - the score crossing into the critical range (90 and up) from below,
+      //    in case the observation is missing.
+      // The flag event, the dashboard alert and the page then say WHAT changed.
+      const acute = severity === 'high' ? (risk.acute ?? null) : null;
+      const crossedCritical = severity === 'high' && alreadyHigh && risk.riskScore >= 90 && currentScore < 90;
+      const flagByEscalation =
+        !flagByLevel && !flagBySubject.first && severity === 'high' && alreadyHigh && acute !== null
+          ? await isFirstFlagAtStage(turn.sessionId, acute, subject)
+          : false;
+      const shouldFlag = flagByLevel || flagBySubject.first || flagByEscalation || crossedCritical;
+      const escalationNote = acute
+        ? `What changed: ${ESCALATION_NOTE[acute]}`
+        : crossedCritical
+          ? 'What changed: the risk score rose into the critical range (90 or more)'
+          : null;
+      const alsoSubject = risk.alsoSubject ?? null;
+      const subjectChangeNote = flagBySubject.first
+        ? `${FLAG_SUBJECT_NAME[subject ?? 'own']} now; the earlier high flag in this session was about ` +
+          `${flagBySubject.earlier.map((s) => FLAG_SUBJECT_NAME[s]).join(' and ') || 'someone else'}`
+        : null;
 
       if (shouldFlag) {
         // A flag write that fails must not cost the turn its response: the
-        // page and the resources below do not depend on the row.
+        // page and the resources below do not depend on the row
+        // (ai-therapist-366).
         try {
           await flagSessionCrisis(
             turn.sessionId,
@@ -271,8 +424,14 @@ export async function runCrisisPipeline(
             'system',
             'auto',
             turn.messageId ?? null,
-            risk.factors,
-            `Risk score: ${risk.riskScore} - Factors: ${risk.factors.join(', ')}`,
+            fromCheckin ? [...risk.factors, CHECKIN_FACTOR] : risk.factors,
+            `Risk score: ${risk.riskScore} - ` +
+              (label ? `${label} - ` : '') +
+              (subjectChangeNote ? `${subjectChangeNote} - ` : '') +
+              (escalationNote ? `${escalationNote} - ` : '') +
+              (alsoSubject ? `Also in the same message: ${FLAG_SUBJECT_NAME[alsoSubject]} - ` : '') +
+              (fromCheckin ? 'Source: pre-session check-in text - ' : '') +
+              `Factors: ${risk.factors.join(', ')}`,
           );
         } catch (err) {
           logDbMiss('flag write')(err);
@@ -283,6 +442,17 @@ export async function runCrisisPipeline(
           severity,
           messageId: turn.messageId,
           factors: risk.factors,
+          ...subjectDetail,
+          ...(fromCheckin ? { source: 'checkin' } : {}),
+          ...(flagBySubject.first ? { trigger: 'new_subject', earlierSubjects: flagBySubject.earlier } : {}),
+          // Recorded on every high flag that states it, so the next turn can
+          // tell whether this stage has already been flagged.
+          ...(acute ? { escalation: acute } : {}),
+          ...(flagByEscalation ? { trigger: 'escalation' } : {}),
+          ...(crossedCritical && !flagByLevel && !flagByEscalation && !flagBySubject.first
+            ? { trigger: 'crossed_critical' }
+            : {}),
+          ...(alsoSubject ? { alsoSubject } : {}),
         });
 
         if (global.io) {
@@ -296,7 +466,14 @@ export async function runCrisisPipeline(
               factors: risk.factors,
               messageId: turn.messageId,
               detectedAt: new Date(),
-              message: `${severity.toUpperCase()} risk detected (score: ${risk.riskScore})`,
+              message:
+                `${severity.toUpperCase()} risk detected (score: ${risk.riskScore})` +
+                (label ? ` - ${label}` : '') +
+                (subjectChangeNote ? ` - ${subjectChangeNote}` : '') +
+                (escalationNote ? ` - ${escalationNote}` : '') +
+                (fromCheckin ? ' - from the pre-session check-in' : ''),
+              ...subjectDetail,
+              ...(acute ? { escalation: acute } : {}),
               ...(channel === 'chat' ? { sessionType: 'chat' } : {}),
             },
             turn.sessionId,
@@ -320,22 +497,42 @@ export async function runCrisisPipeline(
           );
         }
 
-        await executeGraduatedResponse(turn.sessionId, severity, risk.riskScore);
+        // The options only exist when there is something to say; an ordinary
+        // high flag makes the call it always made.
+        const responseOptions = {
+          ...(subject === 'third_party' ? { thirdParty: true } : subject ? { subject } : {}),
+          ...(acute ? { escalation: acute } : {}),
+          ...(alsoSubject ? { alsoSubject } : {}),
+        };
+        if (Object.keys(responseOptions).length > 0) {
+          await executeGraduatedResponse(turn.sessionId, severity, risk.riskScore, responseOptions);
+        } else {
+          await executeGraduatedResponse(turn.sessionId, severity, risk.riskScore);
+        }
         flagged = true;
 
-        await enqueueCrisisFlagWorkItem(turn.sessionId, severity, risk.riskScore, risk.factors);
+        await enqueueCrisisFlagWorkItem(turn.sessionId, severity, risk.riskScore, risk.factors, subject);
 
         console.log(`Session ${turn.sessionId} flagged as ${severity} risk (score: ${risk.riskScore}, ${channel})`);
       } else if (severity === 'high' && alreadyHigh) {
         // A high turn that the re-flag rule above let pass. Correct when the
         // stored high flag came from the participant (the on-call was paged
         // for it and the flag is on record). Not when it is only the
-        // recovery-continuation stamp: see handleHighTurnWithoutReflag.
-        // Fire-and-forget, like the page in executeHighRiskResponse: the
-        // voice reply must not wait on it.
-        void handleHighTurnWithoutReflag(turn, { riskScore: risk.riskScore, factors: risk.factors }, channel).catch(
-          (err) => console.error('[CrisisPipeline] high turn without re-flag: handling failed:', err),
-        );
+        // recovery-continuation stamp, and not when the turn is at the
+        // critical level or states a time or plan the on-call has not been
+        // told about: see handleHighTurnWithoutReflag. Fire-and-forget, like
+        // the page in executeHighRiskResponse: the voice reply must not wait
+        // on it.
+        void handleHighTurnWithoutReflag(
+          turn,
+          {
+            riskScore: risk.riskScore,
+            factors: risk.factors,
+            ...(subject ? { subject } : {}),
+            ...(acute ? { acute } : {}),
+          },
+          channel,
+        ).catch((err) => console.error('[CrisisPipeline] high turn without re-flag: handling failed:', err));
       }
     }
 
@@ -365,6 +562,72 @@ function logDbMiss(what: string): (err: unknown) => undefined {
   };
 }
 
+/** Who a high flag is about: a labelled subject, or the participant. */
+type FlagSubject = 'own' | 'third_party' | 'harm_to_others';
+
+const FLAG_SUBJECT_NAME: Record<FlagSubject, string> = {
+  own: "the participant's OWN risk",
+  third_party: 'a third party at risk',
+  harm_to_others: 'risk to others',
+};
+
+/**
+ * Is this the first automatic high flag of the session about `subject` (null:
+ * the participant's own risk), the session having been flagged high about
+ * someone else? False when the session has no automatic high flag on record
+ * (a manual flag or a recovery stamp: those are handled as before). A lookup
+ * that fails flags: not knowing who the earlier flag was about is not a reason
+ * to stay silent about a high turn. Never throws.
+ */
+async function isFirstHighFlagAbout(
+  sessionId: string,
+  subject: 'third_party' | 'harm_to_others' | null,
+): Promise<{ first: boolean; earlier: FlagSubject[] }> {
+  try {
+    const earlier = [
+      ...new Set(
+        (await getSessionHighFlagSubjects(sessionId)).map(
+          (s): FlagSubject => (s === 'third_party' || s === 'harm_to_others' ? s : 'own'),
+        ),
+      ),
+    ];
+    return { first: earlier.length > 0 && !earlier.includes(subject ?? 'own'), earlier };
+  } catch (err) {
+    console.error('[CrisisPipeline] could not read who the earlier high flag was about; flagging this turn:', err);
+    return { first: true, earlier: [] };
+  }
+}
+
+/** The flag event's words for what a high turn says is happening. */
+const ESCALATION_NOTE: Record<'plan_or_time' | 'attempt', string> = {
+  plan_or_time: 'stated intent with a time, a plan or the means at hand',
+  attempt: 'ATTEMPT IN PROGRESS, or an act already taken',
+};
+
+/**
+ * Has this session not yet been flagged at this stage ('plan_or_time' or
+ * 'attempt') for this person? An attempt also counts as having stated a plan,
+ * so "tonight" after "I already did it" does not flag again. A lookup that
+ * fails flags: an attempt in progress is not something to stay silent about
+ * because a read failed. Never throws.
+ */
+async function isFirstFlagAtStage(
+  sessionId: string,
+  stage: 'plan_or_time' | 'attempt',
+  subject: 'third_party' | 'harm_to_others' | null,
+): Promise<boolean> {
+  try {
+    const seen = (await getSessionFlagEscalations(sessionId)).filter((row) => (row.subject ?? null) === subject);
+    return !seen.some((row) => row.escalation === stage || row.escalation === 'attempt');
+  } catch (err) {
+    console.error('[CrisisPipeline] could not read earlier escalation flags; flagging this turn:', err);
+    return true;
+  }
+}
+
+/** Factor added to a flag raised by the check-in text rather than a turn. */
+export const CHECKIN_FACTOR = 'from the pre-session check-in';
+
 /**
  * Work-queue hook (caseworker portal): pool item for the client's care team.
  * Only sessions with a logged-in participant enqueue — anonymous sessions
@@ -382,6 +645,7 @@ async function enqueueCrisisFlagWorkItem(
   severity: CrisisSeverity,
   riskScore: number,
   factors: string[],
+  subject: 'third_party' | 'harm_to_others' | null = null,
 ): Promise<void> {
   try {
     const sessionInfo = await getSessionAccessInfo(sessionId);
@@ -389,7 +653,13 @@ async function enqueueCrisisFlagWorkItem(
       void enqueueWorkItem({
         itemType: 'crisis_flag',
         severity: 'urgent',
-        title: `Crisis flag: ${severity} risk (score ${riskScore})`,
+        title:
+          `Crisis flag: ${severity} risk (score ${riskScore})` +
+          (subject === 'third_party'
+            ? ' - third party at risk'
+            : subject === 'harm_to_others'
+              ? ' - risk to others'
+              : ''),
         detail: { severity, risk_score: riskScore, factors },
         sourceTable: 'therapy_sessions',
         sourceId: `${sessionId}:${severity}`,
@@ -444,10 +714,24 @@ export const RECOVERY_DISCLOSURE_RECORD_TIMEOUT_MS = 2000;
  */
 export async function handleHighTurnWithoutReflag(
   turn: ParticipantTurn,
-  risk: { riskScore: number; factors: string[] },
+  risk: {
+    riskScore: number;
+    factors: string[];
+    /** Who the turn is about when it is not the participant's own risk. It
+     *  goes into the page, the record's rows and the adverse-event draft; the
+     *  crisis event carries it through `factors` (the label is the first one). */
+    subject?: 'third_party' | 'harm_to_others';
+    /** What the turn says is happening (ai-therapist-353). */
+    acute?: 'plan_or_time' | 'attempt';
+  },
   channel: 'realtime' | 'chat',
 ): Promise<void> {
   const short = turn.sessionId.substring(0, 12);
+  const pageFacts = {
+    ...(risk.subject ? { subject: risk.subject } : {}),
+    ...(risk.acute ? { escalation: risk.acute } : {}),
+  };
+  const subjectDetail = risk.subject ? { subject: risk.subject } : {};
   type Recorded = Awaited<ReturnType<typeof recordRecoveryDisclosure>>;
   const recording: Promise<Recorded | null> = (async () => {
     try {
@@ -476,13 +760,45 @@ export async function handleHighTurnWithoutReflag(
   clearTimeout(timer);
 
   // A real high flag exists: the on-call was paged for it, it is on record.
-  if (first !== 'slow' && first !== null && !first.recorded) return;
+  // Two things still ask for a page, because that page did not say them
+  // (review of PR 65, ai-therapist-353):
+  //  - a turn at the critical level (a score of 90 or more, or an attempt in
+  //    progress whatever the number). The re-flag rule needs MORE than 10
+  //    points, so after "tonight" (85) an attempt scored 95 raised no flag and
+  //    reached nobody. Measured live: "I already took the pills" 95.
+  //  - a stated time or plan, behind REPAGE_ON_STATED_TIME_OR_PLAN.
+  // Whether it becomes an SMS is the fold rule's decision: a page that was
+  // already at that level and that far along, about the same person, absorbs
+  // it. Nothing is written here; the turn's own flag event, when it is the
+  // first at its stage, is written by the pipeline before this is reached.
+  if (first !== 'slow' && first !== null && !first.recorded) {
+    import('./crisisPaging.service.js')
+      .then((m) => {
+        if (m.riskPageLevel(risk.riskScore, risk.acute ?? null) === m.PAGE_LEVEL.critical) {
+          return m.pageHighRisk(turn.sessionId, risk.riskScore, {
+            ...pageFacts,
+            trigger: 'critical_turn_without_reflag',
+          });
+        }
+        if (risk.acute === 'plan_or_time' && m.REPAGE_ON_STATED_TIME_OR_PLAN) {
+          return m.pageHighRisk(turn.sessionId, risk.riskScore, {
+            ...pageFacts,
+            trigger: 'stated_plan_without_reflag',
+          });
+        }
+        return null;
+      })
+      .catch((err) => console.error('[CrisisPipeline] page for a critical turn without re-flag failed:', err));
+    return;
+  }
 
   if (first === 'slow') {
     console.error(`[CrisisPipeline] recording the recovery-session disclosure for ${short}... is slow; paging first`);
   }
   import('./crisisPaging.service.js')
-    .then((m) => m.pageHighRisk(turn.sessionId, risk.riskScore, { trigger: 'high_turn_in_recovery_session' }))
+    .then((m) =>
+      m.pageHighRisk(turn.sessionId, risk.riskScore, { ...pageFacts, trigger: 'high_turn_in_recovery_session' }),
+    )
     .catch((err) => console.error('[CrisisPipeline] page for a recovery-session disclosure failed:', err));
 
   const recorded = first === 'slow' ? await recording : first;
@@ -500,6 +816,8 @@ export async function handleHighTurnWithoutReflag(
       messageId: turn.messageId,
       factors: risk.factors,
       recoveryDisclosure: true,
+      ...subjectDetail,
+      ...(risk.acute ? { escalation: risk.acute } : {}),
       crisisEventId: recorded.eventId,
       replacesStampScore: recorded.stampedScore,
     });
@@ -518,7 +836,10 @@ export async function handleHighTurnWithoutReflag(
         factors: risk.factors,
         messageId: turn.messageId,
         detectedAt: new Date(),
-        message: `HIGH risk detected in a recovery session (score: ${risk.riskScore})`,
+        message:
+          `HIGH risk detected in a recovery session (score: ${risk.riskScore})` +
+          (risk.subject ? ` - ${subjectLabel(risk.subject)}` : ''),
+        ...subjectDetail,
         ...(channel === 'chat' ? { sessionType: 'chat' } : {}),
       },
       turn.sessionId,
@@ -551,11 +872,15 @@ export async function handleHighTurnWithoutReflag(
   }
   if (!alreadyReported) {
     import('./adverseEvent.service.js')
-      .then((m) => m.draftAdverseEventFromCrisis(turn.sessionId))
+      .then((m) =>
+        risk.subject
+          ? m.draftAdverseEventFromCrisis(turn.sessionId, { subject: risk.subject })
+          : m.draftAdverseEventFromCrisis(turn.sessionId),
+      )
       .catch((err) => console.error('AE auto-draft failed:', err));
   }
 
-  await enqueueCrisisFlagWorkItem(turn.sessionId, 'high', risk.riskScore, risk.factors);
+  await enqueueCrisisFlagWorkItem(turn.sessionId, 'high', risk.riskScore, risk.factors, risk.subject ?? null);
 }
 
 /** A participant turn that ended this recently before the next one began is

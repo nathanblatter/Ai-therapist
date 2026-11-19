@@ -42,6 +42,7 @@ import {
   type RiskCalibrationRunRow,
 } from '../db/riskCalibration.queries.js';
 import { assessRiskOffline } from './crisisDetection.service.js';
+import { RISK_BANDS } from '../../shared/riskBands.js';
 
 const log = createLogger('riskCalibration');
 
@@ -52,8 +53,12 @@ const log = createLogger('riskCalibration');
 /** Threshold grid every layer is scored on (0..100 step 5). */
 export const THRESHOLD_GRID: readonly number[] = Array.from({ length: 21 }, (_, i) => i * 5);
 
-/** The live pipeline's severity bands (crisisDetection severityForScore). */
-export const CURRENT_BANDS = { low: 25, medium: 50, high: 75 } as const;
+/** The live pipeline's severity bands (src/shared/riskBands.ts; high is 65
+ *  since 2026-11-18). The miss-rate report's `ge_50` / `ge_75` counters below
+ *  are fixed cut points named in an archived report format
+ *  (risk_calibration_runs), not the bands: `ge_75` still counts scores of 75
+ *  and up, so it under-counts what would now page (65 and up). */
+export const CURRENT_BANDS = RISK_BANDS;
 
 /** Binary cut used for the layer-agreement matrix: "this layer would flag". */
 export const AGREEMENT_FLAG_THRESHOLD = 50;

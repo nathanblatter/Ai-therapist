@@ -74,8 +74,8 @@ describe('golden data', () => {
 });
 
 describe('band thresholds', () => {
-  it('match crisisDetection severityForScore (25 / 50 / 75)', () => {
-    expect([0, 24, 25, 49, 50, 74, 75, 100].map(bandForScore)).toEqual([
+  it('match crisisDetection severityForScore (25 / 50 / 65; high was 75 until 2026-11-18)', () => {
+    expect([0, 24, 25, 49, 50, 64, 65, 100].map(bandForScore)).toEqual([
       'none',
       'none',
       'low',

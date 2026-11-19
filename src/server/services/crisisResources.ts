@@ -49,6 +49,19 @@ export const CRISIS_RESOURCE_DEDUPE_MS = 10_000;
 type Kind = 'high' | 'vendor';
 const lastEmittedAt = new Map<string, Partial<Record<Kind, number>>>();
 
+// The card for a high flag raised BEFORE the participant's browser is in the
+// session room. That is what a pre-session check-in does: its text is scored
+// while the session is being started (on chat, before /api/chat/start has even
+// answered), so the emit below goes to an empty room and is lost, while
+// hasEmittedHighRiskResources then reports the card as shown and the pipeline
+// does not send it again for later high turns. The payload is kept here and
+// handed to the first participant socket that joins (noteParticipantJoined).
+// Per process: a join handled by another node finds nothing here, and in that
+// case the room emit has already reached that node through the adapter.
+export const CRISIS_RESOURCE_JOIN_REPLAY_MS = 10 * 60 * 1000;
+const participantJoined = new Set<string>();
+const pendingForJoin = new Map<string, { at: number; event: Record<string, unknown> }>();
+
 function kindOf(reason: CrisisResourceReason): Kind {
   return reason === 'high_risk' ? 'high' : 'vendor';
 }
@@ -74,12 +87,21 @@ export function emitCrisisResources(sessionId: string, payload: CrisisResourcePa
         if (Math.max(e.high ?? 0, e.vendor ?? 0) < cutoff) lastEmittedAt.delete(id);
       }
     }
-    global.io.to(`session:${sessionId}`).emit('session:crisis-emergency', {
+    const event = {
       sessionId,
       severity: payload.severity ?? null,
       riskScore: payload.riskScore ?? null,
       reason: payload.reason,
-    });
+    };
+    global.io.to(`session:${sessionId}`).emit('session:crisis-emergency', event);
+    if (kind === 'high' && !participantJoined.has(sessionId)) {
+      pendingForJoin.set(sessionId, { at: now, event });
+      if (pendingForJoin.size > 500) {
+        for (const [id, p] of pendingForJoin) {
+          if (now - p.at > CRISIS_RESOURCE_JOIN_REPLAY_MS) pendingForJoin.delete(id);
+        }
+      }
+    }
     return true;
   } catch (err) {
     console.error(`[CrisisResources] emit failed for ${sessionId.substring(0, 12)}...:`, err);
@@ -92,8 +114,46 @@ export function hasEmittedHighRiskResources(sessionId: string): boolean {
   return lastEmittedAt.get(sessionId)?.high !== undefined;
 }
 
+/**
+ * A participant's socket has joined the session room. If our own high flag
+ * was raised before anyone could receive the card (see pendingForJoin), send
+ * it to that socket now. `send` emits to the joining socket only. Returns true
+ * when the card was sent. Never throws.
+ */
+export function noteParticipantJoined(
+  sessionId: string,
+  send: (event: 'session:crisis-emergency', data: Record<string, unknown>) => void,
+  now = Date.now(),
+): boolean {
+  try {
+    participantJoined.add(sessionId);
+    if (participantJoined.size > 5000) {
+      for (const id of participantJoined) {
+        if (participantJoined.size <= 2500) break;
+        participantJoined.delete(id);
+      }
+    }
+    const pending = pendingForJoin.get(sessionId);
+    if (!pending) return false;
+    pendingForJoin.delete(sessionId);
+    if (now - pending.at > CRISIS_RESOURCE_JOIN_REPLAY_MS) return false;
+    send('session:crisis-emergency', pending.event);
+    return true;
+  } catch (err) {
+    console.error(`[CrisisResources] replay on join failed for ${sessionId.substring(0, 12)}...:`, err);
+    return false;
+  }
+}
+
 /** Drop a session's state (session end / tests). */
 export function clearCrisisResourceState(sessionId?: string): void {
-  if (sessionId === undefined) lastEmittedAt.clear();
-  else lastEmittedAt.delete(sessionId);
+  if (sessionId === undefined) {
+    lastEmittedAt.clear();
+    participantJoined.clear();
+    pendingForJoin.clear();
+  } else {
+    lastEmittedAt.delete(sessionId);
+    participantJoined.delete(sessionId);
+    pendingForJoin.delete(sessionId);
+  }
 }

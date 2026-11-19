@@ -13,6 +13,8 @@ import {
   steeringGuidance,
   SAFETY_PROTOCOL_GUIDANCE,
   CRISIS_WIND_DOWN_GUIDANCE,
+  THIRD_PARTY_GUIDANCE,
+  HARM_TO_OTHERS_GUIDANCE,
 } from './crisisIntervention.service.js';
 import { REALTIME_MINOR_GUIDANCE, REALTIME_MINOR_SPEAK_NOW } from './minorSafeguard.service.js';
 import {
@@ -33,6 +35,10 @@ describe('clinicalSteerKind', () => {
       steeringGuidance(85, 'high'),
       SAFETY_PROTOCOL_GUIDANCE,
       CRISIS_WIND_DOWN_GUIDANCE,
+      // PR 65: someone else at risk, and thoughts of harming another person.
+      // Both answer a high flag and must stand the delegation fallback down.
+      THIRD_PARTY_GUIDANCE,
+      HARM_TO_OTHERS_GUIDANCE,
       // Sent because of what the participant just shared: a crisis steer.
       CRISIS_DISREGARD_WRAP_UP,
     ]) {

@@ -78,10 +78,13 @@ import { DEFAULT_VENDOR_CEILING_MINUTES } from '../../shared/systemConfig.js';
 import { liveOpeningInstruction } from '../../shared/openingPrompt.js';
 import {
   CHAT_SAFETY_PROTOCOL_GUIDANCE,
+  CHAT_THIRD_PARTY_GUIDANCE,
   CRISIS_WIND_DOWN_GUIDANCE,
+  HARM_TO_OTHERS_GUIDANCE,
   DEFAULT_RISK_CHECK_MIN_SCORE,
   RISK_CHECK_REQUIRED_GUIDANCE,
   SAFETY_PROTOCOL_GUIDANCE,
+  THIRD_PARTY_GUIDANCE,
   STEER_COOLDOWN_MS,
   STEER_MIN_SCORE,
   WIND_DOWN_GRACE_MS,
@@ -903,7 +906,9 @@ function buildItems(): Item[] {
     'p',
     `Trigger: a participant message scores ${DEFAULT_RISK_CHECK_MIN_SCORE}/100 or higher (the default threshold) ` +
       'and no structured risk-assessment step has been logged in the session yet. Repeated at most once per five ' +
-      'minutes until the assessment begins. Used for both voice and typed-chat sessions.',
+      'minutes until the assessment begins. Used for both voice and typed-chat sessions. Not sent for a message ' +
+      "that reports someone else's crisis or describes thoughts of harming another person (see B.3): the " +
+      "assessment asks about the participant's own suicidal thoughts.",
   );
   add('pre', RISK_CHECK_REQUIRED_GUIDANCE);
 
@@ -919,6 +924,28 @@ function buildItems(): Item[] {
   add('pre', SAFETY_PROTOCOL_GUIDANCE);
   add('h3', 'Typed-chat sessions');
   add('pre', CHAT_SAFETY_PROTOCOL_GUIDANCE);
+  add(
+    'p',
+    'When the participant is reporting that someone else is suicidal or in crisis (not themselves), and the ' +
+      'crisis-detection pipeline scores that report at medium or high severity, the text below is injected in place ' +
+      'of the texts in B.1 and above. A high-severity report alerts the dashboard and pages the on-call researcher ' +
+      'as any high-severity flag does; the alert and the page state that the person at risk is a third party.',
+  );
+  add('h3', 'Someone else at risk — voice sessions');
+  add('pre', THIRD_PARTY_GUIDANCE);
+  add('h3', 'Someone else at risk — typed-chat sessions');
+  add('pre', CHAT_THIRD_PARTY_GUIDANCE);
+  add(
+    'p',
+    'When the participant describes thoughts of harming another person and the crisis-detection pipeline scores ' +
+      'them at medium or high severity (a figure of speech such as "I could kill my lab partner" is not scored), the ' +
+      'text below is injected in place of the texts in B.1 and above, in voice and typed-chat sessions alike, and ' +
+      'the structured risk-assessment requirement (B.2) is not sent. A high-severity score alerts the dashboard and ' +
+      'pages the on-call researcher as any high-severity flag does; the alert and the page state that the risk is ' +
+      'to another person. The crisis-line resource card is not opened automatically for these messages.',
+  );
+  add('h3', 'Thoughts of harming someone else — voice and typed-chat sessions');
+  add('pre', HARM_TO_OTHERS_GUIDANCE);
 
   add('h2', 'B.4 Crisis wind-down (human-initiated graceful end)');
   add(
@@ -1005,8 +1032,11 @@ function buildItems(): Item[] {
       `periodic sweep after every ${SWEEP_EVERY} participant messages without an assessment (so unusual phrasing is ` +
       'not missed). It also runs on a message that matched no crisis keyword when the conversation around it calls ' +
       'for it: every participant message in a session that is already flagged or had a recent risk-bearing message, ' +
-      'and any message that states intent, a goodbye or a question about dangerous amounts with its subject left ' +
-      'unsaid (for example "I\'m going to do it tonight"). System prompt, verbatim:',
+      'any message that states intent, a goodbye or a question about dangerous amounts with its subject left ' +
+      'unsaid (for example "I\'m going to do it tonight"), any message that uses shorthand for suicide, reports ' +
+      "someone else's suicidal statement or speaks of hurting another person, and the participant's reply to a question from the assistant about " +
+      'suicide, self-harm or safety. The free text of the pre-session check-in is assessed the same way as a first ' +
+      'message. System prompt, verbatim:',
   );
   add('pre', RISK_ASSESSMENT_PROMPT);
   add('note', 'The accompanying user message is, verbatim:');
@@ -1024,6 +1054,29 @@ function buildItems(): Item[] {
         'the factors noted then, and whether the session is currently flagged>',
       keywordFree: true,
     }),
+  );
+  add(
+    'note',
+    "When that message is the participant's reply to a question from the assistant about suicide, self-harm or " +
+      'safety, the last line of the user message is instead, verbatim:',
+  );
+  add(
+    'pre',
+    lastLines(
+      buildRiskAssessmentUserMessage('<recent transcript>', '<latest participant message>', {
+        keywordFree: true,
+        answersSafetyQuestion: true,
+      }),
+    ),
+  );
+  add('note', 'For the free text of the pre-session check-in, the last line is, verbatim:');
+  add(
+    'pre',
+    lastLines(
+      buildRiskAssessmentUserMessage('<recent transcript>', '<check-in text>', {
+        fromCheckin: true,
+      }),
+    ),
   );
 
   add('h2', `C.2 Minor-eligibility confirmation prompt (${CONFIRM_MODEL})`);
@@ -1114,6 +1167,11 @@ const STYLE =
   '</style></head><body>';
 
 /** Render the attachment. Deterministic: same code in, same bytes out. */
+/** The label line and the quoted message that end a risk-assessment user message. */
+function lastLines(userMessage: string): string {
+  return userMessage.split('\n').slice(-2).join('\n');
+}
+
 export function renderPromptsAttachment(): string {
   const parts = ['<html><head><meta charset="utf-8"><title>AI Model System Prompts</title>', STYLE];
   for (const item of buildItems()) {

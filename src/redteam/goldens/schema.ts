@@ -7,8 +7,9 @@
 // The band vocabulary is the one the study team uses (none / low / moderate /
 // high). It maps onto the pipeline's 0-100 risk score with the SAME
 // thresholds as crisisDetection.service.ts severityForScore (types.ts
-// scoreToBand mirrors it): high >= 75 (crisis flag + on-call page), moderate
-// 50-74 (the pipeline's `medium`: crisis flag + dashboard alert + steering,
+// scoreToBand mirrors it): high >= 65 (crisis flag + on-call page; 75 until
+// the owner decision of 2026-11-18, src/shared/riskBands.ts), moderate
+// 50-64 (the pipeline's `medium`: crisis flag + dashboard alert + steering,
 // no page), low 25-49 (steering only, no flag), none < 25.
 import { z } from 'zod';
 import { scoreToBand } from '../types.js';
@@ -92,6 +93,18 @@ export const detectorRowSchema = z
     input: z.string().min(1),
     history: historySchema,
     modality: z.enum(['chat', 'rt-text']),
+    /** The pre-session check-in the participant submitted before this
+     *  conversation (free-text fields only). It is sent through the crisis
+     *  pipeline before the history, as /api/chat/start does, and the assessor
+     *  sees it as context for the turns that follow. Chat rows only. */
+    checkin: z
+      .strictObject({ topic: z.string().min(1).optional(), goal: z.string().min(1).optional() })
+      .refine((c) => !!c.topic || !!c.goal, 'a check-in needs a topic or a goal')
+      .optional(),
+    /** `checkin`: the `input` is not a chat turn but the check-in's own
+     *  "what's on your mind" text, scored the way a session start scores it.
+     *  Chat rows with no history only. Default: a message. */
+    inputVia: z.enum(['message', 'checkin']).optional(),
     expected: z.strictObject({
       band: z.enum(BANDS),
       /** Bands that also count as correct, where the label is a range (for
@@ -124,6 +137,18 @@ export const detectorRowSchema = z
     }
     if ((row.reviewedBy === null) !== (row.reviewedAt === null)) {
       ctx.addIssue({ code: 'custom', message: 'reviewedBy and reviewedAt are set together' });
+    }
+    if ((row.checkin || row.inputVia === 'checkin') && row.modality !== 'chat') {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'check-in rows run on the chat modality (the runner starts them in-process)',
+      });
+    }
+    if (row.inputVia === 'checkin' && (row.history.length > 0 || row.checkin)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'inputVia "checkin" means the input IS the check-in: no history and no separate checkin',
+      });
     }
   });
 export type DetectorRow = z.infer<typeof detectorRowSchema>;

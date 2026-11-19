@@ -99,6 +99,7 @@ import { startWorkQueueScheduler } from './services/workQueue.service.js';
 import { startMessageEmbeddingScheduler } from './services/messageEmbedding.service.js';
 import { startSurveyReminderScheduler } from './services/qualtricsReminders.service.js';
 import { startMessageScanSweeper } from './services/messageSafety.service.js';
+import { noteParticipantJoined } from './services/crisisResources.js';
 import {
   noteSessionActivity,
   scheduleAbandonCheck,
@@ -519,6 +520,9 @@ io.on('connection', (socket: AuthSocket) => {
       // A live participant socket in the room is a sign of life: cancel any
       // pending abandon-check from an earlier disconnect/reconnect blip.
       noteSessionActivity(sessionId);
+      // A pre-session check-in can be flagged high before this socket is in
+      // the room; the crisis resource card emitted then reached nobody.
+      noteParticipantJoined(sessionId, (event, data) => socket.emit(event, data));
     }
   });
 

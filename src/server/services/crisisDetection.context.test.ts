@@ -268,11 +268,13 @@ describe('ai-therapist-299: keyword-free statement of intent in a session alread
 
   it('a keyword turn keeps its trajectory bonus, as before', async () => {
     sessionIs({ ...FLAGGED_MEDIUM, trajectory: [55, 40, 20] });
-    createMock.mockResolvedValue(assess(60));
+    // 65: a turn already at the page line keeps the whole bonus. (A turn below
+    // it is held under the line, ai-therapist-357; see crisisDetection.wakes.test.)
+    createMock.mockResolvedValue(assess(65));
 
     const r = await analyzeMessageRisk(turn("I don't want to be here anymore"), []);
 
-    expect(r.riskScore).toBe(75);
+    expect(r.riskScore).toBe(80);
     expect(r.breakdown).toMatchObject({ trajectory: 15 });
   });
 

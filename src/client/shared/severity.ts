@@ -5,7 +5,9 @@
 // in RiskTimeline). Canonical rules:
 //   - medium is ALWAYS amber
 //   - score bands mirror the server's crisisDetection.service.ts mapping
-//     (>= 75 high, >= 50 medium, >= 25 low, else none)
+//     (src/shared/riskBands.ts: >= 65 high, >= 50 medium, >= 25 low, else none)
+
+import { RISK_BANDS } from '../../shared/riskBands';
 
 export type SeverityLevel = 'high' | 'medium' | 'low';
 export type WorkItemSeverity = 'urgent' | 'warning' | 'info';
@@ -52,21 +54,34 @@ export function workItemSeverityClass(severity: string): string {
 
 /**
  * Canonical numeric risk score -> severity level, mirroring the server-side
- * bands in services/crisisDetection.service.ts (>= 75 high, >= 50 medium).
+ * bands in src/shared/riskBands.ts (>= 65 high, >= 50 medium).
  * The server additionally treats < 25 as 'none'; UI text helpers render that
  * band muted via riskScoreTextClass.
  */
 export function riskScoreLevel(score: number): SeverityLevel {
-  if (score >= 75) return 'high';
-  if (score >= 50) return 'medium';
+  if (score >= RISK_BANDS.high) return 'high';
+  if (score >= RISK_BANDS.medium) return 'medium';
   return 'low';
+}
+
+/**
+ * Tone for a STORED risk row: the severity it was given when it was scored,
+ * and the score only when none was stored. The high band moved from 75 to 65
+ * on 2026-11-18; a turn scored 70 before that was medium and paged nobody, and
+ * must not turn red in a timeline afterwards.
+ */
+export function storedRiskTextClass(score: number, storedSeverity: string | null | undefined): string {
+  if (storedSeverity === 'high') return 'text-red-600';
+  if (storedSeverity === 'medium') return 'text-amber-600';
+  if (storedSeverity === 'low') return 'text-green-600';
+  return riskScoreTextClass(score);
 }
 
 /** Inline text tone for a numeric risk score (sub-25 'none' band renders muted). */
 export function riskScoreTextClass(score: number): string {
-  if (score >= 75) return 'text-red-600';
-  if (score >= 50) return 'text-amber-600';
-  if (score >= 25) return 'text-green-600';
+  if (score >= RISK_BANDS.high) return 'text-red-600';
+  if (score >= RISK_BANDS.medium) return 'text-amber-600';
+  if (score >= RISK_BANDS.low) return 'text-green-600';
   return 'text-gray-400';
 }
 
