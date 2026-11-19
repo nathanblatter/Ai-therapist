@@ -136,8 +136,14 @@ describe('redactionCompleteSql', () => {
 
   it('excludes leak-check-flagged rows until a researcher has reviewed them', () => {
     expect(sql).toMatch(/redaction_check'->>'flagged', 'false'\) = 'true'/);
-    expect(sql).toMatch(/redaction_check'->>'reviewed', 'false'\) <> 'true'/);
+    expect(sql).toMatch(/redaction_check'->>'reviewed', 'false'\) = 'true'/);
     expect(sql).toMatch(/AND NOT \(/);
+  });
+
+  // ai-therapist-288: an errored check is unverified, not clean; it is gated like a flagged one.
+  it('excludes rows whose leak check errored, in both the status and the pre-288 shape, until reviewed', () => {
+    expect(sql).toMatch(/m\.metadata->'redaction_check'->>'status', ''\) = 'errored'/);
+    expect(sql).toMatch(/m\.metadata->'redaction_check' \? 'error'/);
   });
 });
 
