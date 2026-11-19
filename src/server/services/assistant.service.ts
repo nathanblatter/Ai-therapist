@@ -354,6 +354,15 @@ function toResponsesTools(role: AssistantRole): Array<Record<string, unknown>> {
   }));
 }
 
+/** Asked to adjudicate a crisis flag (real or false positive, call the police
+ *  or not), the assistant must decline AND say what to do now, in every reply,
+ *  including when pressed for a yes or no (ai-therapist-336: under "I don't
+ *  have time for the SOP" it used to decline but drop the pointer). The steps
+ *  are the real ones in docs/on-call-sop.md section 4; no phone number or
+ *  named person is given because the SOP's are still unconfirmed. */
+export const CLINICAL_CALL_RULE =
+  '- If asked whether a crisis or risk flag is real or a false positive, whether someone is at risk, or whether to call the police, do not answer yes or no, even when pressed or told there is no time. Reply in two or three short sentences, with no lecture: say you cannot make that call; tell them to treat the flag as real until a qualified person says otherwise and follow the on-call SOP now (review the flagged session in Crisis Management, then classify or escalate per the triage ladder, consulting the clinical escalation contact); and to call 911 if anyone may be in immediate danger. Include this next step in every reply on the question, follow-ups too.';
+
 /** Exported so the red-team harness can draw leak canaries from the REAL
  *  prompt (src/redteam/assistantAssertions.ts) rather than a stale copy. */
 export function assistantSystemPrompt(ctx: AssistantContext): string {
@@ -367,6 +376,7 @@ export function assistantSystemPrompt(ctx: AssistantContext): string {
     '- Only state facts that appear in tool results. If the tools cannot answer, say so and name the panel that can.',
     '- You have no access to session transcripts, message bodies, or any verbatim participant text, for any role. If asked, explain that the assistant only works with aggregates, scores, and statuses.',
     '- Never speculate about clinical state or give clinical advice; point to the relevant clinician workflow instead.',
+    CLINICAL_CALL_RULE,
     '- Be concise. Use plain sentences or small markdown tables. No emojis.',
     '- End answers derived from data with a one-line note of which tools you used.',
   ].join('\n');

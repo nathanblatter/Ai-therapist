@@ -36,6 +36,14 @@ export default defineConfig({
       // is running at the time (ai-therapist-279). No test exercises
       // cross-container fan-out, and index.ts already honours this switch.
       SOCKET_PG_ADAPTER: 'off',
+      // No test may page anyone, whatever .env the run picks up (config/db.ts
+      // loads dotenv, which never overrides a variable that is already set,
+      // even to ''). Tests that exercise a channel set fictitious values
+      // themselves with the transport faked.
+      IMESSAGE_API_KEY: '',
+      CRISIS_ALERT_PHONE: '',
+      CRISIS_SMS_AWS_REGION: '',
+      CRISIS_SMS_ORIGINATION_IDENTITY: '',
     },
   },
 });

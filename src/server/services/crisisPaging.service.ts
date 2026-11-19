@@ -28,6 +28,8 @@
 //     again in any session, the on-call is paged then. The filter can end a
 //     session before the participant's last words reach us, so "nothing was
 //     flagged" plus "they never came back" is not a safe place to stop.
+//     The check is owed by the stored row, not by this process: see
+//     "the silence check" below (ai-therapist-362).
 //
 // FAIL TOWARD PAGING. Only a page that is known to have been DELIVERED can
 // absorb a later one. A lookup that throws, a row that cannot be parsed, a
@@ -41,14 +43,21 @@
 // test) would otherwise both find an empty table.
 import { createLogger } from '../utils/logger.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
+import os from 'node:os';
+import { randomUUID } from 'node:crypto';
 import {
   getPagingParticipantUserId,
   getRecentPagingRecords,
+  getIncidentChainSessionIds,
   getParticipantFlagEvents,
   getParticipantAssessedRisk,
-  highFlagIsContinuationStampOnly,
   participantSpokeSince,
   insertPagingRecord,
+  getUnfinishedSilenceChecks,
+  claimSilenceCheck,
+  releaseSilenceCheck,
+  finishSilenceCheck,
+  INCIDENT_CHAIN_BACKSTOP_MS,
   type PagingRecordRow,
 } from '../db/paging.queries.js';
 
@@ -66,10 +75,15 @@ const log = createLogger('crisisPaging');
 export const PAGE_FOLD_WINDOW_MS = 15 * 60 * 1000;
 
 /**
- * How far back another session's crisis flag still counts as "this incident"
- * when a vendor termination has to be classified. Long on purpose: a recovery
- * session can run to the vendor ceiling without a new flag of its own, and
- * the error this guards against is calling a continuing crisis "no risk".
+ * How far back a crisis flag on one of the participant's OTHER sessions still
+ * counts as "this incident" when a vendor termination has to be classified.
+ *
+ * This is the time bound for sessions that are not linked to this one. The
+ * sessions that ARE linked, the recovery chain (each recovery session
+ * continues the one before it), count however long the chain has run: a
+ * participant flagged high whose recovery session is cut 2 h 20 min later is
+ * the same incident, and a clock alone called it "no risk" (PR #64 review).
+ * The chain walk has its own, longer backstop (INCIDENT_CHAIN_BACKSTOP_MS).
  */
 export const INCIDENT_LOOKBACK_MS = 2 * 60 * 60 * 1000;
 
@@ -120,7 +134,7 @@ export function pageStage(escalation: PageEscalation | null | undefined): 0 | 1 
 
 /** The page's own words for what changed. No participant text, no PHI. */
 export const ESCALATION_WORDS: Record<PageEscalation, string> = {
-  plan_or_time: 'STATED INTENT WITH A TIME OR PLAN (for example "tonight", or the means at hand)',
+  plan_or_time: 'STATED INTENT WITH A TIME OR PLAN',
   attempt: 'ATTEMPT IN PROGRESS, or an act already taken',
 };
 
@@ -132,6 +146,29 @@ export const ESCALATION_WORDS: Record<PageEscalation, string> = {
  * attempts and the typed-chat fallback.
  */
 export const VENDOR_CUT_SILENCE_CHECK_MS = 3 * 60 * 1000;
+
+/**
+ * A silence check that nobody ran by this age is not run at all. It is the
+ * fold window on purpose: a check found later than this (a long outage) would
+ * page about a cut the on-call can no longer act on as "just happened", and
+ * a server that comes back after hours must not send a burst of old pages.
+ * The row is marked expired and admins are told, so the miss is on record.
+ */
+export const SILENCE_CHECK_CEILING_MS = PAGE_FOLD_WINDOW_MS;
+
+/**
+ * A claimed check that has not reported back after this long is taken to
+ * have died with its process and may be claimed again. A check takes a few
+ * seconds at worst (three 2 s lookups and a 5 s send).
+ */
+export const SILENCE_CHECK_STALE_CLAIM_MS = 60 * 1000;
+
+/** How far back the sweep looks for checks to mark expired. */
+const SILENCE_CHECK_EXPIRY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+
+/** Names this process on a claimed check (audit only; the claim itself is
+ *  the row update). No participant data. */
+const INSTANCE_ID = `${os.hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`;
 
 /**
  * Longest any lookup may hold a page back. The lookups only ever decide
@@ -212,6 +249,17 @@ export interface PageDecision {
   foldedIntoSessionId?: string;
 }
 
+/** What one paging channel did with a page, as stored on the page's row. */
+interface ChannelRecord {
+  channel: string;
+  ok: boolean;
+  error: string | null;
+  messageIds: string[];
+  parts: number;
+  partsAccepted: number;
+  ms: number;
+}
+
 /** A page this participant's on-call has (or is about to have) received. */
 interface PriorPage {
   actionId: number | null;
@@ -223,9 +271,9 @@ interface PriorPage {
   /** Who a page was about: for a 'risk' page the person the flag concerned,
    *  for a vendor page the person the session's peak risk concerned. 'own'
    *  for rows written before the subject was recorded. */
-  subject: PageSubject;
-  /** pageStage of a risk page; 0 for vendor pages and older rows. */
-  stage: 0 | 1 | 2;
+  subject?: PageSubject;
+  /** pageStage of a risk page; absent or 0 for vendor pages and older rows. */
+  stage?: 0 | 1 | 2;
 }
 
 interface LedgerEntry extends PriorPage {
@@ -282,12 +330,15 @@ function dropLedgerEntry(key: string, entry: LedgerEntry): void {
   else ledger.delete(key);
 }
 
-const silenceTimers = new Set<ReturnType<typeof setTimeout>>();
+/** Armed silence checks, by the action_id of the cut's row (or a private key
+ *  when the row could not be written). One timer per check per process. */
+const silenceTimers = new Map<number | string, ReturnType<typeof setTimeout>>();
 
-/** Test hook. */
+/** Test hook. Also what a restart does to this process's memory: the ledger
+ *  and every armed timer are gone, and only the stored rows remain. */
 export function _resetPagingStateForTests(): void {
   ledger.clear();
-  for (const timer of silenceTimers) clearTimeout(timer);
+  for (const timer of silenceTimers.values()) clearTimeout(timer);
   silenceTimers.clear();
 }
 
@@ -445,11 +496,20 @@ function lines(...parts: Array<string | null | false>): string {
   return parts.filter((p): p is string => typeof p === 'string' && p.length > 0).join('\n');
 }
 
+/**
+ * Where a high flag came from. The risk pipeline scores the participant's own
+ * words. The model's escalate_to_human tool at high urgency flags at a fixed
+ * score that stands for "the assistant asked for a human": nothing the
+ * participant said was scored to produce it, and the page must not claim so.
+ */
+export type RiskFlagSource = 'participant_turn' | 'model_escalation';
+
 /** High-risk page (risk pipeline or the model's escalate_to_human at high). */
 export function buildRiskPageMessage(
   sessionId: string,
   riskScore: number,
   ctx: Pick<MessageContext, 'previousPage' | 'unpagedCut' | 'now'>,
+  source: RiskFlagSource = 'participant_turn',
   subject: PageSubject = 'own',
   extra: { escalation?: PageEscalation | null; alsoSubject?: PageSubject | null } = {},
 ): string {
@@ -465,11 +525,11 @@ export function buildRiskPageMessage(
     `URGENT: AI-Therapist HIGH crisis flag${who}${critical && sameSubject ? ' (ESCALATED)' : ''}`,
     PAGE_SUBJECT_LABEL[subject],
     // What changed, in words: the numbers alone do not say "tonight" or "an
-    // attempt is under way" (ai-therapist-353).
-    escalation
-      ? `${sameSubject ? 'WHAT CHANGED' : 'WHAT IT SAYS'}: ${ESCALATION_WORDS[escalation]}` +
-          (subject === 'third_party' ? ', for the person the participant is reporting on.' : '.')
-      : null,
+    // attempt is under way" (ai-therapist-353). Kept short, and before the
+    // Why line: a carrier SMS is split into parts of 300 characters, and the
+    // headline, who is at risk, what changed and the Why line must all be in
+    // part 1 (pinned in crisisEscalationLadder.test.ts).
+    escalation ? `${sameSubject ? 'WHAT CHANGED' : 'WHAT IT SAYS'}: ${ESCALATION_WORDS[escalation]}.` : null,
     // Own risk and someone else in the same message (handled as own risk).
     subject === 'own' && extra.alsoSubject === 'harm_to_others'
       ? 'ALSO: the same message describes thoughts of harming another person.'
@@ -480,9 +540,14 @@ export function buildRiskPageMessage(
     subject === 'own' && previous && !sameSubject && previous.kinds.includes('risk')
       ? "PARTICIPANT'S OWN RISK: the earlier page was about someone else; this one is about the participant."
       : null,
-    `Why: RISK SCORE ${riskScore}/100 from what the participant ` +
-      (subject === 'third_party' ? 'reported about someone else' : 'said') +
-      (critical && typeof previousScore === 'number' && previousScore < riskScore
+    `Why: RISK SCORE ${riskScore}/100 ` +
+      (source === 'model_escalation'
+        ? 'set by the ASSISTANT asking for a human (escalate tool). It is the fixed score for that request, ' +
+          "not a score of the participant's words"
+        : `from what the participant ${subject === 'third_party' ? 'reported about someone else' : 'said'}`) +
+      // With a WHAT CHANGED line the comparison is already made in words, and
+      // the room in SMS part 1 goes to that line.
+      (critical && !escalation && typeof previousScore === 'number' && previousScore < riskScore
         ? `, up from ${previousScore} at the last page.`
         : '.'),
     `Session ${shortId(sessionId)}`,
@@ -518,12 +583,14 @@ export function buildVendorCutMessage(
   return lines(
     'AI-Therapist: voice session ended by the vendor filter',
     peak.severity === 'medium'
-      ? `Why: VENDOR CUT, NOT a high risk score. Risk before the cut was MEDIUM${score}, below the paging threshold.`
+      ? `Why: VENDOR CUT, NOT a high risk score. Risk before the cut was MEDIUM${score}, below the paging ` +
+          "threshold. The filter often cuts the assistant's screening question, so the participant's answer " +
+          'may be what was lost.'
       : 'Why: VENDOR CUT. The risk level for this session could NOT be read, so treat it as possibly serious.',
     `Session ${shortId(sessionId)}. The participant lost the assistant mid-conversation; the app tries to ` +
       'reconnect them under a new session id. You are paged again at once if their risk rises.',
     followUpLine(ctx),
-    'Review the transcript.',
+    'Review the transcript and consider reaching out.',
     adminLink(sessionId),
   );
 }
@@ -624,6 +691,27 @@ async function isSandboxSession(sessionId: string): Promise<boolean> {
   }
 }
 
+/** The participant and their recent paging decisions. Never rejects: with no
+ *  history nothing can absorb the page, so it is sent. */
+async function readPagingHistory(sessionId: string): Promise<{ userId: number | null; rows: PagingRecordRow[] }> {
+  try {
+    return await withTimeout(
+      (async () => {
+        const userId = await getPagingParticipantUserId(sessionId);
+        const rows = await getRecentPagingRecords(sessionId, userId, new Date(Date.now() - PAGE_FOLD_WINDOW_MS));
+        return { userId, rows: rows ?? [] };
+      })(),
+      'paging history lookup',
+    );
+  } catch (err) {
+    log.error(
+      { err },
+      `[paging] could not read paging history for ${sessionId.substring(0, 12)}...; paging without it`,
+    );
+    return { userId: null, rows: [] };
+  }
+}
+
 async function record(
   sessionId: string,
   actionType: 'crisis_sms_alert' | 'external_api_called',
@@ -670,7 +758,12 @@ async function dispatchPage(request: PageRequest): Promise<PageDecision> {
   const { sessionId, kind, level } = request;
   const short = sessionId.substring(0, 12);
 
-  if (await isSandboxSession(sessionId)) {
+  // The sandbox check and the paging history are independent reads, each
+  // bounded by PAGING_LOOKUP_TIMEOUT_MS. Run together, a database that has
+  // stopped answering holds a first page back for one timeout, not two.
+  const [sandbox, history] = await Promise.all([isSandboxSession(sessionId), readPagingHistory(sessionId)]);
+
+  if (sandbox) {
     log.info(`[paging] SMS suppressed for sandbox session ${short}...`);
     // Out of the critical path, as before: the row is best effort.
     void record(
@@ -687,24 +780,7 @@ async function dispatchPage(request: PageRequest): Promise<PageDecision> {
     return { outcome: 'sandbox', kind, level, actionId: null };
   }
 
-  let userId: number | null = null;
-  let rows: PagingRecordRow[] = [];
-  try {
-    const history = await withTimeout(
-      (async () => {
-        const id = await getPagingParticipantUserId(sessionId);
-        const found = await getRecentPagingRecords(sessionId, id, new Date(Date.now() - PAGE_FOLD_WINDOW_MS));
-        return { id, found: found ?? [] };
-      })(),
-      'paging history lookup',
-    );
-    userId = history.id;
-    rows = history.found;
-  } catch (err) {
-    // No history means nothing can absorb this page: it is sent.
-    log.error({ err }, `[paging] could not read paging history for ${short}...; paging without it`);
-    rows = [];
-  }
+  const { userId, rows } = history;
   const key = participantKey(sessionId, userId);
   const stored = rows.map(priorPageFromRow).filter((p): p is PriorPage => p !== null);
 
@@ -834,13 +910,40 @@ async function send(
   };
   ledger.set(key, [...(ledger.get(key) ?? []), entry]);
 
+  // Every configured channel at once (iMessage bridge, AWS SMS). DELIVERED,
+  // for the folding rule, means at least one channel accepted the page: the
+  // on-call has it, so a repeat may be folded. A page no channel accepted
+  // absorbs nothing, exactly as an undelivered page did with one channel.
   let ok = false;
+  let channels: ChannelRecord[] = [];
+  let skipped: string | null = null;
   try {
-    const { sendCrisisAlert } = await import('./crisisAlert.service.js');
-    ok = (await sendCrisisAlert(message)) === true;
+    const { sendCrisisAlertDetailed } = await import('./crisisAlert.service.js');
+    const delivery = await sendCrisisAlertDetailed(message);
+    ok = delivery?.delivered === true;
+    skipped = delivery?.skipped ?? null;
+    channels = (delivery?.channels ?? []).map((c) => ({
+      channel: c.channel,
+      ok: c.ok === true,
+      error: c.error ?? null,
+      messageIds: c.messageIds ?? [],
+      parts: c.parts,
+      partsAccepted: c.partsAccepted,
+      ms: c.ms,
+    }));
   } catch (err) {
     log.error({ err }, `[paging] page failed for ${sessionId.substring(0, 12)}...`);
   }
+  const failed = channels.filter((c) => !c.ok);
+  const channelNote =
+    failed.length === 0
+      ? ''
+      : ok
+        ? ` Delivered by ${channels
+            .filter((c) => c.ok)
+            .map((c) => c.channel)
+            .join(' + ')}; FAILED on ${failed.map((c) => `${c.channel} (${c.error ?? 'error'})`).join(', ')}.`
+        : ` Every paging channel failed: ${failed.map((c) => `${c.channel} (${c.error ?? 'error'})`).join(', ')}.`;
   entry.settled = true;
   entry.delivered = ok;
   // An undelivered page absorbs nothing: hand the claim back.
@@ -864,7 +967,12 @@ async function send(
         ...subjectAndStage(request),
         followsActionId: previousPage?.actionId ?? null,
         ...request.facts,
-        summary: `${ok ? 'Paged on-call' : 'Page attempted, not delivered'}: ${request.summary}`,
+        // Per channel: attempted, accepted or not, provider message ids. No
+        // phone number and no message text. Empty when nothing was attempted
+        // (`channelsSkipped` says why: paging disabled, or not configured).
+        channels,
+        channelsSkipped: skipped,
+        summary: `${ok ? 'Paged on-call' : 'Page attempted, not delivered'}: ${request.summary}${channelNote}`,
       },
     },
     request.riskScore,
@@ -873,8 +981,12 @@ async function send(
   resolveRecorded(actionId);
 
   const decision: PageDecision = { outcome: ok ? 'paged' : 'not_delivered', kind, level, actionId };
-  if (kind !== 'risk')
-    notifyAdmins(request, decision, `${ok ? 'On-call paged' : 'Page not delivered'}: ${request.summary}`);
+  // A channel that failed is shown on the dashboards for every kind of page,
+  // risk pages included: with all of them down nobody was texted, and with
+  // one down the redundancy is gone. (A risk page that went out cleanly has
+  // its own dashboard alert and needs no notice here.)
+  if (kind !== 'risk' || failed.length > 0)
+    notifyAdmins(request, decision, `${ok ? 'On-call paged' : 'Page NOT delivered'}: ${request.summary}${channelNote}`);
   return decision;
 }
 
@@ -892,19 +1004,27 @@ function subjectAndStage(request: PageRequest): Record<string, unknown> {
 // ---- entry points ----------------------------------------------------------
 
 /**
- * A session was flagged HIGH (risk pipeline, or the model's escalate_to_human
- * at high urgency). Never throws.
+ * A session was flagged HIGH: by the risk pipeline from what the participant
+ * said, by the pipeline for a participant's first real high turn in a
+ * recovery session (facts.trigger = 'high_turn_in_recovery_session', see
+ * crisisPipeline.service), or by the model's escalate_to_human at high
+ * urgency (facts.source = 'model_escalation', which changes the wording: no
+ * participant words were scored). Never throws.
  */
 export async function pageHighRisk(
   sessionId: string,
   riskScore: number,
-  /** `subject`: who the flag is about when it is not the participant's own
-   *  risk ('third_party' | 'harm_to_others', PR 65). Other keys are free-form
-   *  facts for the audit row. */
-  facts: Record<string, unknown> = {},
+  /** `source`: who raised the flag (#70). `subject`: who the flag is about
+   *  when it is not the participant's own risk ('third_party' |
+   *  'harm_to_others'). `escalation`: what the turn says is happening
+   *  ('plan_or_time' | 'attempt'). `alsoSubject`: the turn is handled as own
+   *  risk and also concerned someone else. Other keys are free-form facts for
+   *  the audit row. */
+  facts: Record<string, unknown> & { source?: RiskFlagSource } = {},
 ): Promise<PageDecision> {
   const escalation = asEscalation(facts['escalation']);
   const level = riskPageLevel(riskScore, escalation);
+  const source: RiskFlagSource = facts.source === 'model_escalation' ? 'model_escalation' : 'participant_turn';
   const subject = asPageSubject(facts['subject']);
   const alsoSubject = facts['alsoSubject'] === undefined ? null : asPageSubject(facts['alsoSubject']);
   const about =
@@ -918,11 +1038,13 @@ export async function pageHighRisk(
       riskScore,
       subject,
       escalation,
-      facts: { severity: 'high', ...facts },
+      facts: { severity: 'high', ...facts, source },
       summary:
-        `high risk flag${about}, score ${riskScore}/100` +
-        (escalation ? `; ${ESCALATION_WORDS[escalation].toLowerCase()}.` : '.'),
-      buildMessage: (ctx) => buildRiskPageMessage(sessionId, riskScore, ctx, subject, extra),
+        source === 'model_escalation'
+          ? `high risk flag raised by the assistant's escalate tool (fixed score ${riskScore}/100).`
+          : `high risk flag${about}, score ${riskScore}/100` +
+            (escalation ? `; ${ESCALATION_WORDS[escalation].toLowerCase()}.` : '.'),
+      buildMessage: (ctx) => buildRiskPageMessage(sessionId, riskScore, ctx, source, subject, extra),
     });
   } catch (err) {
     // dispatchPage is written not to throw; if it does, the page still goes.
@@ -931,67 +1053,9 @@ export async function pageHighRisk(
       sessionId,
       'risk',
       level,
-      buildRiskPageMessage(sessionId, riskScore, bareContext(), subject, extra),
+      buildRiskPageMessage(sessionId, riskScore, bareContext(), source, subject, extra),
     );
   }
-}
-
-/**
- * A turn scored HIGH in a session that is already flagged high, and the
- * pipeline's re-flag rule did not fire (same severity, score not more than 10
- * above the stored one), so no flag and no page were produced for it.
- *
- * That is right when the stored flag came from the participant: the on-call
- * was paged for it. It is wrong in a recovery session. There the flag is the
- * automatic continuation stamp, written at the inherited score or at 100 when
- * the session it continues was never flagged, so a real disclosure can never
- * exceed it by 10 and would reach nobody: the cut that started the recovery
- * is no longer an SMS when the participant had no risk flag, and they "came
- * back", so the silence check stays quiet too.
- *
- * So: when the session's only high flag is that stamp, this turn is the first
- * the on-call would hear of the participant's risk, and a page is requested,
- * under the same folding as any other. A lookup that fails or is slow pages.
- * Returns null when the session has a real high flag. Never throws.
- */
-export async function pageHighTurnWithoutReflag(
-  sessionId: string,
-  riskScore: number,
-  facts: Record<string, unknown> = {},
-): Promise<PageDecision | null> {
-  // A turn at the critical level always asks for a page (review of PR 65).
-  // The pipeline re-flags only when a turn scores MORE than 10 above the
-  // stored flag, so after "I'm going to do it tonight" (85) an attempt in
-  // progress scored 95 raised no flag and never reached this module: the
-  // on-call's last word was the 85. Measured on the live assessor: "I already
-  // took the pills" 95, "yes they are right here" 90. Whether it becomes an
-  // SMS is still the folding rule's decision: a critical page delivered in
-  // the last 15 minutes absorbs it, a high one does not.
-  const escalation = asEscalation(facts['escalation']);
-  const critical = riskPageLevel(riskScore, escalation) === PAGE_LEVEL.critical;
-  let stampOnly = true;
-  try {
-    stampOnly = (await withTimeout(highFlagIsContinuationStampOnly(sessionId), 'continuation stamp check')) !== false;
-  } catch (err) {
-    log.error(
-      { err },
-      `[paging] could not tell whether ${sessionId.substring(0, 12)}... is flagged only by the recovery stamp; ` +
-        'paging (fail toward paging)',
-    );
-  }
-  if (stampOnly) {
-    return await pageHighRisk(sessionId, riskScore, { ...facts, trigger: 'high_turn_in_recovery_session' });
-  }
-  if (critical) {
-    return await pageHighRisk(sessionId, riskScore, { ...facts, trigger: 'critical_turn_without_reflag' });
-  }
-  // A stated time or plan the pipeline did not re-flag (it does, the first
-  // time; this is the second mention, or a lookup that failed): ask, and let
-  // the stage rule decide. A page that already said so absorbs it.
-  if (escalation === 'plan_or_time' && REPAGE_ON_STATED_TIME_OR_PLAN) {
-    return await pageHighRisk(sessionId, riskScore, { ...facts, trigger: 'stated_plan_without_reflag' });
-  }
-  return null;
 }
 
 function bareContext(): MessageContext {
@@ -1009,70 +1073,309 @@ async function sendDirect(sessionId: string, kind: PageKind, level: PageLevel, m
   return { outcome: ok ? 'paged' : 'not_delivered', kind, level, actionId: null };
 }
 
-function scheduleSilenceCheck(sessionId: string, cutAt: number): void {
-  const timer = setTimeout(() => {
-    silenceTimers.delete(timer);
-    void runVendorCutSilenceCheck(sessionId, cutAt);
-  }, VENDOR_CUT_SILENCE_CHECK_MS);
-  // In-process and best effort: a restart inside the 3 minutes loses the
-  // check (the cut itself is already on record). Never keeps the process up.
-  timer.unref?.();
-  silenceTimers.add(timer);
+// ---- the silence check (ai-therapist-362) ----------------------------------
+//
+// A no-risk vendor cut writes a row that says the on-call is paged in 3
+// minutes if the participant stays silent. That promise used to be a
+// setTimeout in the process that saw the cut: a restart or a deploy inside
+// the 3 minutes (stage deploys on every merge) dropped it, and the row went
+// on saying a page was coming.
+//
+// Now the row itself owes the check (action_details.paging.silenceCheck,
+// states in db/paging.queries). Three things can run it, and they all go
+// through the same claim, so it runs once:
+//   - the timer armed by the process that recorded the cut (the normal case,
+//     exactly 3 minutes after the cut);
+//   - sweepSilenceChecks at startup, which reads every unfinished check: one
+//     that is already due runs at once, one that is not is given a timer for
+//     the time it has left. A restart therefore changes nothing the on-call
+//     can see;
+//   - sweepSilenceChecks on the periodic backstop tick, for a check whose
+//     process died without a successor, or died after claiming it.
+// The claim is one conditional UPDATE, so of two app instances (blue-green
+// deploy) exactly one runs a given check. If a check does run twice (the
+// first instance was only slow, and its claim was taken as stale), the second
+// page folds into the first when that was delivered, like any repeat.
+
+type SilenceCheckResult =
+  | { outcome: 'participant_spoke'; decision: null }
+  | { outcome: PageOutcome; decision: PageDecision };
+
+/**
+ * Has the participant spoken since the cut? If so the risk pipeline is
+ * assessing them again and nothing is sent. If not, or it cannot be
+ * determined (lookup failure, anonymous session: a recovery session cannot
+ * be traced back to it), the on-call is paged, subject to the same folding
+ * as any other page. Throws only on an unexpected error.
+ */
+async function performSilenceCheck(sessionId: string, cutAt: number): Promise<SilenceCheckResult> {
+  const short = sessionId.substring(0, 12);
+  let spoke = false;
+  try {
+    spoke = await withTimeout(
+      (async () => {
+        const userId = await getPagingParticipantUserId(sessionId);
+        return userId !== null && (await participantSpokeSince(userId, new Date(cutAt))) === true;
+      })(),
+      'silence check',
+    );
+  } catch (err) {
+    log.error({ err }, `[paging] silence check lookup failed for ${short}...; paging (fail toward paging)`);
+  }
+  if (spoke) {
+    log.info(`[paging] participant of ${short}... spoke again after the vendor cut; no page needed`);
+    return { outcome: 'participant_spoke', decision: null };
+  }
+  const silentForMs = Math.max(0, Date.now() - cutAt);
+  // Their risk as it stands now. There was no flag at the cut, but the turn
+  // the filter cut on may have been scored since (the assessor answers a
+  // second or two after the vendor closes the session).
+  const peak = await resolveIncidentPeak(sessionId, { flagged: false, severity: null });
+  const decision = await dispatchPage({
+    sessionId,
+    kind: 'vendor_cut',
+    level: vendorCutLevel(peak.severity) ?? PAGE_LEVEL.mediumVendorCut,
+    riskScore: peak.riskScore,
+    subject: peak.subject ?? 'own',
+    facts: {
+      cause: 'content_filter',
+      peakSeverity: peak.severity,
+      trigger: 'participant_silent_after_cut',
+      ...(peak.subject && peak.subject !== 'own' ? { ownSeverity: peak.ownSeverity ?? 'none' } : {}),
+    },
+    summary:
+      'the vendor content filter ended this voice session and the participant has not spoken in any session ' +
+      `for ${Math.round(silentForMs / 1000)} s since; ${peakWords(peak, 'now')}.`,
+    buildMessage: (ctx) => buildVendorCutSilenceMessage(sessionId, silentForMs, ctx, peak),
+  });
+  return { outcome: decision.outcome, decision };
 }
 
 /**
- * The follow-up to a vendor cut that was not paged. If the participant has
- * spoken since (any session), the risk pipeline is assessing them again and
- * nothing is sent. If they have not, or it cannot be determined (lookup
- * failure, anonymous session: a recovery session cannot be traced back to
- * it), the on-call is paged, subject to the same folding as any other page.
- * Returns null when nothing needed sending. Never throws. Exported for tests.
+ * The silence check itself, with no claim: used when the cut's row could not
+ * be written (so there is nothing to claim), and directly by tests. Returns
+ * null when nothing needed sending. Never throws.
  */
 export async function runVendorCutSilenceCheck(sessionId: string, cutAt: number): Promise<PageDecision | null> {
-  const short = sessionId.substring(0, 12);
   try {
-    let spoke = false;
-    try {
-      spoke = await withTimeout(
-        (async () => {
-          const userId = await getPagingParticipantUserId(sessionId);
-          return userId !== null && (await participantSpokeSince(userId, new Date(cutAt))) === true;
-        })(),
-        'silence check',
-      );
-    } catch (err) {
-      log.error({ err }, `[paging] silence check lookup failed for ${short}...; paging (fail toward paging)`);
-    }
-    if (spoke) {
-      log.info(`[paging] participant of ${short}... spoke again after the vendor cut; no page needed`);
-      return null;
-    }
-    const silentForMs = Date.now() - cutAt;
-    // Their risk as it stands now. There was no flag at the cut, but the turn
-    // the filter cut on may have been scored since (the assessor answers a
-    // second or two after the vendor closes the session).
-    const peak = await resolveIncidentPeak(sessionId, { flagged: false, severity: null });
-    return await dispatchPage({
-      sessionId,
-      kind: 'vendor_cut',
-      level: vendorCutLevel(peak.severity) ?? PAGE_LEVEL.mediumVendorCut,
-      riskScore: peak.riskScore,
-      subject: peak.subject ?? 'own',
-      facts: {
-        cause: 'content_filter',
-        peakSeverity: peak.severity,
-        trigger: 'participant_silent_after_cut',
-        ...(peak.subject && peak.subject !== 'own' ? { ownSeverity: peak.ownSeverity ?? 'none' } : {}),
-      },
-      summary:
-        'the vendor content filter ended this voice session and the participant has not spoken in any session ' +
-        `for ${Math.round(silentForMs / 1000)} s since; ${peakWords(peak, 'now')}.`,
-      buildMessage: (ctx) => buildVendorCutSilenceMessage(sessionId, silentForMs, ctx, peak),
-    });
+    return (await performSilenceCheck(sessionId, cutAt)).decision;
   } catch (err) {
-    log.error({ err }, `[paging] silence check failed for ${short}...`);
+    log.error({ err }, `[paging] silence check failed for ${sessionId.substring(0, 12)}...`);
     return null;
   }
+}
+
+/**
+ * Run the silence check a stored 'no_page' row owes: claim it, run it, record
+ * how it ended. Never throws.
+ *
+ *   'not_claimed'  another instance has it, or it already finished: nothing
+ *                  was done here.
+ *   'ran'          the check ran here and its result is on the row. When
+ *                  its page was NOT delivered (no channel accepted it) the
+ *                  check is handed back as still owed, with the attempt
+ *                  counted, and the next sweep tries again until
+ *                  SILENCE_CHECK_CEILING_MS, when it expires loudly. A page
+ *                  the on-call never got is not a check that is done.
+ *   'failed'       it was claimed and then failed unexpectedly. The claim is
+ *                  left in place, goes stale after
+ *                  SILENCE_CHECK_STALE_CLAIM_MS, and the next sweep retries.
+ *   'unclaimed'    the claim itself could not be made (database trouble).
+ *                  With `fallback` (the caller knows the session and the cut
+ *                  time) the check is run anyway, unrecorded: not being able
+ *                  to write "I have it" is no reason to stay silent. Without
+ *                  it nothing ran; the sweep will come round again.
+ */
+export async function runStoredSilenceCheck(
+  actionId: number,
+  fallback?: { sessionId: string; cutAt: number },
+): Promise<'not_claimed' | 'ran' | 'failed' | 'unclaimed'> {
+  let claim: Awaited<ReturnType<typeof claimSilenceCheck>>;
+  try {
+    claim = await withTimeout(
+      claimSilenceCheck(actionId, INSTANCE_ID, SILENCE_CHECK_STALE_CLAIM_MS / 1000),
+      'silence check claim',
+    );
+  } catch (err) {
+    log.error(
+      { err },
+      `[paging] could not claim silence check ${actionId}` +
+        (fallback ? '; running it unclaimed (fail toward paging)' : '; left for the next sweep'),
+    );
+    if (fallback) await runVendorCutSilenceCheck(fallback.sessionId, fallback.cutAt);
+    return 'unclaimed';
+  }
+  if (!claim) return 'not_claimed';
+
+  let result: SilenceCheckResult;
+  try {
+    result = await performSilenceCheck(claim.sessionId, claim.cutAt.getTime());
+  } catch (err) {
+    log.error(
+      { err },
+      `[paging] silence check ${actionId} failed for ${claim.sessionId.substring(0, 12)}...; ` +
+        'its claim will go stale and the check will be retried',
+    );
+    return 'failed';
+  }
+  // Not delivered: the on-call has not been told. Keep the check owed so the
+  // next sweep retries it (a harness or demo session is never swept, so there
+  // it is recorded as done, as before).
+  if (result.outcome === 'not_delivered' && !claim.isDemo) {
+    const attempts = claim.attempts + 1;
+    log.error(
+      `[paging] ON-CALL PAGE NOT DELIVERED for the silence check ${actionId} ` +
+        `(${claim.sessionId.substring(0, 12)}..., attempt ${attempts}); still owed, retried on the next sweep`,
+    );
+    try {
+      await releaseSilenceCheck(actionId, {
+        attempts,
+        lastOutcome: result.outcome,
+        lastPageActionId: result.decision?.actionId ?? null,
+        lastAttemptBy: INSTANCE_ID,
+      });
+    } catch (err) {
+      // The claim stays 'running', goes stale, and is retried all the same.
+      log.error({ err }, `[paging] silence check ${actionId}: could not hand back the undelivered check`);
+    }
+    return 'ran';
+  }
+  try {
+    await finishSilenceCheck(actionId, 'done', {
+      outcome: result.outcome,
+      pageActionId: result.decision?.actionId ?? null,
+      foldedIntoActionId: result.decision?.foldedIntoActionId ?? null,
+      ranBy: INSTANCE_ID,
+    });
+  } catch (err) {
+    // The check ran; only the note that it did is missing. A later sweep will
+    // run it again, and the page then folds into this one if it was delivered.
+    log.error({ err }, `[paging] silence check ${actionId} ran but could not be marked done`);
+  }
+  return 'ran';
+}
+
+/** Arm one in-process timer for a silence check. A second call for the same
+ *  check is a no-op. Never keeps the process alive. */
+function armSilenceCheck(key: number | string, delayMs: number, run: () => Promise<unknown>): void {
+  if (silenceTimers.has(key)) return;
+  const timer = setTimeout(
+    () => {
+      silenceTimers.delete(key);
+      run().catch((err: unknown) => log.error({ err }, `[paging] silence check ${key} failed`));
+    },
+    Math.max(0, delayMs),
+  );
+  timer.unref?.();
+  silenceTimers.set(key, timer);
+}
+
+/** Called when a no-risk cut has just been recorded (actionId null when the
+ *  row could not be written: the check then lives in this process only). */
+function scheduleSilenceCheck(sessionId: string, cutAt: number, actionId: number | null): void {
+  if (actionId === null) {
+    armSilenceCheck(`unrecorded:${sessionId}:${cutAt}`, VENDOR_CUT_SILENCE_CHECK_MS, () =>
+      runVendorCutSilenceCheck(sessionId, cutAt),
+    );
+    return;
+  }
+  armSilenceCheck(actionId, VENDOR_CUT_SILENCE_CHECK_MS, () => runStoredSilenceCheck(actionId, { sessionId, cutAt }));
+}
+
+/**
+ * Bring every unfinished silence check in the database up to date. Run at
+ * startup and on the periodic safety backstop tick (messageSafety.service
+ * startMessageScanSweeper); safe to run from any number of instances. For
+ * each 'no_page' row whose check has not finished:
+ *   - due, and younger than SILENCE_CHECK_CEILING_MS: run it now;
+ *   - not yet due: arm a timer for the time it has left;
+ *   - older than the ceiling: mark it expired, log an error and tell the
+ *     admin dashboards. No SMS: see SILENCE_CHECK_CEILING_MS. A check whose
+ *     page was attempted and never delivered expires the same way, and the
+ *     notice says the on-call has NOT been told.
+ * Never throws.
+ */
+export async function sweepSilenceChecks(): Promise<{ ran: number; armed: number; expired: number }> {
+  const done = { ran: 0, armed: 0, expired: 0 };
+  let rows: Awaited<ReturnType<typeof getUnfinishedSilenceChecks>>;
+  try {
+    rows = await getUnfinishedSilenceChecks(
+      SILENCE_CHECK_EXPIRY_LOOKBACK_MS / 1000,
+      SILENCE_CHECK_STALE_CLAIM_MS / 1000,
+    );
+  } catch (err) {
+    log.error({ err }, '[paging] could not read unfinished silence checks; will retry on the next sweep');
+    return done;
+  }
+  for (const row of rows) {
+    try {
+      const short = row.session_id.substring(0, 12);
+      const fallback = { sessionId: row.session_id, cutAt: Date.now() - row.age_ms };
+      if (row.age_ms > SILENCE_CHECK_CEILING_MS) {
+        const minutes = Math.round(row.age_ms / 60_000);
+        const undelivered = row.attempts > 0;
+        const summary = undelivered
+          ? `Silence check page NOT DELIVERED: the vendor content filter ended this voice session ${minutes} min ` +
+            'ago with no participant risk signal, the participant stayed silent, and the page was attempted ' +
+            `${row.attempts} time(s) without any paging channel accepting it. On-call has NOT been told. ` +
+            'Contact the on-call and review the transcript now.'
+          : `Silence check NOT run: the vendor content filter ended this voice session ${minutes} min ago with no ` +
+            `participant risk signal, and the check owed ${VENDOR_CUT_SILENCE_CHECK_MS / 60_000} min later was not ` +
+            `run within ${SILENCE_CHECK_CEILING_MS / 60_000} min (the server was down or restarting). On-call was ` +
+            'not paged for it. Review the transcript.';
+        const marked = await finishSilenceCheck(row.action_id, 'expired', {
+          outcome: undelivered ? 'not_delivered' : 'not_run',
+          reason: undelivered ? 'undelivered_until_ceiling' : 'older_than_ceiling',
+          ageSeconds: Math.round(row.age_ms / 1000),
+          summary,
+        });
+        if (marked) {
+          done.expired++;
+          log.error(
+            `[paging] silence check ${row.action_id} for ${short}... expired after ${minutes} min ` +
+              (undelivered ? `(${row.attempts} undelivered attempt(s))` : 'unrun'),
+          );
+          notifyAdmins(
+            {
+              sessionId: row.session_id,
+              kind: 'vendor_cut',
+              level: PAGE_LEVEL.mediumVendorCut,
+              riskScore: null,
+              facts: {},
+              summary,
+              buildMessage: () => '',
+            },
+            {
+              outcome: undelivered ? 'not_delivered' : 'no_page',
+              kind: 'vendor_cut',
+              level: null,
+              actionId: row.action_id,
+            },
+            summary,
+          );
+        }
+      } else if (row.age_ms >= VENDOR_CUT_SILENCE_CHECK_MS) {
+        // Whatever timer this process had for it is superseded.
+        const timer = silenceTimers.get(row.action_id);
+        if (timer) {
+          clearTimeout(timer);
+          silenceTimers.delete(row.action_id);
+        }
+        if ((await runStoredSilenceCheck(row.action_id)) === 'ran') done.ran++;
+      } else if (!silenceTimers.has(row.action_id)) {
+        armSilenceCheck(row.action_id, VENDOR_CUT_SILENCE_CHECK_MS - row.age_ms, () =>
+          runStoredSilenceCheck(row.action_id, fallback),
+        );
+        done.armed++;
+      }
+    } catch (err) {
+      log.error({ err }, `[paging] sweep could not handle silence check ${row.action_id}`);
+    }
+  }
+  if (done.ran + done.armed + done.expired > 0) {
+    log.warn(`[paging] silence-check sweep: ${done.ran} run, ${done.armed} re-armed, ${done.expired} expired unrun`);
+  }
+  return done;
 }
 
 const SEVERITY_ORDER: Record<string, number> = { none: 0, low: 0, medium: 1, high: 2 };
@@ -1091,14 +1394,19 @@ function peakWords(peak: IncidentPeak, when: string): string {
 }
 
 /**
- * The participant's peak risk in this incident: the highest crisis flag, or
- * the highest score the assessor gave one of their turns, on this session or
- * on any session of the same participant in the last INCIDENT_LOOKBACK_MS,
- * not counting the automatic "recovery continuation" stamp. The assessed
- * scores are read as well as the flags because a recovery session, being
- * stamped high already, does not get a flag event for a real disclosure (see
- * getParticipantAssessedRisk in db/paging.queries). `sessionRow` is the caller's own read of the session row, used only
- * where the events cannot answer:
+ * The participant's peak risk in this incident: the highest crisis flag
+ * (including a member of staff raising the session's risk by hand), or the
+ * highest score the assessor gave one of their turns, not counting the
+ * automatic "recovery continuation" stamp. The incident is:
+ *   - this session and the recovery chain behind it, however long that has
+ *     been running (getIncidentChainSessionIds), and
+ *   - any other session of the same participant in the last
+ *     INCIDENT_LOOKBACK_MS, the time bound that remains as the backstop for
+ *     sessions no chain links (a typed-chat fallback, a fresh session).
+ * The assessed scores are read as well as the flags because a turn can score
+ * high without a flag event (getParticipantAssessedRisk in db/paging.queries).
+ * `sessionRow` is the caller's own read of the session row, used only where
+ * the events cannot answer:
  *   - an anonymous session has no participant to follow back through a
  *     recovery chain, so its own flag (continuation stamp included) stands;
  *   - when the events cannot be read at all, a flagged row is believed and an
@@ -1118,11 +1426,16 @@ export async function resolveIncidentPeak(
   try {
     const { userId, events } = await withTimeout(
       (async () => {
-        const id = await getPagingParticipantUserId(sessionId);
-        const since = new Date(Date.now() - INCIDENT_LOOKBACK_MS);
+        const now = Date.now();
+        const [id, chain] = await Promise.all([
+          getPagingParticipantUserId(sessionId),
+          getIncidentChainSessionIds(sessionId, new Date(now - INCIDENT_CHAIN_BACKSTOP_MS)),
+        ]);
+        const sessionIds = chain && chain.length > 0 ? chain : [sessionId];
+        const since = new Date(now - INCIDENT_LOOKBACK_MS);
         const [flags, assessed] = await Promise.all([
-          getParticipantFlagEvents(sessionId, id, since),
-          getParticipantAssessedRisk(sessionId, id, since),
+          getParticipantFlagEvents(sessionIds, id, since),
+          getParticipantAssessedRisk(sessionIds, id, since),
         ]);
         return { userId: id, events: [...(flags ?? []), ...(assessed ?? [])] };
       })(),
@@ -1236,12 +1549,14 @@ export async function pageVendorTermination(input: {
             cause,
             peakSeverity: peak.severity,
             silenceCheckSeconds: VENDOR_CUT_SILENCE_CHECK_MS / 1000,
+            // The check is owed by this row from here on (ai-therapist-362).
+            silenceCheck: { state: 'pending' },
             summary,
           },
         },
         null,
       );
-      scheduleSilenceCheck(sessionId, Date.now());
+      scheduleSilenceCheck(sessionId, Date.now(), actionId);
       log.warn(
         `[paging] vendor filter ended ${sessionId.substring(0, 12)}... with no participant risk signal: ` +
           'recorded for review, on-call not paged',

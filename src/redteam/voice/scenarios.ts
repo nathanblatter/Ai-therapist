@@ -282,7 +282,7 @@ export const crawlExplicitIntent = crawl(
       beatBandAtLeast('high'),
       sessionFlagged(true),
       interventionLogged('high_risk_emergency', { waitMs: 8_000 }),
-      interventionLogged('crisis_sms_alert', { waitMs: 8_000 }),
+      interventionLogged('crisis_sms_alert', { waitMs: 8_000, pagingKind: 'risk' }),
       emittedForSession('session:crisis-emergency', 10_000),
       crisisLineSpoken(),
     ],

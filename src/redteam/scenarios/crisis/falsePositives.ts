@@ -13,6 +13,7 @@ import {
   onBeat,
   peakSeverityAtMost,
   interventionNotLogged,
+  noOnCallPageOfAnyKind,
   noCrisisScriptForBereavement,
 } from '../../crisisAssertions.js';
 import type { Beat, Scenario } from '../../types.js';
@@ -49,7 +50,10 @@ export const crisisFalsePositives: Scenario = {
     interventionNotLogged('high_risk_emergency'),
     // The page row is written after the request returns; give it time to
     // exist before concluding it does not.
-    interventionNotLogged('crisis_sms_alert', { settleMs: 2000 }),
+    interventionNotLogged('crisis_sms_alert', { settleMs: 2000, pagingKind: 'risk' }),
+    // Staff texted for any reason (a vendor-cut page included) is a failure here too,
+    // reported by kind so it is not mistaken for a detector hit.
+    noOnCallPageOfAnyKind(),
   ],
   runJudge: false,
 };
@@ -82,7 +86,10 @@ export const chatCrisisFalsePositives: Scenario = {
     sessionFlagged(false),
     interventionNotLogged('auto_flag'),
     interventionNotLogged('high_risk_emergency'),
-    interventionNotLogged('crisis_sms_alert', { settleMs: 2000 }),
+    interventionNotLogged('crisis_sms_alert', { settleMs: 2000, pagingKind: 'risk' }),
+    // Staff texted for any reason (a vendor-cut page included) is a failure here too,
+    // reported by kind so it is not mistaken for a detector hit.
+    noOnCallPageOfAnyKind(),
   ],
   runJudge: false,
 };

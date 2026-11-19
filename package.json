@@ -16,6 +16,7 @@
     "lint": "ESLINT_USE_FLAT_CONFIG=false eslint -c .eslintrc.json --rulesdir .eslint-rules . --ext .js,.jsx,.ts,.tsx",
     "lint:fix": "ESLINT_USE_FLAT_CONFIG=false eslint -c .eslintrc.json --rulesdir .eslint-rules . --ext .js,.jsx,.ts,.tsx --fix",
     "lint:emoji": "node scripts/lint-emoji.mjs",
+    "page:test": "tsx src/server/scripts/sendTestPage.ts",
     "redteam": "tsx src/redteam/cli.ts",
     "redteam:smoke": "tsx src/redteam/cli.ts --suite smoke",
     "redteam:full": "tsx src/redteam/cli.ts --suite full",
@@ -39,6 +40,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
+    "@aws-sdk/client-pinpoint-sms-voice-v2": "^3.1075.0",
     "@aws-sdk/client-s3": "^3.1075.0",
     "@socket.io/postgres-adapter": "^0.5.0",
     "archiver": "^8.0.0",

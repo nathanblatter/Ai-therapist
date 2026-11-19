@@ -61,6 +61,12 @@ const EMPTY = {
     flagged_sessions: { total: 0, unflagged_before_end: 0, still_flagged_at_end: 0, with_adverse_event_report: 0 },
     interventions: [],
     pages_sent: 0,
+    pages: {
+      delivered: { risk: 0, vendor_cut: 0, vendor_ceiling: 0, total: 0 },
+      attempted_not_delivered: 0,
+      unclassified: 0,
+      folded_into_earlier_page: 0,
+    },
     escalations: [],
   },
   monitoring: {
@@ -378,6 +384,33 @@ describe('renderIrbPacketHtml', () => {
     }
     expect(html).toContain('None in this period.');
     expect(html).toContain('(not set - fill by hand)');
+  });
+
+  // PR #64 follow-up: the headline line keeps its label and its number; the
+  // split by delivery and reason is added beneath it.
+  it('keeps "On-call pages sent" as it was and adds the delivery / reason lines', async () => {
+    q.getIrbSafetyCounts.mockResolvedValue({
+      ...EMPTY.safety,
+      pages_sent: 41,
+      pages: {
+        delivered: { risk: 17, vendor_cut: 5, vendor_ceiling: 2, total: 24 },
+        attempted_not_delivered: 11,
+        unclassified: 6,
+        folded_into_earlier_page: 9,
+      },
+    });
+    const html = renderIrbPacketHtml(await buildIrbPacket({ from: FROM, to: TO, orgId: 1 }));
+    const cell = (label: string): string | undefined =>
+      new RegExp(`<dt>${label.replace(/[()]/g, '\\$&')}</dt><dd>(\\d+)</dd>`).exec(html)?.[1];
+    expect(cell('On-call pages sent')).toBe('41');
+    expect(cell('Delivered: high risk score')).toBe('17');
+    expect(cell('Delivered: voice vendor ended the session (content filter)')).toBe('5');
+    expect(cell('Delivered: voice vendor session limit during a high flag')).toBe('2');
+    expect(cell('Attempted, not delivered')).toBe('11');
+    expect(cell('Not classified (recorded before 2026-11-18)')).toBe('6');
+    expect(cell('Delivered, total')).toBe('24');
+    expect(cell('Further events folded into a page already delivered (no second text)')).toBe('9');
+    expect(html).toContain('counts every page attempt, delivered or not');
   });
 });
 

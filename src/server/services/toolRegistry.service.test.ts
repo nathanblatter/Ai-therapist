@@ -104,6 +104,10 @@ vi.mock('./crisisDetection.service.js', () => ({
   flagSessionCrisis: flagSessionCrisisMock,
   logInterventionAction: logInterventionActionMock,
 }));
+const { executeGraduatedResponseMock } = vi.hoisted(() => ({
+  executeGraduatedResponseMock: vi.fn(async () => undefined),
+}));
+vi.mock('./crisisIntervention.service.js', () => ({ executeGraduatedResponse: executeGraduatedResponseMock }));
 vi.mock('./embeddings.service.js', () => ({
   embedText: embedTextMock,
 }));
@@ -315,6 +319,9 @@ describe('escalate_to_human', () => {
       ['model_escalation'],
       'participant asked for a person',
     );
+    // The high-risk response is told the flag came from the model, so the
+    // on-call page does not say the score came from the participant's words.
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('s1', 'high', 80, 'model_escalation');
     expect(logInterventionActionMock).toHaveBeenCalledWith(
       's1',
       'ai_escalation',

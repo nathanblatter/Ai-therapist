@@ -90,6 +90,9 @@ vi.mock('../db/index.js', () => ({
         subject: (a.action_details['subject'] as string | undefined) ?? null,
       })),
   ),
+  // A session with a real high flag: nothing to record (PR 70).
+  recordRecoveryDisclosure: vi.fn(async () => ({ recorded: false, eventId: null, stampedScore: null })),
+  incidentHasCrisisAdverseEvent: vi.fn(async () => true),
   isDemoAccountSession: vi.fn(async () => false),
   isSandboxAccountSession: vi.fn(async () => false),
   sessionHasRiskCheck: vi.fn(async () => true),
@@ -106,15 +109,22 @@ vi.mock('../db/paging.queries.js', () => ({
       )
       .sort((a, b) => b.performed_at.getTime() - a.performed_at.getTime()),
   ),
+  getIncidentChainSessionIds: vi.fn(async () => []),
   getParticipantFlagEvents: vi.fn(async () => []),
   getParticipantAssessedRisk: vi.fn(async () => []),
-  highFlagIsContinuationStampOnly: vi.fn(async () => false),
   participantSpokeSince: vi.fn(async () => true),
+  getUnfinishedSilenceChecks: vi.fn(async () => []),
+  claimSilenceCheck: vi.fn(async () => false),
+  releaseSilenceCheck: vi.fn(async () => undefined),
+  finishSilenceCheck: vi.fn(async () => undefined),
+  INCIDENT_CHAIN_BACKSTOP_MS: 6 * 60 * 60 * 1000,
   insertPagingRecord: vi.fn(async (sessionId: string, type: string, details: Record<string, unknown>) =>
     addAction(sessionId, type, details),
   ),
 }));
-vi.mock('./crisisAlert.service.js', () => ({ sendCrisisAlert: sendCrisisAlertMock }));
+vi.mock('./crisisAlert.service.js', async () =>
+  (await import('../testing/alertMock.js')).alertModuleMock(sendCrisisAlertMock),
+);
 vi.mock('./suppression.js', () => ({
   sessionSuppressesSafetyPipeline: vi.fn(async () => false),
   sessionSuppressesCrisisPaging: vi.fn(async () => false),
@@ -280,7 +290,6 @@ describe('who is at risk stays part of the fold rule', () => {
     await turn(95, 'attempt', { subject: 'third_party', thirdParty: true });
     expect(texts()).toHaveLength(1);
     expect(texts()[0]).toContain('THIRD PARTY AT RISK');
-    expect(texts()[0]).toContain('for the person the participant is reporting on');
 
     await turn(75);
     expect(db.flags).toHaveLength(2);
@@ -391,5 +400,63 @@ describe('vendor-cut pages say whose risk was high', () => {
     expect(text).toContain('at HIGH risk (third party)');
     expect(text).toContain('about SOMEONE ELSE');
     expect(text).not.toMatch(/Their risk is HIGH/);
+  });
+});
+
+// PR 76: a carrier SMS is split at line boundaries into parts of at most 300
+// characters, and part 1 is what the on-call reads first.
+describe('the first SMS part carries who is at risk, what changed and why', () => {
+  const previous = (subject: 'own' | 'third_party' | 'harm_to_others') => ({
+    actionId: 1,
+    sessionId: 'live_previous_session_id',
+    at: Date.now() - 120_000,
+    level: paging.PAGE_LEVEL.high,
+    kinds: ['risk' as const],
+    riskScore: 85,
+    subject,
+    stage: 0 as const,
+  });
+
+  it.each([
+    ['own', null],
+    ['own', 'plan_or_time'],
+    ['own', 'attempt'],
+    ['third_party', null],
+    ['third_party', 'plan_or_time'],
+    ['third_party', 'attempt'],
+    ['harm_to_others', null],
+    ['harm_to_others', 'plan_or_time'],
+    ['harm_to_others', 'attempt'],
+  ] as const)('%s, escalation %s, as a follow-up at 100', async (subject, escalation) => {
+    const { splitForSms } = await import('../utils/smsText.js');
+    const text = paging.buildRiskPageMessage(
+      'live_0123456789abcdefghijklmnop',
+      100,
+      { previousPage: previous(subject), unpagedCut: null, now: Date.now() },
+      'participant_turn',
+      subject,
+      { escalation },
+    );
+    const first = splitForSms(text)[0];
+    expect(first).toContain('URGENT: AI-Therapist HIGH crisis flag');
+    expect(first).toContain('Why: RISK SCORE 100/100');
+    if (subject === 'third_party') expect(first).toContain('THIRD PARTY AT RISK');
+    if (subject === 'harm_to_others') expect(first).toContain('RISK TO OTHERS');
+    if (escalation) expect(first).toContain(`WHAT CHANGED: ${paging.ESCALATION_WORDS[escalation]}`);
+  });
+
+  it("the participant's own page after a third-party page keeps OWN RISK and the Why line in part 1", async () => {
+    const { splitForSms } = await import('../utils/smsText.js');
+    const text = paging.buildRiskPageMessage(
+      'live_0123456789abcdefghijklmnop',
+      75,
+      { previousPage: previous('third_party'), unpagedCut: null, now: Date.now() },
+      'participant_turn',
+      'own',
+      { escalation: 'plan_or_time', alsoSubject: 'harm_to_others' },
+    );
+    const first = splitForSms(text)[0];
+    expect(first).toContain("PARTICIPANT'S OWN RISK");
+    expect(first).toContain('WHAT IT SAYS: STATED INTENT WITH A TIME OR PLAN');
   });
 });

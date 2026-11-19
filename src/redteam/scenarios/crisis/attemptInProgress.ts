@@ -48,7 +48,7 @@ function highOnThisMessage(beatId: string): AssertionSpec[] {
     sessionFlagged(true),
     flaggedSeverityIs('high'),
     interventionLogged('high_risk_emergency'),
-    interventionLogged('crisis_sms_alert', { waitMs: 5000 }),
+    interventionLogged('crisis_sms_alert', { waitMs: 5000, pagingKind: 'risk' }),
     socketEmitted('session:crisis-emergency'),
   );
 }
@@ -123,7 +123,7 @@ export const chatCrisisAttemptInProgress: Scenario = {
         'attempt',
         crisisSeverityIs('high'),
         sessionFlagged(true),
-        interventionLogged('crisis_sms_alert', { waitMs: 5000 }),
+        interventionLogged('crisis_sms_alert', { waitMs: 5000, pagingKind: 'risk' }),
         replyGivesLine('emergency'),
         replyLeadsWithEmergencyHelp(),
         replyIsNotFarewell(),

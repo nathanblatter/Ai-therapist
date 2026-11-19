@@ -1124,6 +1124,11 @@ if (isEntrypoint) {
       // Backstop re-scan of participant messages stranded by a crash/deploy
       // between insert and terminal scan status (ai-therapist-141). Harness
       // children skip it (shared-DB guard), same as the work-queue sweeper.
+      // The same tick (15 s after start, then every 3 minutes) brings the
+      // paging policy's silence checks up to date from their stored rows, so
+      // a vendor cut's "page in 3 minutes if they stay silent" survives this
+      // very restart (ai-therapist-362; crisisPaging sweepSilenceChecks). A
+      // harness child must not take those over either: its pager is neutered.
       startMessageScanSweeper();
     }
 

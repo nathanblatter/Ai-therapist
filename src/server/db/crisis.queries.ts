@@ -2,6 +2,7 @@
 import { pool } from '../config/db.js';
 import { ownerOrgScopeSql } from './organizations.queries.js';
 import { CRISIS_EVENT_ADJUDICATIONS_SQL } from './crisisAdjudications.queries.js';
+import { getIncidentChainSessionIds, INCIDENT_CHAIN_BACKSTOP_MS } from './paging.queries.js';
 
 /** Anything that can run a parameterized query (the pool, or a transaction's
  *  PoolClient so callers can write the event atomically with other rows). */
@@ -616,4 +617,130 @@ export async function markSessionCrisisContinuation(sessionId: string): Promise<
   } finally {
     client.release();
   }
+}
+
+export interface RecoveryDisclosureResult {
+  /** True when THIS call wrote the event: until now the session's only high
+   *  flag was the automatic continuation stamp. False when the session has a
+   *  real high flag already (or is not a stamped recovery session at all). */
+  recorded: boolean;
+  eventId: number | null;
+  /** The score the stamp had put on the session row (inherited, or 100). */
+  stampedScore: number | null;
+}
+
+/**
+ * The participant's first HIGH turn in a recovery session whose high flag is
+ * only the continuation stamp (ai-therapist-363).
+ *
+ * The stamp is written at the inherited score, or 100, so the pipeline's
+ * re-flag rule can never fire in such a session and, before this, a real
+ * disclosure there left no 'flagged' event: the on-call was paged, and the
+ * record showed nothing but the automatic stamp. This writes the missing
+ * record, once per session, in one transaction:
+ *   - a crisis_events 'flagged' row at high severity with the score the
+ *     assessor actually gave the turn, its factors, and the message it came
+ *     from (previous_risk_score keeps the stamp's placeholder score);
+ *   - the session row's crisis_risk_score and crisis_flagged_at, which the
+ *     stamp had set to a placeholder, now say what was assessed and when. The
+ *     re-flag rule therefore works normally for the rest of the session.
+ *
+ * The session row is locked first, so two high turns arriving together
+ * cannot both find "stamp only": the second sees the first one's event and
+ * returns recorded=false. A session with a real high flag is left alone,
+ * which is what keeps this from duplicating an ordinary flag.
+ *
+ * Deliberately does not draft the adverse event: whether the incident already
+ * has one is the caller's question (incidentHasCrisisAdverseEvent).
+ */
+export async function recordRecoveryDisclosure(input: {
+  sessionId: string;
+  riskScore: number;
+  messageId: string | number | null;
+  factors: string[];
+}): Promise<RecoveryDisclosureResult> {
+  const none: RecoveryDisclosureResult = { recorded: false, eventId: null, stampedScore: null };
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const session = await client.query<{ crisis_risk_score: number | null }>(
+      'SELECT crisis_risk_score FROM therapy_sessions WHERE session_id = $1 FOR UPDATE',
+      [input.sessionId],
+    );
+    if (session.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return none;
+    }
+    const flags = await client.query<{ stamped: boolean; real_high: boolean }>(
+      `SELECT EXISTS (SELECT 1 FROM crisis_events ce
+                       WHERE ce.session_id = $1 AND ce.event_type = 'flagged'
+                         AND ce.risk_factors @> '["recovery_continuation"]'::jsonb) AS stamped,
+              EXISTS (SELECT 1 FROM crisis_events ce
+                       WHERE ce.session_id = $1 AND ce.event_type = 'flagged' AND ce.severity = 'high'
+                         AND NOT COALESCE(ce.risk_factors @> '["recovery_continuation"]'::jsonb, FALSE)) AS real_high`,
+      [input.sessionId],
+    );
+    if (flags.rows[0]?.stamped !== true || flags.rows[0]?.real_high === true) {
+      await client.query('ROLLBACK');
+      return none;
+    }
+    const stampedScore = session.rows[0].crisis_risk_score ?? null;
+    await client.query(
+      `UPDATE therapy_sessions
+          SET crisis_flagged = TRUE,
+              crisis_severity = 'high',
+              crisis_risk_score = $2,
+              crisis_flagged_at = CURRENT_TIMESTAMP,
+              crisis_flagged_by = 'system',
+              monitoring_frequency = 'critical'
+        WHERE session_id = $1`,
+      [input.sessionId, input.riskScore],
+    );
+    const factors = input.factors.filter((factor) => factor !== 'recovery_continuation');
+    const eventId = await recordCrisisEvent(
+      {
+        sessionId: input.sessionId,
+        eventType: 'flagged',
+        severity: 'high',
+        previousSeverity: 'high',
+        riskScore: input.riskScore,
+        previousRiskScore: stampedScore,
+        triggeredBy: 'system',
+        triggerMethod: 'auto',
+        messageId: input.messageId,
+        // The stamp's marker must never appear here: its absence is what
+        // makes this row "a real high flag" to every reader.
+        riskFactors: factors,
+        notes:
+          `Participant disclosure in a recovery session. Risk score: ${input.riskScore} - Factors: ` +
+          `${factors.join(', ')}. Until this turn the session's high flag was only the automatic ` +
+          `continuation stamp (placeholder score ${stampedScore ?? 'n/a'}).`,
+      },
+      client,
+    );
+    await client.query('COMMIT');
+    return { recorded: true, eventId, stampedScore };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Does the incident this session belongs to (its recovery chain, see
+ * getIncidentChainSessionIds) already have an adverse-event report drafted
+ * from a crisis flag? One incident, one report: it belongs to the session
+ * where the participant was first flagged high.
+ */
+export async function incidentHasCrisisAdverseEvent(sessionId: string): Promise<boolean> {
+  const chain = await getIncidentChainSessionIds(sessionId, new Date(Date.now() - INCIDENT_CHAIN_BACKSTOP_MS));
+  const result = await pool.query(
+    `SELECT 1 FROM adverse_event_reports
+      WHERE session_id = ANY($1::text[]) AND trigger_source = 'auto_crisis_flag'
+      LIMIT 1`,
+    [chain],
+  );
+  return result.rows.length > 0;
 }

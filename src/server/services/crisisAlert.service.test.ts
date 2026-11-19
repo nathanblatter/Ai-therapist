@@ -79,6 +79,39 @@ describe('sendCrisisAlert', () => {
     const { sendCrisisAlert } = await import('./crisisAlert.service.js');
     await expect(sendCrisisAlert('test message')).resolves.toBe(false);
   });
+
+  // PR #64 review: the config read sits inside the send path of every page.
+  it('a config read that never answers holds the page back for the timeout only, then uses the env phone', async () => {
+    vi.useFakeTimers();
+    try {
+      getSystemConfigMock.mockReturnValue(new Promise(() => undefined));
+      fetchMock.mockResolvedValue({ ok: true });
+
+      const { sendCrisisAlert, ALERT_CONFIG_TIMEOUT_MS } = await import('./crisisAlert.service.js');
+      const sending = sendCrisisAlert('test message');
+      await vi.advanceTimersByTimeAsync(ALERT_CONFIG_TIMEOUT_MS - 50);
+      expect(fetchMock).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(100);
+      await expect(sending).resolves.toBe(true);
+      const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+      expect(body.recipient).toBe('+15550000000');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a config read that answers in time leaves no timer behind', async () => {
+    vi.useFakeTimers();
+    try {
+      getSystemConfigMock.mockResolvedValue({ crisis_alert: { enabled: true, phone: '+19995551111' } });
+      fetchMock.mockResolvedValue({ ok: true });
+      const { sendCrisisAlert } = await import('./crisisAlert.service.js');
+      await expect(sendCrisisAlert('test message')).resolves.toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // ai-therapist-190: a hard OpenAI spend cap takes down the risk assessor, the

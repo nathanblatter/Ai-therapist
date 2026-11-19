@@ -635,37 +635,52 @@ async function hardEndCrisisSession(sessionId: string, endedBy: string): Promise
 // GRADUATED RESPONSE SYSTEM
 // ============================================
 
+/** Who raised a high flag (PR 70). */
+export type RiskFlagRaisedBy = 'participant_turn' | 'model_escalation';
+
+export interface GraduatedResponseOptions {
+  source?: RiskFlagRaisedBy;
+  thirdParty?: boolean;
+  subject?: CrisisSubject | null;
+  escalation?: 'plan_or_time' | 'attempt' | null;
+  alsoSubject?: CrisisSubject | null;
+}
+
 /**
  * Execute graduated response based on risk severity.
  * Only 'high' severity triggers a response (admin alert only).
  * @param {string} sessionId - Session ID
  * @param {string} severity - Risk severity ('high' or 'none')
  * @param {number} riskScore - Risk score (0-100)
+ * @param source - Where the flag came from. 'model_escalation' (the model's
+ *   escalate_to_human tool) only changes what the on-call page says: its
+ *   score is the fixed value for that request, not a score of anything the
+ *   participant said.
  */
 export async function executeGraduatedResponse(
   sessionId: string,
   severity: string,
   riskScore: number,
-  /** `subject`: the flag is not about the participant's own suicide or
-   *  self-harm risk (someone else's crisis, or thoughts of harming another
-   *  person); the page, the alert and the steer say so. `thirdParty: true` is
-   *  the same as subject 'third_party'. */
-  options: {
-    thirdParty?: boolean;
-    subject?: CrisisSubject | null;
-    /** What the turn says is happening ('plan_or_time' | 'attempt'): the page
-     *  says it in words and is not folded into a page that did not. */
-    escalation?: 'plan_or_time' | 'attempt' | null;
-    /** The turn is handled as the participant's own risk and ALSO concerned
-     *  someone else; the page mentions it. */
-    alsoSubject?: CrisisSubject | null;
-  } = {},
+  /** Either who raised the flag (PR 70: 'participant_turn' by default, or
+   *  'model_escalation' for the assistant's escalate tool), or an options
+   *  object carrying that and what PR 65 added:
+   *  `subject` / `thirdParty`: the flag is not about the participant's own
+   *  suicide or self-harm risk (someone else's crisis, or thoughts of harming
+   *  another person); the page, the alert and the steer say so.
+   *  `escalation`: what the turn says is happening ('plan_or_time' |
+   *  'attempt'); the page says it in words and is not folded into a page that
+   *  did not. `alsoSubject`: the turn is handled as the participant's own
+   *  risk and ALSO concerned someone else; the page mentions it. */
+  optionsOrSource: GraduatedResponseOptions | RiskFlagRaisedBy = {},
 ): Promise<void> {
+  const options: GraduatedResponseOptions =
+    typeof optionsOrSource === 'string' ? { source: optionsOrSource } : optionsOrSource;
   try {
     if (severity === 'high') {
       await executeHighRiskResponse(
         sessionId,
         riskScore,
+        options.source ?? 'participant_turn',
         options.subject ?? (options.thirdParty === true ? 'third_party' : null),
         { escalation: options.escalation ?? null, alsoSubject: options.alsoSubject ?? null },
       );
@@ -719,11 +734,13 @@ export async function pageOnCall(message: string): Promise<void> {
 async function executeHighRiskResponse(
   sessionId: string,
   riskScore: number,
+  source: RiskFlagRaisedBy = 'participant_turn',
   subject: CrisisSubject | null = null,
   extra: { escalation?: 'plan_or_time' | 'attempt' | null; alsoSubject?: CrisisSubject | null } = {},
 ): Promise<void> {
   const subjectDetail = subject ? { subject } : {};
   const pageFacts = {
+    source,
     ...subjectDetail,
     ...(extra.escalation ? { escalation: extra.escalation } : {}),
     ...(extra.alsoSubject ? { alsoSubject: extra.alsoSubject } : {}),
