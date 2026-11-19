@@ -415,3 +415,39 @@ describe('sendTestPage', () => {
     expect(awsSend).not.toHaveBeenCalled();
   });
 });
+
+describe('a structured page (crisisPaging builders): the bridge gets it whole, SMS part 1 stands on its own', () => {
+  it('the bridge text is the rendered page; the SMS has the headline, Why line and link in part 1', async () => {
+    const { composeVendorCutPage } = await import('./crisisPaging.service.js');
+    const { renderPage } = await import('../utils/pageMessage.js');
+    const { splitPageForSms } = await import('../utils/smsText.js');
+    const sessionId = 'live_u7_Eloycp3oMNHnVh9M';
+    const page = composeVendorCutPage(
+      sessionId,
+      { severity: 'high', riskScore: 82, subject: 'third_party', ownSeverity: 'medium' },
+      {
+        previousPage: { actionId: 1, sessionId, at: Date.now() - 120_000, level: 2, kinds: ['risk'], riskScore: 82 },
+        now: Date.now(),
+      },
+    );
+    const alert = await load({ imessage: true, aws: true });
+    const delivery = await alert.sendCrisisAlertDetailed(page);
+    expect(delivery.delivered).toBe(true);
+    expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string).message).toBe(renderPage(page));
+    const bodies = awsInputs().map((i) => String(i['MessageBody']));
+    expect(bodies).toEqual(splitPageForSms(page));
+    expect(bodies.length).toBeGreaterThan(1);
+    expect(bodies[0]).toMatch(
+      /^\(1\/\d\) URGENT: [^\n]*\(third party\)\nWhy: VENDOR CUT[^\n]*SOMEONE ELSE[^\n]*\nhttps:\/\/[^\n]*\/admin#session=live_u7_Eloycp3oMNHnVh9M$/,
+    );
+    expect(delivery.channels.find((c) => c.channel === 'aws_sms')).toMatchObject({ ok: true, parts: bodies.length });
+  });
+
+  it('the test page is one SMS, worded as before', async () => {
+    const sentAt = new Date('2026-11-19T12:00:00Z');
+    const alert = await load({ aws: true });
+    const report = await alert.sendTestPage(sentAt);
+    expect(report.ok).toBe(true);
+    expect(awsInputs().map((i) => i['MessageBody'])).toEqual([alert.buildTestPageMessage('aws_sms', sentAt)]);
+  });
+});

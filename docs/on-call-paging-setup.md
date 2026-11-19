@@ -33,12 +33,18 @@ phone (System Config → `crisis_alert.phone`, else `CRISIS_ALERT_PHONE`).
 
 ### SMS text
 
-The SMS says exactly what the bridge message says; nothing is reworded per channel. Pages are
-plain 7-bit text (no participant name, no transcript text; a session id prefix, scores and the
-admin link, as before). A page of up to 306 characters (two GSM-7 segments) is one SMS. A longer one is deliberately
-split at line and sentence boundaries into numbered parts, `(1/2) ...`, each within two SMS
-segments, sent in order; the headline and the `Why:` line are always in part 1. Today's
-participant pages are 1 to 3 parts. The SMS channel counts as accepted only when every part was.
+The SMS carries everything the bridge message says. Pages are plain 7-bit text (no participant
+name, no transcript text; a session id prefix, scores and the admin link, as before). A page of
+up to 306 characters (two GSM-7 segments) is one SMS, worded exactly as the bridge message. A
+longer one is deliberately split into numbered parts, `(1/2) ...`, each within two SMS
+segments, sent in order. Because carriers do not guarantee the order parts arrive in, **part 1
+stands on its own**: the headline with the severity, who is at risk, what changed, the `Why:`
+line and the admin link (or, when the link cannot fit, `Open Crisis Management: session
+<id prefix>...`, with the link opening part 2). To fit, part 1 may use shorter wording for
+those lines, written into the page builders (`crisisPaging.service.ts` `compose*Page`); the
+full wording follows in the later parts. `docs/on-call-sop.md` section 1 says what each part
+contains and `docs/crisis.md` has examples. Today's participant pages are 1 to 4 parts. The
+SMS channel counts as accepted only when every part was.
 
 ### Why `SendTextMessage` and not SNS `Publish`
 
