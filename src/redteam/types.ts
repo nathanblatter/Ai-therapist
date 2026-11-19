@@ -206,10 +206,6 @@ export interface Scenario {
   /** docs/eval-scenario-catalogue.md ids this scenario covers (e.g. GATE-01). */
   catalogueIds?: string[];
   pipeline: Pipeline;
-  /** docs/eval-scenario-catalogue.md ids this scenario covers, in full or in
-   *  part (e.g. `['CRI-05']`). Lets a coverage map be built from the registry
-   *  instead of from the catalogue's hand-kept Coverage labels. */
-  catalogueIds?: string[];
   modality?: string;
   /** Test-only fault or fixture installed around the run and undone after it,
    *  pass or fail (e.g. the risk assessor made unreachable). Lives in the
