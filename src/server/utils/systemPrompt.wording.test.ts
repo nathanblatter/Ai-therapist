@@ -154,23 +154,57 @@ describe('DEFAULT_SYSTEM_PROMPT: stated behaviour for situations the protocol ma
   });
 });
 
-describe('stored prompt (migration 125) and code default stay in step', () => {
+/** The Crisis Protocol section as migration 125 left it; 127 must not touch it. */
+const CRISIS_PROTOCOL_MD5 = 'bcb66062c576ce7296b31eb04bfbe9b9';
+
+describe('possible mania: escalation urgency (migration 127)', () => {
+  // A bare "call escalate_to_human" was called with urgency high in every
+  // rel-elevated-mood run checked: a full crisis flag and page for a
+  // sleepless, elated participant, and crisis steering that replaced the plan
+  // and the referral with a suicide question (docs/redteam.md).
+  it('asks for urgency medium, high only with stated intent to harm', () => {
+    const bullet = section('Other safety situations')
+      .split('\n')
+      .find((l) => l.startsWith('- **Days without sleep, racing grand plans, or unusual beliefs**'));
+    expect(bullet).toBeDefined();
+    expect(bullet).toContain(
+      'call escalate_to_human with urgency medium, not high (high raises a crisis alert), unless they also say they want to harm themselves or someone else.',
+    );
+    expect(bullet).not.toMatch(/call escalate_to_human\. /);
+  });
+
+  it('leaves the Crisis Protocol and the means bullet as they were', () => {
+    expect(md5(section('Crisis Protocol'))).toBe(CRISIS_PROTOCOL_MD5);
+    expect(section('Other safety situations')).toMatch(/whether they are having thoughts of suicide\. Ask it\./);
+  });
+});
+
+describe('stored prompt (migrations 125 and 127) and code default stay in step', () => {
   const up = readFileSync(path.join(MIGRATIONS, '125_prompt_confidentiality_and_protocol_gaps.sql'), 'utf8');
   const down = readFileSync(path.join(MIGRATIONS, '125_prompt_confidentiality_and_protocol_gaps_rollback.sql'), 'utf8');
   const m124 = readFileSync(path.join(MIGRATIONS, '124_prompt_sections_2026_09_22.sql'), 'utf8');
+  const up127 = readFileSync(path.join(MIGRATIONS, '127_prompt_mania_escalation_urgency.sql'), 'utf8');
+  const down127 = readFileSync(path.join(MIGRATIONS, '127_prompt_mania_escalation_urgency_rollback.sql'), 'utf8');
   const constant = (sql: string, name: string) =>
     new RegExp(`${name} constant text := '([0-9a-f]{32})'`).exec(sql)?.[1];
 
-  it('the text migration 125 writes is the code default, modulo the known section order', () => {
-    expect(md5(inStoredOrder(DEFAULT_SYSTEM_PROMPT))).toBe(constant(up, 'target_md5'));
+  it('the text migration 127 writes is the code default, modulo the known section order', () => {
+    expect(md5(inStoredOrder(DEFAULT_SYSTEM_PROMPT))).toBe(constant(up127, 'target_md5'));
+  });
+
+  it('migration 127 starts from exactly the text migration 125 leaves', () => {
+    expect(constant(up127, 'known_old_md5')).toBe(constant(up, 'target_md5'));
+    expect(constant(up, 'target_md5')).toBe('cef2f94ab7d84b98d9fb28438d3a9db5');
   });
 
   it('migration 125 starts from exactly the text migration 124 leaves', () => {
     expect(constant(up, 'known_old_md5')).toBe(constant(m124, 'target_md5'));
   });
 
-  it('the rollback carries the same two md5s', () => {
+  it('each rollback carries the same two md5s as its migration', () => {
     expect(constant(down, 'target_md5')).toBe(constant(up, 'target_md5'));
     expect(constant(down, 'known_old_md5')).toBe(constant(up, 'known_old_md5'));
+    expect(constant(down127, 'target_md5')).toBe(constant(up127, 'target_md5'));
+    expect(constant(down127, 'known_old_md5')).toBe(constant(up127, 'known_old_md5'));
   });
 });
