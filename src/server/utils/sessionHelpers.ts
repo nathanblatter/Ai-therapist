@@ -210,8 +210,31 @@ export function setFeatureOverrides(overrides: Record<string, unknown> | null): 
   featureOverrides = overrides && Object.keys(overrides).length > 0 ? { ...overrides } : null;
 }
 
+// In-process base-prompt override for the red-team harness (`--prompt-file`,
+// src/redteam/promptOverride.ts): replaces the stored chat and realtime prompt
+// text for THIS process only, so two prompt wordings can be compared on one
+// disposable database without writing system_config. Null (the default, and
+// always in the server) means no override.
+let systemPromptOverride: string | null = null;
+
+/** Harness hook: use this text as the stored chat + realtime base prompt in this process. */
+export function setSystemPromptOverride(prompt: string | null): void {
+  systemPromptOverride = prompt && prompt.length > 0 ? prompt : null;
+}
+
 export async function getSystemConfig(): Promise<SystemConfig> {
-  const config = await loadSystemConfig();
+  let config = await loadSystemConfig();
+  if (systemPromptOverride) {
+    const prompts = config.system_prompts ?? {};
+    config = {
+      ...config,
+      system_prompts: {
+        ...prompts,
+        chat: { ...(prompts.chat ?? {}), prompt: systemPromptOverride },
+        realtime: { ...(prompts.realtime ?? {}), prompt: systemPromptOverride },
+      },
+    };
+  }
   if (!featureOverrides) return config;
   return { ...config, features: { ...(config.features ?? {}), ...featureOverrides } };
 }

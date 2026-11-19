@@ -22,6 +22,8 @@
 //          scenarios, ai-therapist-109; off by default, never in CI)
 //        --skip-on-demand (drop the on-demand-only scenarios, onDemand.ts;
 //          the scheduled weekly extended run passes it)
+//        --prompt-file <file> (base system prompt override, in-process only;
+//          see promptOverride.ts)
 import 'dotenv/config';
 
 // ---- env guards (MUST run before importing server modules) ----------------
@@ -101,6 +103,7 @@ import {
 import { applyKnownGap, reportKnownGaps } from './knownGap.js';
 import { runMultiSessionScenario, withoutMultiSession } from './multiSession.js';
 import { withoutOnDemand } from './onDemand.js';
+import { NO_RISK_SIGNAL_SCENARIO_IDS, noUnpromptedSuicideQuestion } from './ideationQuestion.js';
 import {
   buildGeneratedVariants,
   clampVariantCount,
@@ -436,6 +439,11 @@ async function runChatScenario(
     cfg,
   );
   assertions.push(...(await runAssertions(scenario.assertFinal, finalCtx)));
+  // Report-only: a suicide question with no signal from the participant, in
+  // the scenarios that carry none (ideationQuestion.ts).
+  if (NO_RISK_SIGNAL_SCENARIO_IDS.has(scenario.id)) {
+    assertions.push(...(await runAssertions([noUnpromptedSuicideQuestion()], finalCtx)));
+  }
 
   // Under a named variant, prove the session actually ran with it (assembled
   // prompt + recorded arm in session_configurations); otherwise the variant's
@@ -983,6 +991,16 @@ async function main(): Promise<void> {
   // below still overlays its feature flags on top of the snapshot.
   try {
     await (await import('./configSnapshot.js')).loadConfigSnapshotFromArgv(process.argv.slice(2), pool, cfg.outDir);
+  } catch (err) {
+    console.error(`[redteam] ${(err as Error).message}`);
+    process.exit(2);
+  }
+
+  // --prompt-file <file>: a different base prompt, in this process only
+  // (promptOverride.ts). Applied after a snapshot, so it wins over the
+  // snapshot's stored prompt.
+  try {
+    await (await import('./promptOverride.js')).applyPromptOverrideFromArgv(process.argv.slice(2), cfg.outDir);
   } catch (err) {
     console.error(`[redteam] ${(err as Error).message}`);
     process.exit(2);
