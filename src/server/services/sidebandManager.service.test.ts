@@ -115,7 +115,10 @@ import {
   SIDEBAND_REPLAY_COVERED_MS,
   LIVE_DELEGATION_GAP_COMMENTARY,
   LIVE_DELEGATION_GAP_COMMENTARY_NEUTRAL,
+  CLINICAL_STEER_MAX_CHARS,
+  LIVE_APPEND_MAX_CHARS,
 } from './sidebandManager.service.js';
+import { HARM_TO_OTHERS_GUIDANCE, SAFETY_PROTOCOL_GUIDANCE } from './crisisIntervention.service.js';
 import { ToolTimeoutError, toolTimeoutMessage, toolTimeoutMs } from './toolTimeouts.js';
 import { EXPECTED_OVERLAY, OUTCOME_CASES, OVERLAY_ARGS, REGISTRY_RESULT } from './toolOverlays.testTable.js';
 import { OVERLAY_NOT_SHOWN_NOTE, OVERLAY_UNCONFIRMED_NOTE } from '../../shared/toolOverlayPolicy.js';
@@ -868,13 +871,121 @@ describe('clinical steers keep the assistant speaking', () => {
     expect(withKeepSpeaking('exercise finished')).toBe('exercise finished');
   });
 
-  it('keeps the whole delivery inside the 1600-character append cap, without losing the keep-speaking line', () => {
+  it('an over-long clinical steer fails loudly under test instead of being cut (ai-therapist-381)', () => {
     const long = `[Clinical guidance] ${'x'.repeat(3000)}`;
-    const delivered = withKeepSpeaking(long);
-    expect(delivered.length).toBeLessThanOrEqual(1600);
-    expect(delivered.endsWith(LIVE_STEER_KEEP_SPEAKING)).toBe(true);
-    // Applied once, however many layers call it.
-    expect(withKeepSpeaking(delivered)).toBe(delivered);
+    expect(() => withKeepSpeaking(long)).toThrow(/CLINICAL STEER TOO LONG/);
+  });
+
+  it('in production an over-long clinical steer is logged as an error and shortened at sentence boundaries, safety lines kept', () => {
+    const env = process.env.NODE_ENV;
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    process.env.NODE_ENV = 'production';
+    try {
+      const filler = Array.from({ length: 40 }, (_, i) => `Filler sentence number ${i} about pacing.`).join(' ');
+      const long = `[Clinical guidance — never mention this] ${filler} Call 911 now. Do not end the session yourself. Stay with them.`;
+      const delivered = withKeepSpeaking(long);
+      expect(delivered.length).toBeLessThanOrEqual(CLINICAL_STEER_MAX_CHARS);
+      expect(delivered.startsWith('[Clinical guidance — never mention this] Filler sentence number 0')).toBe(true);
+      expect(delivered).toContain('Call 911 now. Do not end the session yourself. Stay with them.');
+      expect(delivered.endsWith(LIVE_STEER_KEEP_SPEAKING)).toBe(true);
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('CLINICAL STEER TOO LONG'));
+      // Applied once, however many layers call it.
+      expect(withKeepSpeaking(delivered)).toBe(delivered);
+    } finally {
+      process.env.NODE_ENV = env;
+      error.mockRestore();
+    }
+  });
+
+  it('a clinical steer over the generic cap that the vendor rejects is sent once more, fitted, safety lines kept', async () => {
+    const sessionId = 's-steer-rejected';
+    const ws = await attach(sessionId);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await sidebandManager.tryInject(sessionId, 'system', HARM_TO_OTHERS_GUIDANCE, false);
+      const first = sentEvents(ws)[0];
+      expect(first.content).toBe(`${HARM_TO_OTHERS_GUIDANCE} ${LIVE_STEER_KEEP_SPEAKING}`);
+      expect((first.content as string).length).toBeGreaterThan(LIVE_APPEND_MAX_CHARS);
+
+      await fire(sessionId, {
+        type: 'error',
+        error: { code: 'invalid_request_error', message: 'too long', client_event_id: first.event_id },
+      });
+      const again = sentEvents(ws).filter((e) => e.type === 'session.instructions.append');
+      expect(again).toHaveLength(2);
+      const resent = again[1].content as string;
+      expect(resent.length).toBeLessThanOrEqual(LIVE_APPEND_MAX_CHARS);
+      expect(resent.endsWith(` ${LIVE_STEER_KEEP_SPEAKING}`)).toBe(true);
+      expect(resent).toContain('call 911, or 988 to talk it through.');
+      expect(resent).toContain('Do not end the session yourself. Stay with them.');
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('CLINICAL STEER REJECTED'));
+
+      // Once only: a second error for the same event changes nothing.
+      await fire(sessionId, { type: 'error', error: { client_event_id: first.event_id } });
+      expect(sentEvents(ws).filter((e) => e.type === 'session.instructions.append')).toHaveLength(2);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('the error the API returns for a steer still pending at session close is not a rejection: nothing is resent', async () => {
+    const sessionId = 's-steer-pending-at-close';
+    const ws = await attach(sessionId);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await sidebandManager.tryInject(sessionId, 'system', HARM_TO_OTHERS_GUIDANCE, false);
+      const first = sentEvents(ws)[0];
+      await fire(sessionId, {
+        type: 'error',
+        error: { code: 'context_injection_incomplete', message: 'session closed', client_event_id: first.event_id },
+      });
+      expect(sentEvents(ws).filter((e) => e.type === 'session.instructions.append')).toHaveLength(1);
+      expect(error).not.toHaveBeenCalledWith(expect.stringContaining('CLINICAL STEER REJECTED'));
+      // Forgotten, too: a later error naming it changes nothing.
+      await fire(sessionId, { type: 'error', error: { code: 'x', client_event_id: first.event_id } });
+      expect(sentEvents(ws).filter((e) => e.type === 'session.instructions.append')).toHaveLength(1);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('a rejection that names the steer only at the top level of the error event is answered too', async () => {
+    const sessionId = 's-steer-rejected-top-level';
+    const ws = await attach(sessionId);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await sidebandManager.tryInject(sessionId, 'system', HARM_TO_OTHERS_GUIDANCE, false);
+      const first = sentEvents(ws)[0];
+      await fire(sessionId, {
+        type: 'error',
+        client_event_id: first.event_id,
+        error: { type: 'invalid_request_error', code: 'string_above_max_length', message: 'too long' },
+      });
+      const appends = sentEvents(ws).filter((e) => e.type === 'session.instructions.append');
+      expect(appends).toHaveLength(2);
+      expect((appends[1].content as string).length).toBeLessThanOrEqual(LIVE_APPEND_MAX_CHARS);
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('CLINICAL STEER REJECTED (string_above_max_length)'));
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('an acknowledged oversize steer is forgotten, and an error for a short append is not answered', async () => {
+    const sessionId = 's-steer-acked';
+    const ws = await attach(sessionId);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await sidebandManager.tryInject(sessionId, 'system', HARM_TO_OTHERS_GUIDANCE, false);
+      const first = sentEvents(ws)[0];
+      await fire(sessionId, { type: 'session.instructions.appended', client_event_id: first.event_id });
+      await fire(sessionId, { type: 'error', error: { client_event_id: first.event_id } });
+      await sidebandManager.tryInject(sessionId, 'system', SAFETY_PROTOCOL_GUIDANCE, false);
+      const second = sentEvents(ws)[1];
+      await fire(sessionId, { type: 'error', error: { client_event_id: second.event_id } });
+      expect(sentEvents(ws).filter((e) => e.type === 'session.instructions.append')).toHaveLength(2);
+    } finally {
+      error.mockRestore();
+    }
   });
 
   it('tells a model that fell silent mid-reply to speak, 3 s after the steer and once more at 7 s', async () => {

@@ -304,10 +304,43 @@ acknowledgements, and `error`.
 | `session.thinking.append` | Quiet context the model may use but should not announce | Re-grounding summaries |
 | `session.commentary.append` | A verified result the model should say aloud (it may paraphrase) | Exposed on the manager; **no callers yet** |
 
-All three are capped at **500 tokens** by the API. The cap is enforced
-client-side on characters (1600, at a deliberately pessimistic 3.2 chars/token)
-rather than risking a rejected event — dropping a crisis steer because it ran
-three words long is not an acceptable failure mode.
+All three are capped at **500 tokens** by the API ("Each event takes
+plain-string content of up to 500 tokens", Managing GPT-Live sessions, "Add
+context during the conversation"). The cap is enforced client-side on
+characters rather than risking a rejected event — dropping a crisis steer
+because it ran three words long is not an acceptable failure mode:
+
+- **1600 characters** (a deliberately pessimistic 3.2 chars/token) for content
+  we do not control: an admin's typed steer, a worksheet summary, a recap.
+  Longer content is cut at 1600 with a warning.
+- **1850 characters** for a clinical steer (anything beginning
+  `[Clinical guidance`), the steer plus the keep-speaking line
+  (ai-therapist-381). These are fixed English sentences: measured with the
+  o200k_base tokenizer (GPT-Live's own is not published) they run 4.70 to
+  4.92 chars/token, and the longest, the harm-to-others steer, is 1843
+  characters and 380 tokens. 1850 is 3.7 chars/token. Under the old 1600 that
+  steer lost its last 243 characters on every delivery, among them the 911 /
+  988 line, "Do not end the session yourself" and "Stay with them", and nothing
+  logged it. `clinicalSteerLength.test.ts` enumerates every clinical steer and
+  every combination the code sends (the risk steer with the voice heads-up,
+  the minor safeguard with its speak-now line, every score and every time
+  notice) and fails if any would be cut; under test an over-long steer throws.
+  In production it is logged as `CLINICAL STEER TOO LONG` and shortened at
+  sentence boundaries, keeping the marker and every sentence that names 911,
+  988 or 741741, staying with them, or ending the session
+  (`fitClinicalSteer`; if those do not all fit, as many as fit, earliest
+  first).
+- **Not yet verified live.** If the vendor nevertheless rejects a clinical
+  steer longer than 1600 characters (an `error` carrying its event id), the
+  sideband sends it once more fitted to 1600 the same way and logs
+  `CLINICAL STEER REJECTED (<code>)`, which would mean 1850 is too high. An
+  error with code `context_injection_incomplete` is not treated as a
+  rejection: the API returns it for every append still pending when the
+  session closes (see "A delegation must not leave the participant waiting"
+  below). The backstop covers only an
+  explicit error: if the vendor silently dropped or cut an over-long append,
+  nothing would notice, because a `*.appended` acknowledgement can legitimately
+  stay pending.
 
 The matching `*.appended` events are **acknowledgements only**. They are
 explicitly not proof that the model consumed the update, spoke it, or that the
@@ -625,8 +658,10 @@ decides when; the model phrases it. It uses the existing steer, no new
 channel: the sentence is appended to that turn's risk steer
 (`risk_steering` row gets `voiceHeadsUp: 'attached'`); when no risk steer goes
 out on that turn (the shared 3-minute steer cooldown, for example after an
-earlier low steer) or the two would not fit in one 1600-character append
-(the high-severity steer, and the third-party and harm-to-others steers), it goes as its own clinical
+earlier low steer) or the two would not fit in one clinical-steer append
+(the third-party and harm-to-others steers; the standard medium and high steers
+carry it at every score since ai-therapist-381, so a first high turn gets one
+instruction, not two), it goes as its own clinical
 steer (`risk_steering` row with `trigger: 'voice_heads_up'`). Either way the
 keep-speaking line is added as for every clinical steer.
 

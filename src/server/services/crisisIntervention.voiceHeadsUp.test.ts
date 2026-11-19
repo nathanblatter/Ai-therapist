@@ -124,7 +124,7 @@ describe('maybeSteerSession with the voice heads-up', () => {
       expect(hu.voiceHeadsUpPending(s)).toBe(false);
       // A later turn without that observation may still carry it.
       await ci.maybeSteerSession(s, 80, 'high');
-      expect(alone()).toHaveLength(1);
+      expect(injected()[1]).toBe(`${ci.steeringGuidance(80, 'high')} ${hu.VOICE_HEADS_UP_GUIDANCE}`);
     },
   );
 
@@ -150,7 +150,8 @@ describe('maybeSteerSession with the voice heads-up', () => {
   it('the first high turn gets it too, when nothing came before', async () => {
     const s = fresh();
     await ci.maybeSteerSession(s, 85, 'high');
-    expect(alone()).toHaveLength(1);
+    expect(injected()).toEqual([`${ci.steeringGuidance(85, 'high')} ${hu.VOICE_HEADS_UP_GUIDANCE}`]);
+    expect(alone()).toHaveLength(0);
     expect(hu.voiceHeadsUpPending(s)).toBe(true);
   });
 
@@ -186,13 +187,21 @@ describe('maybeSteerSession with the voice heads-up', () => {
     expect(alone()).toHaveLength(1);
   });
 
-  it('a medium steer carries it in one append; the high steer is followed by it on its own', async () => {
+  it('the medium and the high steer each carry it in one append: one instruction, nothing after it', async () => {
+    // ai-therapist-381: the high steer used to be followed by the heads-up as a
+    // second instruction within milliseconds, which can interrupt the reply
+    // the first one started.
     expect(ci.fitsWithHeadsUp(ci.steeringGuidance(64, 'medium'))).toBe(true);
-    expect(ci.fitsWithHeadsUp(ci.steeringGuidance(100, 'high'))).toBe(false);
+    expect(ci.fitsWithHeadsUp(ci.steeringGuidance(100, 'high'))).toBe(true);
     const s = fresh();
     await ci.maybeSteerSession(s, 90, 'high');
-    expect(injected()).toEqual([ci.steeringGuidance(90, 'high')]);
-    expect(alone()).toHaveLength(1);
+    expect(injected()).toEqual([`${ci.steeringGuidance(90, 'high')} ${hu.VOICE_HEADS_UP_GUIDANCE}`]);
+    expect(alone()).toHaveLength(0);
+    expect(logInterventionActionMock).toHaveBeenCalledWith(
+      s,
+      'risk_steering',
+      expect.objectContaining({ severity: 'high', voiceHeadsUp: 'attached' }),
+    );
   });
 
   it('not for a session the GPT-Live sideband cannot give it to (recovery session, other backend)', async () => {
