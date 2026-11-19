@@ -2,7 +2,10 @@
 // (ai-therapist-382), so they can be re-redacted later.
 //
 //   npx tsx src/database/scripts/findInvalidRedactions.ts            list only (default)
-//   npx tsx src/database/scripts/findInvalidRedactions.ts --re-redact
+//   npx tsx src/database/scripts/findInvalidRedactions.ts --re-redact --db=<database name>
+//
+// Reads DATABASE_URL like the app and prints the target (host/database, no
+// credentials) first. --re-redact is refused unless --db names that database.
 //
 // LIST MODE (default) makes no model calls and writes nothing. It prints one
 // line per row (message id, session prefix, role, day, reason) and a summary.
@@ -122,9 +125,38 @@ export function summarize(findings: Finding[]): string[] {
   return lines;
 }
 
+/** host[:port]/database from a connection URL, never the credentials. */
+export function describeTarget(url: string | undefined): { label: string; database: string | null } {
+  try {
+    const u = new URL(url ?? '');
+    const database = decodeURIComponent(u.pathname.replace(/^\//, '')) || null;
+    return { label: `${u.hostname}${u.port ? `:${u.port}` : ''}/${database ?? '(none)'}`, database };
+  } catch {
+    return { label: '(DATABASE_URL unset or unparseable)', database: null };
+  }
+}
+
+/** --re-redact writes and spends: it must name the database it is pointed at
+ *  (--db=<name>), so a shell left pointing at prod cannot run it by accident. */
+export function reRedactRefusal(argv: string[], database: string | null): string | null {
+  if (!argv.includes('--re-redact')) return null;
+  const named = argv.find((a) => a.startsWith('--db='))?.slice('--db='.length);
+  if (!database) return '--re-redact refused: DATABASE_URL names no database.';
+  if (named !== database) return `--re-redact refused: pass --db=${database} to confirm the target database.`;
+  return null;
+}
+
 async function main(argv: string[]): Promise<void> {
   const reRedact = argv.includes('--re-redact');
   const showUnverifiable = argv.includes('--show-unverifiable');
+  const target = describeTarget(process.env.DATABASE_URL);
+  console.log(`target: ${target.label}`);
+  const refusal = reRedactRefusal(argv, target.database);
+  if (refusal) {
+    console.error(refusal);
+    process.exitCode = 2;
+    return;
+  }
   const { pool } = await import('../../server/config/db.js');
   try {
     const findings = await findInvalidRedactions((sql, params) => pool.query(sql, params));

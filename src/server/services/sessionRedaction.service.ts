@@ -49,10 +49,13 @@ export async function redactSession(sessionId: string): Promise<void> {
   // Messages whose output failed validation (ai-therapist-382): never stored
   // as redacted.
   const rejected = new Map<number, string>();
+  // Messages never judged because the single-message call budget ran out:
+  // marked with a redaction_error only, so the gap sweep retries them.
+  const deferred = new Map<number, string>();
   try {
     const redacted = await redactPHIBatch(
       rows.map((r) => ({ id: r.message_id, content: r.content })),
-      { usage, rejected },
+      { usage, rejected, deferred },
     );
     const redactedAt = new Date().toISOString();
 
@@ -84,6 +87,19 @@ export async function redactSession(sessionId: string): Promise<void> {
                            || jsonb_build_object('redaction_error', $1::text, 'redaction_rejected', $2::text)
           WHERE message_id = $3 AND content_redacted IS NULL`,
         [error, redactedAt, messageId],
+      );
+    }
+    // Deferred (call_cap): the model never saw these on their own, so they are
+    // not rejections. redaction_error keeps them out of the content wipe and
+    // in the staff error count; without redaction_rejected the 15-minute
+    // sweep picks them up again, and each run judges up to the budget more,
+    // so a long session converges instead of being stranded.
+    for (const [messageId, error] of deferred) {
+      await pool.query(
+        `UPDATE messages
+            SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('redaction_error', $1::text)
+          WHERE message_id = $2 AND content_redacted IS NULL`,
+        [error, messageId],
       );
     }
     if (rejected.size > 0) {

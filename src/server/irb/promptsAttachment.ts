@@ -131,7 +131,13 @@ import {
   LIVE_STEER_KEEP_SPEAKING,
   LIVE_STEER_RESUME_COMMENTARY,
 } from '../services/sidebandManager.service.js';
-import { REDACTION_BATCH_INSTRUCTIONS, REDACTION_MODEL, REDACTION_PROMPT } from '../services/redaction.service.js';
+import {
+  REDACTION_BATCH_INSTRUCTIONS,
+  REDACTION_BATCH_INSTRUCTIONS_V2,
+  REDACTION_MODEL,
+  REDACTION_PROMPT,
+  redactionPromptVersion,
+} from '../services/redaction.service.js';
 import {
   SESSION_NAME_MODEL,
   SESSION_NAME_SYSTEM_PROMPT,
@@ -1116,17 +1122,30 @@ function buildItems(): Item[] {
       'break):',
   );
   add('pre', REDACTION_PROMPT);
-  if (!REDACTION_BATCH_INSTRUCTIONS.startsWith(REDACTION_PROMPT)) {
+  // The attachment shows the wording in force (REDACTION_PROMPT_VERSION;
+  // legacy unless set to v2), so regenerating it after the switch is flipped
+  // documents what actually runs.
+  const v2Redaction = redactionPromptVersion() === 'v2';
+  const redactionAppendix = v2Redaction ? REDACTION_BATCH_INSTRUCTIONS_V2 : REDACTION_BATCH_INSTRUCTIONS;
+  if (!redactionAppendix.startsWith(REDACTION_PROMPT)) {
     throw new Error('irb prompts attachment: batch redaction prompt no longer extends the base prompt');
   }
+  const outputCheck =
+    'Every output is checked; a message whose output fails the automatic check that it is a redaction of the ' +
+    'original is never stored as redacted: its original is kept, it is excluded from the content wipe while ' +
+    'that setting requires completed redaction, and it is counted as a redaction error for staff review.';
   add(
     'note',
-    'Every redaction request (a whole-session batch, or a single message re-sent on its own when its batch output ' +
-      'fails the automatic check that it is a redaction of the original) appends the following to the prompt ' +
-      'above, verbatim. A message whose output still fails that check is never stored as redacted: its original ' +
-      'is kept, it is excluded from the content wipe, and it is counted as a redaction error for staff review.',
+    v2Redaction
+      ? 'Every redaction request (a whole-session batch, or a single message re-sent on its own when its batch ' +
+          'output fails the check, or a staff edit) appends the following to the prompt above, verbatim. ' +
+          outputCheck
+      : 'For whole-session batches, the following is appended to the prompt above, verbatim. A single message ' +
+          'sent on its own (one re-sent because its batch output failed the check, or a staff edit) is sent under ' +
+          'the prompt above alone. ' +
+          outputCheck,
   );
-  add('pre', block(REDACTION_BATCH_INSTRUCTIONS.slice(REDACTION_PROMPT.length)));
+  add('pre', block(redactionAppendix.slice(REDACTION_PROMPT.length)));
 
   add('h2', `C.4 Session-name prompt (${SESSION_NAME_MODEL})`);
   add(

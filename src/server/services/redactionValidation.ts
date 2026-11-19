@@ -75,11 +75,18 @@ export function countPlaceholders(s: string): number {
   return (normalize(s).match(PLACEHOLDER_RE) ?? []).length;
 }
 
+/** A URL (scheme or www. prefix, or a dotted domain followed by a path). A
+ *  URL with a query string splits into many word tokens, so a correct
+ *  redaction to one placeholder would exceed PLACEHOLDER_SPAN; each URL is
+ *  therefore counted as ONE token (review of PR #102). */
+const URL_RE = /(?:\b(?:https?:\/\/|www\.)|\b[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+\/)[^\s<>"'()[\]]*/giu;
+
 /** Lower-cased word tokens with every placeholder removed. */
 export function wordTokens(s: string): string[] {
   return (
     normalize(s)
       .replace(PLACEHOLDER_RE, ' ')
+      .replace(URL_RE, (url) => ` ${url.replace(/[^\p{L}\p{N}]/gu, '')} `)
       .toLowerCase()
       .match(/[\p{L}\p{N}]+/gu) ?? []
   );

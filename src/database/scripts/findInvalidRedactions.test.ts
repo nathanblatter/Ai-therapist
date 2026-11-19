@@ -1,6 +1,13 @@
 // List-only finder for stored redactions that fail validation (ai-therapist-382).
 import { describe, it, expect, vi } from 'vitest';
-import { classifyStoredRow, findInvalidRedactions, summarize, type StoredRow } from './findInvalidRedactions.js';
+import {
+  classifyStoredRow,
+  describeTarget,
+  findInvalidRedactions,
+  reRedactRefusal,
+  summarize,
+  type StoredRow,
+} from './findInvalidRedactions.js';
 
 const REFUSAL = 'I’m really sorry you’re feeling like this. Call or text 988.';
 const base: StoredRow = {
@@ -47,5 +54,21 @@ describe('findInvalidRedactions', () => {
     ]);
     expect(JSON.stringify(findings)).not.toContain('sorry');
     expect(summarize(findings)[0]).toBe('invalid: 1 row(s) in 1 session(s) (user 1)');
+  });
+});
+
+describe('target guard (review of PR #102)', () => {
+  it('describes host/database without credentials', () => {
+    const t = describeTarget('postgresql://user:s3cret@db.example:5432/ai_therapist_prod');
+    expect(t).toEqual({ label: 'db.example:5432/ai_therapist_prod', database: 'ai_therapist_prod' });
+    expect(t.label).not.toContain('s3cret');
+    expect(describeTarget(undefined).database).toBeNull();
+  });
+  it('list mode needs no confirmation; --re-redact needs --db naming the target', () => {
+    expect(reRedactRefusal([], 'ai_therapist_prod')).toBeNull();
+    expect(reRedactRefusal(['--re-redact'], 'ai_therapist_prod')).toMatch(/--db=ai_therapist_prod/);
+    expect(reRedactRefusal(['--re-redact', '--db=rt_scratch'], 'ai_therapist_prod')).toMatch(/refused/);
+    expect(reRedactRefusal(['--re-redact', '--db=x'], null)).toMatch(/names no database/);
+    expect(reRedactRefusal(['--re-redact', '--db=ai_therapist_prod'], 'ai_therapist_prod')).toBeNull();
   });
 });

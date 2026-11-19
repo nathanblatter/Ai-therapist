@@ -156,3 +156,52 @@ describe('helpers', () => {
     expect(msg).not.toContain('pills');
   });
 });
+
+describe('threshold boundaries (review of PR #102: each pinned on both sides)', () => {
+  const ws = (n: number, p = 'w') => Array.from({ length: n }, (_, k) => `${p}${k + 1}`);
+
+  it('new words: at least 2 are allowed even in a short message, 3 are not', () => {
+    expect(validateRedaction('hello there', 'hello there n1 n2').ok).toBe(true);
+    expect(validateRedaction('hello there', 'hello there n1 n2 n3')).toMatchObject({ reason: 'words_not_in_input' });
+  });
+
+  it('new words: 10% of the output words (floor) in a long message', () => {
+    const base = ws(30).join(' ');
+    // 33 output words -> floor(3.3) = 3 allowed; 34 -> floor(3.4) = 3
+    expect(validateRedaction(base, `${base} ${ws(3, 'n').join(' ')}`).ok).toBe(true);
+    expect(validateRedaction(base, `${base} ${ws(4, 'n').join(' ')}`)).toMatchObject({ reason: 'words_not_in_input' });
+  });
+
+  it('dropped words without a placeholder: at least 1, else 5% of the input (floor)', () => {
+    const five = ws(5);
+    expect(validateRedaction(five.join(' '), five.slice(1).join(' ')).ok).toBe(true);
+    expect(validateRedaction(five.join(' '), five.slice(2).join(' '))).toMatchObject({ reason: 'words_missing' });
+    const forty = ws(40);
+    expect(validateRedaction(forty.join(' '), forty.slice(2).join(' ')).ok).toBe(true);
+    expect(validateRedaction(forty.join(' '), forty.slice(3).join(' '))).toMatchObject({ reason: 'words_missing' });
+  });
+
+  it('a placeholder covers exactly PLACEHOLDER_SPAN words plus the 1-word slack, no more', () => {
+    const at = (n: number) => validateRedaction(`a ${ws(n).join(' ')} b`, 'a [REDACTED: X] b');
+    expect(at(PLACEHOLDER_SPAN + 1).ok).toBe(true);
+    expect(at(PLACEHOLDER_SPAN + 2)).toMatchObject({ reason: 'words_missing' });
+  });
+});
+
+describe('URLs count as one word (review of PR #102)', () => {
+  it('accepts a long URL with a query string redacted to one placeholder', () => {
+    const input =
+      'here is my profile https://www.facebook.com/profile.php?id=100012345678&ref=bookmarks&utm_source=share_link_v2 lol';
+    expect(validateRedaction(input, 'here is my profile [REDACTED: URL] lol')).toEqual({ ok: true });
+  });
+
+  it('accepts a scheme-less URL with a path, and a URL kept verbatim', () => {
+    const input = 'see instagram.com/p/C9xYzAbCdEf/?utm_source=ig_web_copy_link&igsh=MzRlODBiNWFlZA== ok';
+    expect(validateRedaction(input, 'see [REDACTED: URL] ok')).toEqual({ ok: true });
+    expect(validateRedaction(input, input)).toEqual({ ok: true });
+  });
+
+  it('tokenises a URL as a single word', () => {
+    expect(wordTokens('a https://x.example.com/a/b/c?d=e&f=g b')).toHaveLength(3);
+  });
+});

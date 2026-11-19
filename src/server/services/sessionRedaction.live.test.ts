@@ -48,9 +48,31 @@ const CRISIS = 'I have been saving my pills and tonight is the night';
 const REFUSAL = 'I’m really sorry you’re feeling like this. You don’t have to go through this alone. Call or text 988.';
 
 type Item = { i: number; text: string };
+/** A single message under the default (legacy) wording arrives as bare text. */
+function parseInput(input: string): Item[] | null {
+  try {
+    const v = JSON.parse(input) as unknown;
+    return Array.isArray(v) ? (v as Item[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Echoes every request: batch in the schema shape, bare text as itself. */
+function echoReply(opts: { input: string }) {
+  const sent = parseInput(opts.input);
+  return Promise.resolve({ output_text: sent ? JSON.stringify({ items: sent }) : opts.input });
+}
+
 /** Refuses any request that contains the crisis message; echoes the rest. */
 function model(opts: { input: string }) {
-  const sent = JSON.parse(opts.input) as Item[];
+  const sent = parseInput(opts.input);
+  if (!sent) {
+    return Promise.resolve({
+      output_text: opts.input === CRISIS ? REFUSAL : opts.input,
+      usage: { input_tokens: 5, output_tokens: 5 },
+    });
+  }
   if (sent.some((s) => s.text === CRISIS))
     return Promise.resolve({ output_text: REFUSAL, usage: { input_tokens: 9, output_tokens: 9 } });
   return Promise.resolve({
@@ -184,5 +206,93 @@ describe.skipIf(!LIVE)('rejected redactions in Postgres (ai-therapist-382)', () 
       reRedactable: true,
     });
     expect(findings.some((f) => f.messageId === String(ids.plain))).toBe(false);
+  });
+
+  it('call_cap rows are deferred, not rejected: error recorded, kept from the wipe, picked up by the sweep, then redacted', async () => {
+    // Review of PR #102. Two messages: pass-1 batch refused, both singles
+    // echo (budget 2 -> 0), pass-2 batch refused with no budget left.
+    const s = await q(
+      `INSERT INTO therapy_sessions (user_id, status, ended_at) VALUES ($1, 'ended', now()) RETURNING session_id`,
+      [userId],
+    );
+    const sid = s.rows[0].session_id as string;
+    const mk = async (content: string) =>
+      Number(
+        (
+          await q(
+            `INSERT INTO messages (session_id, role, message_type, content, metadata, created_at)
+             VALUES ($1, 'user', 'text', $2, '{}', now() - interval '2 days') RETURNING message_id`,
+            [sid, content],
+          )
+        ).rows[0].message_id,
+      );
+    const a = await mk('My week was fine');
+    const b = await mk('Work is busy');
+    createMock
+      .mockReset()
+      .mockResolvedValueOnce({ output_text: REFUSAL })
+      .mockImplementationOnce(echoReply)
+      .mockImplementationOnce(echoReply)
+      .mockResolvedValueOnce({ output_text: REFUSAL });
+    await redactSession(sid);
+    const after1 = await q(`SELECT content, content_redacted, metadata FROM messages WHERE message_id = ANY($1)`, [
+      [a, b],
+    ]);
+    for (const r of after1.rows) {
+      expect(r.content_redacted).toBeNull();
+      expect(r.metadata.redaction_error).toMatch(/^Redaction deferred: call_cap/);
+      expect(r.metadata.redaction_rejected).toBeUndefined();
+    }
+    expect(await findEndedSessionsWithRedactionGaps()).toContain(sid);
+    await executeContentWipe('manual', tag);
+    const kept = await q(`SELECT count(*)::int AS n FROM messages WHERE message_id = ANY($1) AND content IS NOT NULL`, [
+      [a, b],
+    ]);
+    expect(kept.rows[0].n).toBe(2);
+
+    createMock.mockReset().mockImplementation(echoReply);
+    await redactSession(sid);
+    const after2 = await q(`SELECT content_redacted, metadata FROM messages WHERE message_id = ANY($1)`, [[a, b]]);
+    for (const r of after2.rows) {
+      expect(r.content_redacted).not.toBeNull();
+      expect(r.metadata.redaction_error).toBeUndefined();
+    }
+    await q(`DELETE FROM session_llm_usage WHERE session_id = $1`, [sid]);
+    await q(`DELETE FROM therapy_sessions WHERE session_id = $1`, [sid]);
+  });
+
+  it('with "require redaction complete" OFF the rejected original is wiped and nothing unredacted remains', async () => {
+    const prev = await q(`SELECT config_value FROM system_config WHERE config_key = 'content_retention'`);
+    await q(
+      `INSERT INTO system_config (config_key, config_value) VALUES ('content_retention', $1::jsonb)
+       ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value`,
+      [
+        JSON.stringify({
+          enabled: true,
+          retention_hours: 24,
+          wipe_time: '03:00',
+          require_redaction_complete: false,
+          last_wipe_at: null,
+          last_wipe_count: 0,
+        }),
+      ],
+    );
+    try {
+      await executeContentWipe('manual', tag);
+      const { rows } = await q(`SELECT content, content_redacted, metadata FROM messages WHERE message_id = $1`, [
+        ids.crisis,
+      ]);
+      expect(rows[0].content).toBeNull();
+      expect(rows[0].content_redacted).toBeNull();
+      expect(rows[0].metadata.redaction_rejected).toEqual(expect.any(String));
+      // A wiped row is no longer a gap: the sweep does not resend it.
+      expect(await findEndedSessionsWithRedactionGaps()).not.toContain(sessionId);
+    } finally {
+      if (prev.rows.length === 0) await q(`DELETE FROM system_config WHERE config_key = 'content_retention'`);
+      else
+        await q(`UPDATE system_config SET config_value = $1::jsonb WHERE config_key = 'content_retention'`, [
+          JSON.stringify(prev.rows[0].config_value),
+        ]);
+    }
   });
 });
