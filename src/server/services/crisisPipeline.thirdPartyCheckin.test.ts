@@ -22,7 +22,9 @@ const {
   getSessionCrisisStateMock,
   getSessionCheckinMock,
   enqueueWorkItemMock,
+  emitCrisisResourcesMock,
 } = vi.hoisted(() => ({
+  emitCrisisResourcesMock: vi.fn(),
   analyzeMessageRiskMock: vi.fn(),
   flagSessionCrisisMock: vi.fn(),
   logInterventionActionMock: vi.fn(),
@@ -48,9 +50,24 @@ vi.mock('./crisisIntervention.service.js', () => ({
   maybeRequireRiskCheck: maybeRequireRiskCheckMock,
   executeGraduatedResponse: executeGraduatedResponseMock,
   CHAT_SAFETY_PROTOCOL_GUIDANCE: 'CHAT_HIGH_GUIDANCE',
-  CHAT_THIRD_PARTY_GUIDANCE: 'CHAT_THIRD_PARTY_GUIDANCE',
-  THIRD_PARTY_GUIDANCE: 'RT_THIRD_PARTY_GUIDANCE',
-  THIRD_PARTY_PAGE_LABEL: 'THIRD PARTY AT RISK: label',
+  subjectGuidance: (subject: string | null, channel: string) =>
+    subject === 'third_party'
+      ? channel === 'chat'
+        ? 'CHAT_THIRD_PARTY_GUIDANCE'
+        : 'RT_THIRD_PARTY_GUIDANCE'
+      : subject === 'harm_to_others'
+        ? 'HARM_TO_OTHERS_GUIDANCE'
+        : null,
+  subjectLabel: (subject: string | null) =>
+    subject === 'third_party'
+      ? 'THIRD PARTY AT RISK: label'
+      : subject === 'harm_to_others'
+        ? 'RISK TO OTHERS: label'
+        : null,
+}));
+vi.mock('./crisisResources.js', () => ({
+  emitCrisisResources: emitCrisisResourcesMock,
+  hasEmittedHighRiskResources: () => false,
 }));
 vi.mock('../db/index.js', () => ({
   getRecentSessionMessages: getRecentSessionMessagesMock,
@@ -145,7 +162,14 @@ describe('third party at risk: same flag and page, labelled', () => {
   it('realtime: the sideband steer carries the third-party guidance, forced past the cooldown', async () => {
     thirdPartyHigh();
     await runCrisisPipeline(TURN, 'realtime');
-    expect(maybeSteerSessionMock).toHaveBeenCalledWith('chat_1', 90, 'high', true, 'RT_THIRD_PARTY_GUIDANCE');
+    expect(maybeSteerSessionMock).toHaveBeenCalledWith(
+      'chat_1',
+      90,
+      'high',
+      true,
+      'RT_THIRD_PARTY_GUIDANCE',
+      'third_party',
+    );
     expect(maybeRequireRiskCheckMock).not.toHaveBeenCalled();
   });
 
@@ -274,5 +298,82 @@ describe('the pre-session check-in goes through the pipeline', () => {
     risk(55, 'medium');
     const r = await runCrisisPipeline({ sessionId: 'chat_1', messageId: 2, content: 'x' }, 'chat');
     expect(r.flagged).toBe(true);
+  });
+});
+
+// Owner decision 2026-11-18 (ai-therapist-330): "bring them down from the
+// ledge and notify staff".
+describe('risk to others: flagged and paged like a high self-risk, labelled, de-escalation steer', () => {
+  const HARM_TURN = {
+    sessionId: 'chat_1',
+    messageId: 43,
+    content: 'I keep picturing hurting him. I know where he parks.',
+  };
+  const HARM_FACTOR = 'risk to others (thoughts of harming another person)';
+  const harmHigh = () => risk(80, 'high', { subject: 'harm_to_others', factors: [HARM_FACTOR, 'intent'] });
+
+  it('flags high and runs the high-risk response with the subject', async () => {
+    harmHigh();
+    const r = await runCrisisPipeline(HARM_TURN, 'chat');
+    expect(r.flagged).toBe(true);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 80, { subject: 'harm_to_others' });
+  });
+
+  it('every record a person reads says risk to others', async () => {
+    harmHigh();
+    await runCrisisPipeline(HARM_TURN, 'chat');
+
+    const [, , , , , , factors, notes] = flagSessionCrisisMock.mock.calls[0];
+    expect(factors[0]).toBe(HARM_FACTOR);
+    expect(notes).toContain('RISK TO OTHERS');
+    expect(interventions('auto_flag')[0]).toMatchObject({ subject: 'harm_to_others' });
+    const detected = emitMock.mock.calls.find((c) => c[0] === 'session:crisis-detected');
+    expect(detected![1]).toMatchObject({ subject: 'harm_to_others' });
+    expect(detected![1].message).toContain('RISK TO OTHERS');
+    expect(enqueueWorkItemMock.mock.calls[0][0].title).toContain('risk to others');
+  });
+
+  it('chat: the reply gets the de-escalation steer, not the suicide protocol or the ladder', async () => {
+    harmHigh();
+    const r = await runCrisisPipeline(HARM_TURN, 'chat');
+    expect(r.steeringGuidance).toBe('HARM_TO_OTHERS_GUIDANCE');
+    expect(maybeRequireRiskCheckMock).not.toHaveBeenCalled();
+    expect(interventions('risk_steering')[0]).toMatchObject({ subject: 'harm_to_others' });
+  });
+
+  it('realtime: the sideband steer is the de-escalation text, forced past the cooldown', async () => {
+    harmHigh();
+    await runCrisisPipeline(HARM_TURN, 'realtime');
+    expect(maybeSteerSessionMock).toHaveBeenCalledWith(
+      'chat_1',
+      80,
+      'high',
+      true,
+      'HARM_TO_OTHERS_GUIDANCE',
+      'harm_to_others',
+    );
+  });
+
+  it('the suicide and crisis resource card is not pushed for risk to others; it still is for self-risk', async () => {
+    harmHigh();
+    await runCrisisPipeline(HARM_TURN, 'realtime');
+    expect(emitCrisisResourcesMock).not.toHaveBeenCalled();
+
+    risk(90, 'high');
+    await runCrisisPipeline(TURN, 'realtime');
+    expect(emitCrisisResourcesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('an idiom the assessor cleared does nothing at all', async () => {
+    risk(5, 'none');
+    const r = await runCrisisPipeline(
+      { sessionId: 'chat_1', messageId: 44, content: "I swear I'm going to kill my lab partner" },
+      'chat',
+    );
+    expect(r.flagged).toBe(false);
+    expect(flagSessionCrisisMock).not.toHaveBeenCalled();
+    expect(executeGraduatedResponseMock).not.toHaveBeenCalled();
+    expect(maybeSteerSessionMock).not.toHaveBeenCalled();
+    expect(emitCrisisResourcesMock).not.toHaveBeenCalled();
   });
 });

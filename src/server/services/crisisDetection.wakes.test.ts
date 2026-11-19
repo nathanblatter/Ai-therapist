@@ -44,6 +44,7 @@ const {
   needsContextAssessment,
   RISK_ASSESSMENT_PROMPT,
   THIRD_PARTY_FACTOR,
+  HARM_TO_OTHERS_FACTOR,
 } = await import('./crisisDetection.service.js');
 const { _resetAssessorHealthForTests } = await import('./riskAssessorHealth.service.js');
 
@@ -390,5 +391,140 @@ describe('the assessor user message', () => {
     expect(buildRiskAssessmentUserMessage('T', 'm', { keywordFree: true })).toBe(
       'Recent transcript:\nT\n\nLatest participant message (it matched no crisis keyword; assess it against the transcript and any session risk context above):\n"m"',
     );
+  });
+});
+
+describe('ai-therapist-330: thoughts of harming another person', () => {
+  const REAL = 'I keep picturing hurting him. I know where he parks.';
+  const IDIOM = "I swear I'm going to kill my lab partner, he did nothing all semester.";
+
+  it('REPRODUCTION: the turn reaches the assessor on the realtime path (it used to score 0 with no call)', async () => {
+    createMock.mockResolvedValue(assess(80, 'harm_to_others', ['intent to harm another person']));
+
+    const result = await analyzeMessageRisk(turn(REAL), [{ role: 'user', content: REAL }]);
+
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(result.riskScore).toBe(80);
+    expect(result.severity).toBe('high');
+    expect(result.method).toBe('llm_context');
+  });
+
+  it('labels the result, the factors and the risk row as risk to others, and not as a third party', async () => {
+    createMock.mockResolvedValue(assess(80, 'harm_to_others', ['intent to harm another person']));
+
+    const result = await analyzeMessageRisk(turn(REAL), []);
+
+    expect(result.subject).toBe('harm_to_others');
+    expect(result.thirdParty).toBe(false);
+    expect(result.factors[0]).toBe(HARM_TO_OTHERS_FACTOR);
+    expect(riskRow()).toMatchObject({ harm_to_others: true, llm_context: 'harm_to_others', context_wake: true });
+    expect(riskRow().third_party).toBeUndefined();
+  });
+
+  it('the idiom is assessed and cleared: no score, no label', async () => {
+    createMock.mockResolvedValue(assess(5, 'reference'));
+    const result = await analyzeMessageRisk(turn(IDIOM), []);
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(result.riskScore).toBe(5);
+    expect(result.severity).toBe('none');
+    expect(result.subject).toBeUndefined();
+  });
+
+  it('frightening unwanted thoughts scored low by the assessor carry no label and do not flag', async () => {
+    createMock.mockResolvedValue(assess(30, 'harm_to_others'));
+    const result = await analyzeMessageRisk(
+      turn("I've been having thoughts about hurting my baby sister and it scares me. I would never do it."),
+      [],
+    );
+    expect(result.severity).toBe('low');
+    expect(result.subject).toBeUndefined();
+    expect(riskRow().harm_to_others).toBeUndefined();
+  });
+
+  it('assessor down: the screen alone never scores it, so the idiom cannot page', async () => {
+    createMock.mockRejectedValue(MODEL_NOT_FOUND());
+    for (const text of [REAL, IDIOM]) {
+      const result = await analyzeMessageRisk(turn(text), []);
+      expect(result.severity, text).toBe('none');
+      expect(result.degraded, text).toBe(true);
+    }
+  });
+
+  it('later turns are told the earlier concern was about harming someone else', async () => {
+    queryMock.mockImplementation(async (sql: unknown) =>
+      String(sql).includes('session-risk-context')
+        ? {
+            rows: [
+              {
+                crisis_flagged: true,
+                crisis_severity: 'high',
+                recent: [{ risk_score: 80, score_factors: { harm_to_others: true, llm_factors: ['intent'] } }],
+              },
+            ],
+          }
+        : { rows: [] },
+    );
+    expect((await getSessionRiskContext('sess-harm')).peakHarmToOthers).toBe(true);
+    createMock.mockResolvedValue(assess(20, 'harm_to_others'));
+    await analyzeMessageRisk(turn('ok. i am not going to do anything tonight'), []);
+    expect(assessorSaw()).toContain('thoughts of harming ANOTHER person');
+    expect(assessorSaw()).not.toContain("the participant's risk was assessed as");
+  });
+
+  it('thread messages carry the same label (standalone path)', async () => {
+    createMock.mockResolvedValue(assess(80, 'harm_to_others'));
+    const result = await analyzeStandaloneRisk(REAL);
+    expect(result.subject).toBe('harm_to_others');
+    expect(result.thirdParty).toBeUndefined();
+    expect(result.factors[0]).toBe(HARM_TO_OTHERS_FACTOR);
+  });
+
+  it('the rubric separates idiom from credible intent and offers the context label', () => {
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/Harm to others\./);
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/Idiom, exaggeration and ordinary anger → 0-10, none/);
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/Credible intent or planning → 75-100, high, context "harm_to_others"/);
+    expect(RISK_ASSESSMENT_PROMPT).toContain('"unclear" | "harm_to_others"');
+  });
+});
+
+describe('the rubric agrees with the cutoff (owner decision 2026-11-18: 65 and up is high)', () => {
+  it('no band is called high that the pipeline treats as medium', async () => {
+    const { RISK_BANDS } = await import('../../shared/riskBands.js');
+    expect(RISK_BANDS.high).toBe(65);
+    // Every "N-M, high" band in the rubric starts at or above the cutoff, and
+    // every "N-M, medium" band ends below it.
+    for (const m of RISK_ASSESSMENT_PROMPT.matchAll(/(\d+)-(\d+), high/g)) {
+      expect(Number(m[1]), m[0]).toBeGreaterThanOrEqual(RISK_BANDS.high);
+    }
+    for (const m of RISK_ASSESSMENT_PROMPT.matchAll(/(\d+)-(\d+), medium/g)) {
+      expect(Number(m[2]), m[0]).toBeLessThan(RISK_BANDS.high);
+    }
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/active ideation without plan → 65-75, high, ALWAYS at least 65/);
+    expect(RISK_ASSESSMENT_PROMPT).not.toMatch(/60-75, high/);
+  });
+
+  it('65 is high and 64 is medium, end to end', async () => {
+    createMock.mockResolvedValue(assess(65, 'genuine', ['active ideation']));
+    expect((await analyzeMessageRisk(turn("I've been thinking about ending my life a lot lately."), [])).severity).toBe(
+      'high',
+    );
+    createMock.mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              risk_score: 64,
+              severity: 'medium',
+              context: 'genuine',
+              factors: [],
+              reasoning: 't',
+              states_intent: false,
+              loss_or_disclosure: false,
+            }),
+          },
+        },
+      ],
+    });
+    expect((await analyzeMessageRisk(turn('I wish I was dead.'), [])).severity).toBe('medium');
   });
 });

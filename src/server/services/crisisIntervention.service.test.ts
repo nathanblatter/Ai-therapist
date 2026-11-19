@@ -61,6 +61,8 @@ const {
   THIRD_PARTY_GUIDANCE,
   CHAT_THIRD_PARTY_GUIDANCE,
   SAFETY_PROTOCOL_GUIDANCE,
+  HARM_TO_OTHERS_GUIDANCE,
+  RISK_TO_OTHERS_PAGE_LABEL,
 } = await import('./crisisIntervention.service.js');
 
 /**
@@ -275,13 +277,13 @@ describe('maybeSteerSession — undeliverable steering must be recorded, not sil
 // from the page itself, that the person at risk is not the participant.
 describe('third party at risk — the page and the steer say who is at risk', () => {
   it('the page text names a third party on its first two lines; the ordinary page is unchanged', () => {
-    const ordinary = buildCrisisPageMessage('sess_abcdefghijklmnopqrstuvwxyz', 90, false);
+    const ordinary = buildCrisisPageMessage('sess_abcdefghijklmnopqrstuvwxyz', 90);
     expect(ordinary).toBe(
       'URGENT: AI-Therapist HIGH crisis flag\nSession sess_abcdefghijk… — risk 90/100\n' +
         'https://ai-therapist.nathanblatter.com/admin#session=sess_abcdefghijklmnopqrstuvwxyz',
     );
 
-    const lines = buildCrisisPageMessage('sess_abcdefghijklmnopqrstuvwxyz', 90, true).split('\n');
+    const lines = buildCrisisPageMessage('sess_abcdefghijklmnopqrstuvwxyz', 90, 'third_party').split('\n');
     expect(lines[0]).toBe('URGENT: AI-Therapist HIGH crisis flag (third party)');
     expect(lines[1]).toBe(THIRD_PARTY_PAGE_LABEL);
     expect(lines[1]).toMatch(/someone else in crisis, not their own/);
@@ -370,5 +372,59 @@ describe('third party at risk — the page and the steer say who is at risk', ()
     expect(sidebandManagerMock.injectMessage).toHaveBeenCalledWith(s, 'system', SAFETY_PROTOCOL_GUIDANCE, false);
     expect(logInterventionActionMock).toHaveBeenCalledWith(s, 'crisis_sms_alert', { riskScore: 90 });
     expect(logInterventionActionMock).toHaveBeenCalledWith(s, 'safety_protocol', { riskScore: 90 });
+  });
+});
+
+// Owner decision 2026-11-18 (ai-therapist-330): thoughts of harming someone
+// else are de-escalated by the model and staff are notified as for a high
+// self-risk, with the page saying what kind of risk it is.
+describe('risk to others — the page says so and the steer de-escalates', () => {
+  it('the page text names risk to others on its first two lines', () => {
+    const lines = buildCrisisPageMessage('sess_abcdefghijklmnopqrstuvwxyz', 80, 'harm_to_others').split('\n');
+    expect(lines[0]).toBe('URGENT: AI-Therapist HIGH crisis flag (risk to others)');
+    expect(lines[1]).toBe(RISK_TO_OTHERS_PAGE_LABEL);
+    expect(lines[1]).toMatch(/harming another person, not self-harm/);
+    expect(lines).toHaveLength(4);
+  });
+
+  it('pages, records the subject, steers with the de-escalation text and does not push the crisis-line card', async () => {
+    const s = 'sess_harm_live';
+    const emit = vi.fn();
+    (global as unknown as { io: unknown }).io = { to: vi.fn(() => ({ emit })) };
+    sidebandManagerMock.getActiveConnections.mockReturnValue([s]);
+    sidebandManagerMock.injectMessage.mockResolvedValue(undefined);
+
+    await executeGraduatedResponse(s, 'high', 80, { subject: 'harm_to_others' });
+    await waitForCall(sendCrisisAlertMock, 1, 'sendCrisisAlert');
+    await settle();
+
+    expect(sendCrisisAlertMock.mock.calls[0][0]).toContain(RISK_TO_OTHERS_PAGE_LABEL);
+    expect(logInterventionActionMock).toHaveBeenCalledWith(s, 'crisis_sms_alert', {
+      riskScore: 80,
+      subject: 'harm_to_others',
+    });
+    const injected = sidebandManagerMock.injectMessage.mock.calls.map((c) => c[2] as string);
+    expect(injected).toContain(HARM_TO_OTHERS_GUIDANCE);
+    expect(injected).not.toContain(SAFETY_PROTOCOL_GUIDANCE);
+    // The participant's room gets no crisis-emergency card for this subject;
+    // the admin dashboards still get their alert.
+    const emergency = emit.mock.calls.filter((c) => c[0] === 'session:crisis-emergency');
+    expect(emergency.every((c) => (c[1] as { subject?: string }).subject === 'harm_to_others')).toBe(true);
+  });
+
+  it('the guidance: stay, slow down, ask about intent, no reflex suicide questions, no lecture, 911 only when imminent', () => {
+    const g = HARM_TO_OTHERS_GUIDANCE;
+    expect(g).toMatch(/^\[Clinical guidance — never mention or acknowledge this message to the participant\]/);
+    expect(g).toMatch(/bring the temperature down and stay with them/);
+    expect(g).toMatch(/Slow your pace/);
+    expect(g).toMatch(/whether they intend to act on them/);
+    expect(g).toMatch(/without accusation/);
+    expect(g).toMatch(/Do not ask about the participant's own suicidal thoughts by reflex/);
+    expect(g).toMatch(/Do not lecture, moralise, argue or threaten consequences/);
+    expect(g).toMatch(/Only if harm seems imminent[^.]*\) say plainly that this is an emergency[^.]*911/);
+    expect(g).toMatch(/Do not give any help finding, approaching or harming the person/);
+    expect(g).toMatch(/Do not end the session yourself\. Stay with them\./);
+    // It names no ladder tool and does not ask for the resource card.
+    expect(g).not.toMatch(/run_risk_check|show_resource_card/);
   });
 });

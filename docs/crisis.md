@@ -63,6 +63,39 @@ Two behaviour changes follow:
 
 ---
 
+## Severity bands (high starts at 65 since 2026-11-18)
+
+One definition, `src/shared/riskBands.ts`, imported by the scorer, the red-team harness, the
+goldens and the admin displays:
+
+| Band | Risk score | What the pipeline does |
+|---|---|---|
+| none | 0-24 | nothing |
+| low | 25-49 | steering only, no flag |
+| medium | 50-64 | crisis flag, dashboard alert, steering, no page |
+| high | 65-100 | crisis flag and on-call page |
+
+High started at 75 until the study owner's decision of 2026-11-18. The assessor rubric put
+active suicidal ideation without a plan at "60-75, high" while the pipeline treated 60-74 as
+medium, so "I've been thinking about ending my life a lot lately" scored 65, was flagged and
+was never paged. The rubric now reads passive ideation 50-60 and active ideation without a
+plan 65-75 ("always at least 65"), and a unit test fails if any band the rubric calls high
+starts below the cutoff. The bands are code, not `system_config` and not a column: no
+migration, and rows already stored keep the severity they were given.
+
+Two things follow from the number and were not otherwise changed:
+
+- **Trajectory bonus.** A turn the assessor scores 50-60 (passive ideation) reaches the
+  paging band with the +10 "sudden spike" or +15 "deteriorating" bonus (55 + 10 = 65). At
+  the old cutoff that needed the full +20, or a 60 with +15. Whether the bonus should be able
+  to carry a passive-ideation turn into a page is a clinical call that has not been made.
+- **Assessor down.** The moderation fallback is capped at 85 and uncapped below: a
+  keyword-free turn with a moderation self-harm score of 65-74 now pages while the assessor
+  is unreachable (it flagged without paging before).
+
+The offline calibration report keeps its literal `ge_50` / `ge_75` counters (an archived
+format); its `current_bands` follow the shared definition.
+
 ## Detection: Two-Stage (Keyword Screen + LLM Assessment)
 
 **File:** `src/server/services/crisisDetection.service.ts`
@@ -250,7 +283,10 @@ A gated live test (`crisisDetection.context.live.test.ts`, 35 `gpt-4o-mini` call
 cent) checks the real assessor against these bands: intent and goodbye after ideation at 75+,
 the same sentences about a job application under 25, the means probe after a loss in the
 medium band (five times over), ordinary turns and agreed safety steps in a flagged session
-under 75, a retraction not raising a high session. Run it after any change to the assessor prompt or
+under the paging band (65), a retraction not raising a high session. A second gated file,
+`crisisDetection.wakes.live.test.ts` (about 45 calls), covers the 2026-11-18 additions: a
+third party at risk, shorthand, the reply to a safety question, the check-in, harm to others,
+and the 65 cutoff sitting between passive and active ideation. Run both after any change to the assessor prompt or
 `crisis.risk_model`:
 
 ```sh
@@ -266,8 +302,8 @@ which returns a risk score (0–100) and a graduated severity: `none`, `low`, `m
 `high`. The prompt explicitly downgrades references (hotline names, media), negations
 ("I'm not suicidal"), and ordinary worry or past loss concerning someone else; someone
 else's CURRENT crisis is scored by its own rule (see "Third party at risk"). If the returned
-severity is malformed, it is derived from the score bands (`>=75` high, `>=50` medium,
-`>=25` low).
+severity is malformed, it is derived from the score bands (`>=65` high, `>=50` medium,
+`>=25` low; see "Severity bands").
 
 Note for IRB/privacy accounting: this means unredacted conversation excerpts are transmitted
 to OpenAI for risk assessment, in addition to the conversation-generation calls themselves.
@@ -355,6 +391,45 @@ that she's going to kill herself tonight" scored 0 with no assessor call.
   auto-draft on a high flag all still run for a third-party flag. Whether a third party's
   crisis is a reportable adverse event for the participant is for the study team to decide;
   the draft is a draft.
+
+## Risk to others (2026-11-18, ai-therapist-330)
+
+Owner decision: "bring them down from the ledge and notify staff". A credible statement of
+intent or planning to harm another person ("I keep picturing hurting him. I know where he
+parks.") is flagged and staff are notified exactly as for a high self-risk, and the model
+de-escalates. Before this change the keyword tiers (built around self-harm) matched nothing,
+so on the realtime path the turn scored 0 with no assessor call; on chat the moderation
+screen sometimes woke the assessor, which paged on the idiom ("I'm going to kill my lab
+partner") and steered the reply with the suicide protocol.
+
+- **Screen.** A `harm_others` context signal: a violent verb with a person as its object
+  ("hurting him", "kill my lab partner"), thoughts or images of violence, and veiled threats
+  ("get what's coming to him", "I know where he parks"). It only wakes the assessor and never
+  scores, because the idiom is the same words: with the assessor down these turns score 0.
+  Objects that are not people ("hurt my back", "kill my GPA") are not matched.
+- **Rubric.** A new assessor context, `harm_to_others`. Idiom, exaggeration, media and
+  ordinary anger are 0-10 (`reference`); credible intent or planning (thoughts presented as
+  real plus anything that makes it more than venting: where the person will be, what they
+  would do, a plan, means, a time) is 75-100; frightening unwanted thoughts the participant
+  rejects, or rage without plan or intent, are 25-50 and never high. `states_intent` stays
+  about the participant's own suicide or self-harm.
+- **How staff can tell.** Same places as a third party at risk, with subject
+  `harm_to_others`: the page reads `URGENT: AI-Therapist HIGH crisis flag (risk to others)` /
+  `RISK TO OTHERS: the participant is describing thoughts of harming another person, not
+  self-harm.`; the crisis event's first factor is `risk to others (thoughts of harming
+  another person)`; dashboard events, the work-queue title and the intervention rows carry
+  the subject; `risk_score_history.score_factors` carries `harm_to_others: true`. No schema
+  change.
+- **What the model is told.** `HARM_TO_OTHERS_GUIDANCE` replaces the safety-protocol steer
+  on voice and chat: stay, slow down, acknowledge the anger without agreeing anyone deserves
+  harm, ask calmly and without accusation what is happening and whether they intend to act,
+  no reflex questions about the participant's own suicide, no lecture or threat, no help
+  reaching the person, honesty about the team reviewing flagged conversations if asked, and
+  911 only when harm is imminent. It lives with the other crisis steers
+  (`crisisIntervention.service.ts`), not in the base system prompt. The structured ladder is
+  not demanded, and the crisis-line resource card is not opened automatically for these turns.
+- **Not decided here.** What the on-call does on such a page (duty-to-warn questions, who is
+  contacted) is a study-team and legal matter; see `docs/on-call-sop.md`.
 
 ## Pre-session check-in (2026-11-18)
 

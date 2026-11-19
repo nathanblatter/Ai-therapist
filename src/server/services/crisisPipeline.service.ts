@@ -23,9 +23,8 @@ import {
   buildChatSteeringGuidance,
   executeGraduatedResponse,
   CHAT_SAFETY_PROTOCOL_GUIDANCE,
-  CHAT_THIRD_PARTY_GUIDANCE,
-  THIRD_PARTY_GUIDANCE,
-  THIRD_PARTY_PAGE_LABEL,
+  subjectGuidance,
+  subjectLabel,
 } from './crisisIntervention.service.js';
 import {
   getRecentSessionMessages,
@@ -198,9 +197,13 @@ export async function runCrisisPipeline(
     );
 
     const severity = risk.severity as CrisisSeverity;
-    // Someone else's crisis, reported by the participant (ai-therapist-326).
-    // Same flag, same page; the label, the steer and the ladder differ.
-    const thirdParty = risk.thirdParty === true;
+    // Not the participant's own suicide or self-harm risk: someone else's
+    // crisis reported by the participant (ai-therapist-326), or thoughts of
+    // harming another person (ai-therapist-330). Same flag, same page; the
+    // label, the steer and the ladder differ.
+    const subject = risk.subject ?? (risk.thirdParty === true ? 'third_party' : null);
+    const subjectDetail = subject ? { subject } : {};
+    const label = subjectLabel(subject);
     const fromCheckin = turn.source === 'checkin';
     let steeringGuidance: string | null = null;
     let flagged = false;
@@ -210,7 +213,8 @@ export async function runCrisisPipeline(
     // session from here: a later escalation re-emits from
     // executeHighRiskResponse exactly as before, so a participant who closed
     // the card is not shown it again on every high turn.
-    if (severity === 'high' && !hasEmittedHighRiskResources(turn.sessionId)) {
+    // Not for thoughts of harming someone else (see executeHighRiskResponse).
+    if (severity === 'high' && subject !== 'harm_to_others' && !hasEmittedHighRiskResources(turn.sessionId)) {
       emitCrisisResources(turn.sessionId, { reason: 'high_risk', severity: 'high', riskScore: risk.riskScore });
     }
 
@@ -260,10 +264,17 @@ export async function runCrisisPipeline(
       // ---- Steering ----
       if (channel === 'realtime') {
         // Sideband injection happens inside; realtime ignores the return value.
-        // The fifth argument only exists for a third party at risk; every
-        // other turn makes the call it always made.
-        if (thirdParty) {
-          await maybeSteerSession(turn.sessionId, risk.riskScore, severity, forceSteer, THIRD_PARTY_GUIDANCE);
+        // The extra arguments only exist for a labelled subject; every other
+        // turn makes the call it always made.
+        if (subject) {
+          await maybeSteerSession(
+            turn.sessionId,
+            risk.riskScore,
+            severity,
+            forceSteer,
+            subjectGuidance(subject, 'realtime'),
+            subject,
+          );
         } else {
           await maybeSteerSession(turn.sessionId, risk.riskScore, severity, forceSteer);
         }
@@ -274,23 +285,20 @@ export async function runCrisisPipeline(
         // realtime `safety_protocol` intervention so the AE timeline matches.
         // High severity forces past the cooldown — a crisis escalating within
         // three minutes of a routine steer must still get the safety protocol.
-        const subject = thirdParty ? { subject: 'third_party' } : {};
-        steeringGuidance = thirdParty
-          ? CHAT_THIRD_PARTY_GUIDANCE
-          : severity === 'high'
-            ? CHAT_SAFETY_PROTOCOL_GUIDANCE
-            : buildChatSteeringGuidance(risk.riskScore, severity);
+        steeringGuidance =
+          subjectGuidance(subject, 'chat') ??
+          (severity === 'high' ? CHAT_SAFETY_PROTOCOL_GUIDANCE : buildChatSteeringGuidance(risk.riskScore, severity));
         await logInterventionAction(turn.sessionId, 'risk_steering', {
           riskScore: risk.riskScore,
           severity,
           channel: 'chat',
-          ...subject,
+          ...subjectDetail,
         });
         if (severity === 'high') {
           await logInterventionAction(turn.sessionId, 'safety_protocol', {
             riskScore: risk.riskScore,
             channel: 'chat',
-            ...subject,
+            ...subjectDetail,
           });
         }
         if (global.io) {
@@ -314,11 +322,11 @@ export async function runCrisisPipeline(
       // this session has logged no ladder step", not on steering cadence. It
       // runs on both channels; realtime delivers over the sideband inside,
       // chat gets a guidance string appended to this turn's model call.
-      // Not for a third party at risk: the ladder asks the participant about
-      // their OWN suicidal thoughts, and its questions are about someone who is
-      // not in the conversation. If the participant voices thoughts of their
-      // own, that turn is scored as theirs and requires the ladder as usual.
-      const ladderGuidance = thirdParty
+      // Not for a third party at risk or for risk to others: the ladder asks
+      // the participant about their OWN suicidal thoughts. If the participant
+      // voices thoughts of their own, that turn is scored as theirs and
+      // requires the ladder as usual.
+      const ladderGuidance = subject
         ? null
         : await maybeRequireRiskCheck(turn.sessionId, risk.riskScore, severity, channel);
       if (ladderGuidance) {
@@ -344,7 +352,7 @@ export async function runCrisisPipeline(
           turn.messageId ?? null,
           fromCheckin ? [...risk.factors, CHECKIN_FACTOR] : risk.factors,
           `Risk score: ${risk.riskScore} - ` +
-            (thirdParty ? `${THIRD_PARTY_PAGE_LABEL} - ` : '') +
+            (label ? `${label} - ` : '') +
             (fromCheckin ? 'Source: pre-session check-in text - ' : '') +
             `Factors: ${risk.factors.join(', ')}`,
         );
@@ -354,7 +362,7 @@ export async function runCrisisPipeline(
           severity,
           messageId: turn.messageId,
           factors: risk.factors,
-          ...(thirdParty ? { subject: 'third_party' } : {}),
+          ...subjectDetail,
           ...(fromCheckin ? { source: 'checkin' } : {}),
         });
 
@@ -371,9 +379,9 @@ export async function runCrisisPipeline(
               detectedAt: new Date(),
               message:
                 `${severity.toUpperCase()} risk detected (score: ${risk.riskScore})` +
-                (thirdParty ? ` - ${THIRD_PARTY_PAGE_LABEL}` : '') +
+                (label ? ` - ${label}` : '') +
                 (fromCheckin ? ' - from the pre-session check-in' : ''),
-              ...(thirdParty ? { subject: 'third_party' } : {}),
+              ...subjectDetail,
               ...(channel === 'chat' ? { sessionType: 'chat' } : {}),
             },
             turn.sessionId,
@@ -397,8 +405,10 @@ export async function runCrisisPipeline(
           );
         }
 
-        if (thirdParty) {
+        if (subject === 'third_party') {
           await executeGraduatedResponse(turn.sessionId, severity, risk.riskScore, { thirdParty: true });
+        } else if (subject) {
+          await executeGraduatedResponse(turn.sessionId, severity, risk.riskScore, { subject });
         } else {
           await executeGraduatedResponse(turn.sessionId, severity, risk.riskScore);
         }
@@ -423,7 +433,11 @@ export async function runCrisisPipeline(
               severity: 'urgent',
               title:
                 `Crisis flag: ${severity} risk (score ${risk.riskScore})` +
-                (thirdParty ? ' - third party at risk' : ''),
+                (subject === 'third_party'
+                  ? ' - third party at risk'
+                  : subject === 'harm_to_others'
+                    ? ' - risk to others'
+                    : ''),
               detail: { severity, risk_score: risk.riskScore, factors: risk.factors },
               sourceTable: 'therapy_sessions',
               sourceId: `${turn.sessionId}:${severity}`,

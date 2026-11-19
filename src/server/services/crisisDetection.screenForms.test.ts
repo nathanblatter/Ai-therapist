@@ -281,3 +281,48 @@ describe('the assistant asking about safety', () => {
     ).toBe(true);
   });
 });
+
+// Owner decision 2026-11-18 (ai-therapist-330): credible thoughts of harming
+// another person are detected on every path and staff are notified. The
+// keyword tiers are about self-harm, so on the realtime path these turns were
+// never assessed ("I keep picturing hurting him. I know where he parks."
+// scored 0). The screen only wakes the assessor: the idiom has the same words.
+describe('thoughts of harming another person wake the assessor (never a score)', () => {
+  it.each([
+    'I keep picturing hurting him. I know where he parks.',
+    "My roommate is going to get what's coming to him. I've thought about exactly what I'd do.",
+    "I've been having thoughts about hurting my baby sister and it scares me. I would never do it.",
+    'I want to hurt him the way he hurt me',
+    'honestly i think about killing my stepdad every single day',
+    "I'm going to make her pay for what she did",
+    'I know where she lives and she is going to regret it',
+    // The idiom is sent to the assessor too: only context tells it apart.
+    "I swear I'm going to kill my lab partner, he did nothing all semester.",
+  ])('%s', (text) => {
+    expect(score(text), text).toBe(0);
+    expect(kinds(text), text).toContain('harm_others');
+    expect(detectContextSignals(text).some((s) => s.kind === 'harm_others' && s.strong)).toBe(false);
+  });
+
+  it('must not fire: objects that are not people, and ordinary anger', () => {
+    for (const text of [
+      'I hurt my back moving the couch.',
+      'That class is going to kill my GPA.',
+      'This heat is killing my appetite.',
+      'I want to beat my record on the 5k.',
+      "I'm going to shoot my shot and ask her out.",
+      "I'm so mad at my ex I could scream.",
+      'I punched my pillow, it helped a little.',
+      'She really hurt my feelings.',
+      'I attacked the problem set all night.',
+      "I'm going to murder this exam.",
+    ]) {
+      expect(untouched(text), text).toBe(true);
+    }
+  });
+
+  it('thoughts of hurting MYSELF are the self-harm keyword, not this signal', () => {
+    expect(score('I keep thinking about hurting myself')).toBe(75);
+    expect(kinds('thoughts of hurting my self')).not.toContain('harm_others');
+  });
+});

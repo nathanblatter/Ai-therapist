@@ -45,6 +45,8 @@ vi.mock('./crisisIntervention.service.js', () => ({
   maybeRequireRiskCheck: maybeRequireRiskCheckMock,
   executeGraduatedResponse: executeGraduatedResponseMock,
   CHAT_SAFETY_PROTOCOL_GUIDANCE: 'CHAT_HIGH_GUIDANCE',
+  subjectGuidance: () => null,
+  subjectLabel: () => null,
 }));
 vi.mock('../db/index.js', () => ({
   getRecentSessionMessages: getRecentSessionMessagesMock,

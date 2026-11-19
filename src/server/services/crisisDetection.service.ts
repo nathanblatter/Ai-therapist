@@ -364,7 +364,17 @@ export type ContextSignalKind =
   // keyword tiers do not match these, so before this kind existed the turn
   // was never assessed at all. Never a score: third-person talk is far more
   // often a film, the news or a past loss, which only the assessor can tell.
-  | 'third_party';
+  | 'third_party'
+  // Thoughts of harming ANOTHER person ("I keep picturing hurting him. I know
+  // where he parks."). Owner decision 2026-11-18 (ai-therapist-330): a
+  // credible statement of intent or planning is flagged and staff are
+  // notified as for a high self-risk, labelled as risk to others, and the
+  // model is steered to de-escalate. The keyword tiers are built around
+  // self-harm, so these turns were never assessed on the realtime path.
+  // Never a score: "I'm going to kill my lab partner, he did nothing all
+  // semester" is the same verb and object, and only the assessor can tell
+  // venting from intent.
+  | 'harm_others';
 
 export interface ContextSignal {
   kind: ContextSignalKind;
@@ -499,6 +509,36 @@ const CONTEXT_SIGNAL_PATTERNS: Array<{ kind: ContextSignalKind; label: string; s
     strong: false,
     pattern:
       /\b(?:he|she|they)(?:'s|'re| is| are| was| were)?\b[\w\s,'-]{0,25}?\b(?:want(?:s|ed|ing)? to die|wish(?:es|ed)? (?:he|she|they) (?:was|were|wasn't|weren't|was not|were not) (?:dead|alive|here|around|born)|wish(?:es|ed)? (?:he|she|they) (?:could|would) (?:just )?(?:disappear|die|not wake up|not exist|not be here)|want(?:s|ed)? to (?:just )?disappear|(?:would|will|'d|'ll) be better off (?:dead|without (?:him|her|them))|going to end it)\b/,
+  },
+  // ---- thoughts of harming another person (assessor decides) ----
+  {
+    kind: 'harm_others',
+    label: 'harm to a person (violent verb + person)',
+    strong: false,
+    // The object is a person: a pronoun, or "my/that/this/the" + a person
+    // noun. "hurt my back", "kill my appetite" and "beat my record" are not
+    // matched; "kill my lab partner" is, and is the assessor's to clear.
+    pattern: new RegExp(
+      '\\b(?:hurt|hurting|kill|killing|harm|harming|stab|stabbing|shoot|shooting|strangle|strangling|choke|choking|attack|attacking|murder|murdering|beat(?:ing)? up|punch|punching)\\s+' +
+        '(?:him|her|them|someone|somebody|anyone|people|everyone|(?:my|that|this|the)\\s+(?:[\\w-]+\\s+){0,2}?(?:' +
+        'partner|roommate|boss|manager|coworker|ex|boyfriend|girlfriend|husband|wife|mom|mother|dad|father|stepdad|stepmom|' +
+        'brother|sister|friend|teacher|professor|landlord|neighbou?r|kid|son|daughter|baby|family|parents|classmate|teammate|guy|girl|man|woman|person' +
+        '))\\b',
+    ),
+  },
+  {
+    kind: 'harm_others',
+    label: 'thoughts or images of violence',
+    strong: false,
+    pattern:
+      /\b(?:picturing|imagining|fantasi[sz]ing about|thinking about|thought about|thoughts? (?:of|about)|urges? to|dream(?:ing|ed)? (?:of|about))\s+(?:hurting|killing|harming|stabbing|shooting|strangling|choking|attacking|murdering|beating up)\b(?!\s+(?:myself|my ?self)\b)/,
+  },
+  {
+    kind: 'harm_others',
+    label: 'veiled threat',
+    strong: false,
+    pattern:
+      /\b(?:get(?:s|ting)?|got) what(?:'s| is) coming to (?:him|her|them)\b|\bmake (?:him|her|them) pay\b|\b(?:he|she|they)(?:'ll| will|'s going to| is going to|'re going to| are going to) (?:regret|pay for|be sorry)\b|\bi know where (?:he|she|they) (?:parks?|lives?|works?|sleeps?)\b|\bexactly what i(?:'d| would|'ll| will|'m going to| am going to) do to (?:him|her|them)\b/,
   },
   // ---- means-relevant questions (lethality, dangerous amounts) ----
   {
@@ -693,6 +733,9 @@ export interface SessionRiskContext {
   /** The peak turn was a report of SOMEONE ELSE's crisis (score_factors
    *  third_party), not the participant's own risk. */
   peakThirdParty: boolean;
+  /** The peak turn was about harming ANOTHER person (score_factors
+   *  harm_to_others), not the participant's own suicide or self-harm risk. */
+  peakHarmToOthers: boolean;
   /** The lookup itself failed. `elevated` is then true: when the session's
    *  state cannot be read, the turn is assessed rather than assumed calm. */
   lookupFailed: boolean;
@@ -706,6 +749,7 @@ const CALM_CONTEXT: SessionRiskContext = {
   turnsSincePeak: null,
   peakFactors: [],
   peakThirdParty: false,
+  peakHarmToOthers: false,
   lookupFailed: false,
 };
 
@@ -761,6 +805,7 @@ export async function getSessionRiskContext(sessionId: string): Promise<SessionR
       turnsSincePeak: peakIndex >= 0 ? peakIndex + 1 : null,
       peakFactors: peakIndex >= 0 ? factorsFromScoreFactors(recent[peakIndex].score_factors) : [],
       peakThirdParty: peakIndex >= 0 && scoreFactorsFlag(recent[peakIndex].score_factors, 'third_party'),
+      peakHarmToOthers: peakIndex >= 0 && scoreFactorsFlag(recent[peakIndex].score_factors, 'harm_to_others'),
       lookupFailed: false,
     };
   } catch (err) {
@@ -769,7 +814,7 @@ export async function getSessionRiskContext(sessionId: string): Promise<SessionR
   }
 }
 
-function scoreFactorsFlag(raw: unknown, key: 'context_wake' | 'third_party'): boolean {
+function scoreFactorsFlag(raw: unknown, key: 'context_wake' | 'third_party' | 'harm_to_others'): boolean {
   let parsed: unknown = raw;
   if (typeof raw === 'string') {
     try {
@@ -824,7 +869,9 @@ function describeSessionRiskContext(ctx: SessionRiskContext): string | null {
         ? // Not the participant's own risk: without this the assessor reads
           // "assessed as high" as the participant having been suicidal.
           `earlier in this session the participant reported SOMEONE ELSE's crisis (a third party at risk, not the participant), assessed as ${severityForScore(ctx.recentPeak)}`
-        : `earlier in this session the participant's risk was assessed as ${severityForScore(ctx.recentPeak)}`) +
+        : ctx.peakHarmToOthers
+          ? `earlier in this session the participant described thoughts of harming ANOTHER person (a risk to someone else, not suicide or self-harm), assessed as ${severityForScore(ctx.recentPeak)}`
+          : `earlier in this session the participant's risk was assessed as ${severityForScore(ctx.recentPeak)}`) +
         (ctx.turnsSincePeak ? `, ${ctx.turnsSincePeak} participant turn(s) ago` : '') +
         (ctx.peakFactors.length > 0 ? `; factors noted then: ${ctx.peakFactors.join(', ')}` : ''),
     );
@@ -987,13 +1034,13 @@ async function getClient(): Promise<OpenAI> {
   return openaiClient;
 }
 
-export const RISK_ASSESSMENT_PROMPT = `You are a clinical risk-assessment assistant for an AI-assisted therapy research platform. A keyword screen flagged possible crisis language in a support conversation. Read the recent transcript and assess the PARTICIPANT's current suicide/self-harm risk.
+export const RISK_ASSESSMENT_PROMPT = `You are a clinical risk-assessment assistant for an AI-assisted therapy research platform. A keyword screen flagged possible crisis language in a support conversation. Read the recent transcript and assess the PARTICIPANT's current suicide/self-harm risk (and, under the "Harm to others" rule below, a serious risk that they will harm someone else).
 
 Return STRICT JSON only:
 {
   "risk_score": <0-100>,
   "severity": "none" | "low" | "medium" | "high",
-  "context": "genuine" | "negated" | "bystander" | "reference" | "unclear",
+  "context": "genuine" | "negated" | "bystander" | "reference" | "unclear" | "harm_to_others",
   "factors": [<short strings: e.g. "passive ideation", "expressed plan", "hopelessness", "protective factors present">],
   "reasoning": "<one sentence>",
   "states_intent": <true | false>,
@@ -1015,7 +1062,7 @@ Resolve references against the conversation before scoring. The latest message i
 - A retraction, a joke or a reassurance after a disclosure ("jk", "forget I said that", "I'm fine, I was being dramatic") adds no new risk and does not prove safety: never score it HIGHER than what the conversation had already established, and never read "I've decided NOT to", "I'm not going to do it" or "I changed my mind" as intent.
 - Means inquiry. A question about what is lethal or dangerous to take or keep, how much is too much, or how something could kill is a recognised warning sign when the SAME conversation contains a recent loss or setback, hopelessness, or any disclosure. Score it at least 50, medium, context "unclear", whatever purpose the participant gives for asking (a class paper, curiosity, a story): a stated purpose does not lower the score, and an abrupt change of subject from the loss to this question is itself a reason for concern. After expressed ideation → 75-100, high. Only when the conversation contains nothing concerning at all (for example a student talking about a toxicology exam) → 10-20.
 The last two fields are plain observations, not risk judgments. Answer them literally and independently of the score:
-- "states_intent": true ONLY when the latest participant message itself, read against the conversation, says that they (the participant, not a third party they are reporting about) intend or have decided to end their life or hurt themselves, names a time for it, says they have a plan or the means at hand, says goodbye in that sense, or says they have already acted. false when the latest message is about getting help or taking a safety step, an ordinary plan or decision, a retraction or reassurance, a question, or anything else; earlier risk in the conversation does not make it true.
+- "states_intent": true ONLY when the latest participant message itself, read against the conversation, says that they (the participant, not a third party they are reporting about) intend or have decided to end their own life or hurt themselves, names a time for it, says they have a plan or the means at hand, says goodbye in that sense, or says they have already acted. false when the latest message is about getting help or taking a safety step, an ordinary plan or decision, a retraction or reassurance, a question, or anything else; earlier risk in the conversation does not make it true.
 - "loss_or_disclosure": true when anywhere in the transcript the PARTICIPANT reports a significant loss or setback of their own (failing or being dropped from a program, a breakup, a death, losing a job, a serious diagnosis or other serious bad news), even stated flatly with no feelings named, or expresses hopelessness, or discloses suicidal thoughts or self-harm. Ordinary stress (a busy week, an upcoming exam, being tired) is false.
 - The session risk context, when present, is background for understanding what the latest message refers to. It is not new evidence: a latest message that adds nothing ("ok", a change of subject, a practical question) must not be scored HIGHER than the level already noted, and ordinary life events mentioned afterwards are not warning signs merely because risk was noted earlier.
 Third party at risk. When the participant reports that SOMEONE ELSE is suicidal, keep context "bystander" and score what is happening to that other person:
@@ -1023,6 +1070,11 @@ Third party at risk. When the participant reports that SOMEONE ELSE is suicidal,
 - Passive or long-standing thoughts with nothing imminent ("my mom has depression and some days she says she wishes she wasn't here") → 50-60, medium.
 - Ordinary worry, a past crisis that has resolved, a death or suicide that has already happened, a film, a book or the news → 0-20, none/low.
 - If the participant also voices ideation of their OWN, score that instead, with context "genuine".
+Harm to others. When the participant talks about hurting or killing ANOTHER person, decide first whether it is a figure of speech:
+- Idiom, exaggeration and ordinary anger → 0-10, none, context "reference". "I swear I'm going to kill my lab partner, he did nothing all semester", "I could strangle him", "I'm so mad at my ex I could scream", "sometimes I get so angry I want to hit something, but I'd never actually hurt anyone", a film or a game. An angry sentence with a violent verb and nothing else is this.
+- Credible intent or planning → 75-100, high, context "harm_to_others": thoughts or images of hurting a specific person that the participant presents as real, together with anything that makes it more than venting (knowing where the person is or will be, having thought through what they would do, a plan, the means, a time, a threat meant seriously, or saying they might actually do it). "I keep picturing hurting him. I know where he parks." and "He's going to get what's coming to him. I've thought about exactly what I'd do." are this. The study team is alerted so a person can respond.
+- Unwanted thoughts of harming someone that the participant is frightened by and rejects ("I've been having thoughts about hurting my baby sister and it scares me. I would never do it"), or rage with an urge to hurt a specific person but no plan and no stated intent → 25-50, low to medium, context "harm_to_others". Never high.
+"states_intent" is false for all of these: it is only about the participant's own suicide or self-harm.
 Slang and shorthand: "kms" (kill myself), "ctb" or "catch the bus" (die by suicide), "unalive", "sewerslide", "off myself", "I want out" (of life, of everything). Said in earnest about themselves, score them as the plain words they stand for ("been thinking about ctb a lot lately" is active ideation; "I want out. Of everything." is at least passive ideation, 50 or more). With an ordinary meaning in the conversation (a distance in kms, an unrelated abbreviation, an actual bus, wanting out of a lease or a class) → 0-10, none.
 An answer to a safety question. When the assistant's turn just before the latest message asks about suicide, self-harm, wanting to die or not be alive, or whether the participant is safe, the latest message is the answer to THAT question, however short: score it as if the participant had said the full sentence. "yeah", "kind of", "sometimes", "most nights", "I guess" in reply to a question about not wanting to be alive is passive ideation → at least 50, medium; in reply to a question about suicide or ending their life it is active ideation; in reply to a question about a plan, the means or a time → 80-100, high. Hedged and minimal answers do not downgrade it. A clear "no" (or "yes, I'm safe") is "negated" → 0-15. A dodge ("I don't know", "does it matter") is "unclear" → 25-40, low.
 Before you answer, read the latest message once more for help-seeking. When it announces or agrees to a step toward help or safety (texting or calling a family member, a friend, a counselor or a crisis line, booking an appointment, telling a roommate), the "it" in "I'm going to do it" or "I'll do it" is that step: "states_intent" is false and the score is not above the level the conversation had already established.
@@ -1072,6 +1124,20 @@ export function buildRiskAssessmentUserMessage(
 /** First factor on a flag raised for someone else's crisis: what staff read in
  *  the crisis event, the dashboard alert and the work item. */
 export const THIRD_PARTY_FACTOR = 'third party at risk (reported by participant)';
+
+/** First factor on a flag raised for thoughts of harming another person. */
+export const HARM_TO_OTHERS_FACTOR = 'risk to others (thoughts of harming another person)';
+
+/** Who a flag is about when it is not the participant's own suicide or
+ *  self-harm risk. Carried on the result, the risk row, the crisis event, the
+ *  intervention rows, the dashboard events and the page. */
+export type CrisisSubject = 'third_party' | 'harm_to_others';
+
+/** The assessor's context label at a flagging severity, as a subject. */
+function subjectFor(context: string | undefined, severity: string): CrisisSubject | null {
+  if (severity !== 'medium' && severity !== 'high') return null;
+  return context === 'bystander' ? 'third_party' : context === 'harm_to_others' ? 'harm_to_others' : null;
+}
 
 const SEVERITY_RANK_ORDER = { none: 0, low: 1, medium: 2, high: 3 } as const;
 
@@ -1148,7 +1214,10 @@ const RISK_ASSESSMENT_SCHEMA = {
       properties: {
         risk_score: { type: 'integer', minimum: 0, maximum: 100 },
         severity: { type: 'string', enum: ['none', 'low', 'medium', 'high'] },
-        context: { type: 'string', enum: ['genuine', 'negated', 'bystander', 'reference', 'unclear'] },
+        context: {
+          type: 'string',
+          enum: ['genuine', 'negated', 'bystander', 'reference', 'unclear', 'harm_to_others'],
+        },
         factors: { type: 'array', items: { type: 'string' } },
         reasoning: { type: 'string' },
         states_intent: { type: 'boolean' },
@@ -1463,6 +1532,8 @@ export interface StandaloneRiskResult {
   /** True when the assessor judged the message to be about SOMEONE ELSE's
    *  crisis at medium or high (see RiskAnalysisResult.thirdParty). */
   thirdParty?: boolean;
+  /** Set with thirdParty / for harm to others (see RiskAnalysisResult.subject). */
+  subject?: CrisisSubject;
 }
 
 /**
@@ -1508,17 +1579,19 @@ export async function analyzeStandaloneRisk(
         (floored.floored ? ` [raised to ${floored.riskScore} by the passive-ideation floor]` : ''),
     );
     const baseFactors = llm.factors.length > 0 ? llm.factors : keywordAnalysis.keywords;
-    const thirdParty = llm.context === 'bystander' && (floored.severity === 'medium' || floored.severity === 'high');
+    const subject = subjectFor(llm.context, floored.severity);
     return {
       riskScore: floored.riskScore,
       severity: floored.severity,
       factors: [
-        ...(thirdParty ? [THIRD_PARTY_FACTOR] : []),
+        ...(subject === 'third_party' ? [THIRD_PARTY_FACTOR] : []),
+        ...(subject === 'harm_to_others' ? [HARM_TO_OTHERS_FACTOR] : []),
         ...baseFactors,
         ...(floored.floored ? ['passive ideation (screen floor)'] : []),
       ],
       method: 'llm_assessed',
-      ...(thirdParty ? { thirdParty: true } : {}),
+      ...(subject === 'third_party' ? { thirdParty: true } : {}),
+      ...(subject ? { subject } : {}),
     };
   } catch (err) {
     const failure = await recordAssessorFailure(err, null);
@@ -1676,6 +1749,11 @@ interface RiskAnalysisResult {
    *  flag, the dashboard alert and the on-call page as a third party at risk
    *  and steers the model to help the participant respond (ai-therapist-326). */
   thirdParty?: boolean;
+  /** Who the flag is about when it is not the participant's own suicide or
+   *  self-harm risk: 'third_party' (same as thirdParty) or 'harm_to_others'
+   *  (the assessor judged credible thoughts of harming another person,
+   *  ai-therapist-330). Absent for the participant's own risk. */
+  subject?: CrisisSubject;
 }
 
 /**
@@ -1894,8 +1972,10 @@ export async function analyzeMessageRisk(
     const severity = severityForScore(riskScore);
     // Someone else's crisis, as judged by the assessor. Only at the flagging
     // levels: a low bystander score (ordinary worry, a past loss) labels nothing.
-    const thirdParty = llm?.context === 'bystander' && (severity === 'medium' || severity === 'high');
+    const subject = subjectFor(llm?.context, severity);
+    const thirdParty = subject === 'third_party';
     if (thirdParty) factors = [THIRD_PARTY_FACTOR, ...factors];
+    if (subject === 'harm_to_others') factors = [HARM_TO_OTHERS_FACTOR, ...factors];
 
     // Passive logging — insert unconditionally regardless of flagging.
     // severity column has CHECK (severity IN ('low','medium','high')), so use NULL when no keyword matched.
@@ -1960,6 +2040,7 @@ export async function analyzeMessageRisk(
             // The assessor read the turn as someone else's crisis. Kept on the
             // row so later turns are told so (describeSessionRiskContext).
             ...(thirdParty ? { third_party: true } : {}),
+            ...(subject === 'harm_to_others' ? { harm_to_others: true } : {}),
             ...(contextFallbackApplied ? { context_fallback: true } : {}),
             ...(contextSignalFloored ? { context_signal_floor: CRISIS_KEYWORDS.high.score } : {}),
             ...(meansInquiryFloor !== null ? { means_inquiry_floor: meansInquiryFloor } : {}),
@@ -1995,6 +2076,7 @@ export async function analyzeMessageRisk(
       contextWake: isContextWake,
       degraded: llmErrorKind !== null,
       thirdParty,
+      ...(subject ? { subject } : {}),
     };
   } catch (error) {
     console.error('Error in analyzeMessageRisk:', error);

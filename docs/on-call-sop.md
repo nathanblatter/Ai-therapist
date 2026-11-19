@@ -10,7 +10,9 @@ document. Bracketed items are decisions the team must finalize before launch.
 ## 1. What the system does automatically
 
 When a participant's message trips the imminent-risk detector
-(`docs/crisis.md` — explicit suicidal/self-harm intent only):
+(`docs/crisis.md` — a risk score of 65 or more: suicidal or self-harm intent
+or active ideation, someone else's active crisis reported by the participant,
+or credible thoughts of harming another person):
 
 1. The **agent** follows its crisis protocol in-session: acknowledges, checks
    immediate safety, and surfaces 988, the Crisis Text Line, and CAPS.
@@ -37,6 +39,23 @@ someone else) and then to check on the participant. [What the on-call does
 for a third-party page, beyond reviewing the session and supporting the
 participant, is not yet written: to be set by the PI and the clinical
 consultant.]
+
+**A page that says "risk to others" (since 2026-11-18).** When the
+participant describes credible thoughts of harming another person (not a
+figure of speech), the page's first line ends `(risk to others)` and its
+second line reads `RISK TO OTHERS: the participant is describing thoughts of
+harming another person, not self-harm.` The agent has been steered to
+de-escalate: stay with the participant, slow down, ask calmly what is
+happening and whether they intend to act, and give 911 guidance only if harm
+is imminent. It does not run the suicide assessment and does not open the
+crisis-line card for these messages. [What the on-call does on a
+risk-to-others page, including any duty to warn or report, is not yet
+written: to be set by the PI, the clinical consultant and the IRB.]
+
+**Where "high" starts (since 2026-11-18).** A risk score of 65 or more is
+high and pages (it was 75). Expect pages for active suicidal ideation without
+a plan ("I've been thinking about ending my life a lot lately"), which used
+to be flagged on the dashboard only.
 
 ## 2. On-call rotation
 
