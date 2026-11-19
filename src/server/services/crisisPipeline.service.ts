@@ -40,6 +40,7 @@ import {
 import { sessionSuppressesSafetyPipeline } from './suppression.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { enqueueWorkItem } from './workQueue.service.js';
+import { trackBackground } from '../utils/backgroundWork.js';
 import { emitCrisisResources, hasEmittedHighRiskResources } from './crisisResources.js';
 import type { MinorVerdict } from './minorSafeguard.service.js';
 
@@ -499,16 +500,18 @@ export async function runCrisisPipeline(
         // told about: see handleHighTurnWithoutReflag. Fire-and-forget, like
         // the page in executeHighRiskResponse: the voice reply must not wait
         // on it.
-        void handleHighTurnWithoutReflag(
-          turn,
-          {
-            riskScore: risk.riskScore,
-            factors: risk.factors,
-            ...(subject ? { subject } : {}),
-            ...(acute ? { acute } : {}),
-          },
-          channel,
-        ).catch((err) => console.error('[CrisisPipeline] high turn without re-flag: handling failed:', err));
+        trackBackground(
+          handleHighTurnWithoutReflag(
+            turn,
+            {
+              riskScore: risk.riskScore,
+              factors: risk.factors,
+              ...(subject ? { subject } : {}),
+              ...(acute ? { acute } : {}),
+            },
+            channel,
+          ).catch((err) => console.error('[CrisisPipeline] high turn without re-flag: handling failed:', err)),
+        );
       }
     }
 
@@ -679,6 +682,10 @@ export const RECOVERY_DISCLOSURE_RECORD_TIMEOUT_MS = 2000;
  * Fail toward paging, and never trade the page for the record: if the record
  * throws, or has not answered in RECOVERY_DISCLOSURE_RECORD_TIMEOUT_MS, the
  * page is requested without waiting for it.
+ *
+ * The returned promise settles when everything it started has settled (the
+ * page request, the dashboard events and the adverse-event draft), so a caller
+ * that awaits it sees all of it; the pipeline does not await it.
  */
 export async function handleHighTurnWithoutReflag(
   turn: ParticipantTurn,
@@ -740,7 +747,7 @@ export async function handleHighTurnWithoutReflag(
   // it. Nothing is written here; the turn's own flag event, when it is the
   // first at its stage, is written by the pipeline before this is reached.
   if (first !== 'slow' && first !== null && !first.recorded) {
-    import('./crisisPaging.service.js')
+    await import('./crisisPaging.service.js')
       .then((m) => {
         if (m.riskPageLevel(risk.riskScore, risk.acute ?? null) === m.PAGE_LEVEL.critical) {
           return m.pageHighRisk(turn.sessionId, risk.riskScore, {
@@ -763,14 +770,18 @@ export async function handleHighTurnWithoutReflag(
   if (first === 'slow') {
     console.error(`[CrisisPipeline] recording the recovery-session disclosure for ${short}... is slow; paging first`);
   }
-  import('./crisisPaging.service.js')
+  const paging = import('./crisisPaging.service.js')
     .then((m) =>
       m.pageHighRisk(turn.sessionId, risk.riskScore, { ...pageFacts, trigger: 'high_turn_in_recovery_session' }),
     )
     .catch((err) => console.error('[CrisisPipeline] page for a recovery-session disclosure failed:', err));
+  const started: Array<Promise<unknown>> = [paging];
 
   const recorded = first === 'slow' ? await recording : first;
-  if (!recorded?.recorded) return;
+  if (!recorded?.recorded) {
+    await paging;
+    return;
+  }
 
   console.log(
     `Session ${turn.sessionId}: participant disclosure recorded in a recovery session ` +
@@ -794,36 +805,38 @@ export async function handleHighTurnWithoutReflag(
   }
 
   if (global.io) {
-    void broadcastAdminEventForSession(
-      global.io,
-      'session:crisis-detected',
-      {
-        sessionId: turn.sessionId,
-        severity: 'high',
-        riskScore: risk.riskScore,
-        factors: risk.factors,
-        messageId: turn.messageId,
-        detectedAt: new Date(),
-        message:
-          `HIGH risk detected in a recovery session (score: ${risk.riskScore})` +
-          (risk.subject ? ` - ${subjectLabel(risk.subject)}` : ''),
-        ...subjectDetail,
-        ...(channel === 'chat' ? { sessionType: 'chat' } : {}),
-      },
-      turn.sessionId,
-    );
-    void broadcastAdminEventForSession(
-      global.io,
-      'session:crisis-event-created',
-      {
-        sessionId: turn.sessionId,
-        severity: 'high',
-        riskScore: risk.riskScore,
-        factors: risk.factors,
-        detectedAt: new Date(),
-      },
-      turn.sessionId,
-      'summary',
+    started.push(
+      broadcastAdminEventForSession(
+        global.io,
+        'session:crisis-detected',
+        {
+          sessionId: turn.sessionId,
+          severity: 'high',
+          riskScore: risk.riskScore,
+          factors: risk.factors,
+          messageId: turn.messageId,
+          detectedAt: new Date(),
+          message:
+            `HIGH risk detected in a recovery session (score: ${risk.riskScore})` +
+            (risk.subject ? ` - ${subjectLabel(risk.subject)}` : ''),
+          ...subjectDetail,
+          ...(channel === 'chat' ? { sessionType: 'chat' } : {}),
+        },
+        turn.sessionId,
+      ),
+      broadcastAdminEventForSession(
+        global.io,
+        'session:crisis-event-created',
+        {
+          sessionId: turn.sessionId,
+          severity: 'high',
+          riskScore: risk.riskScore,
+          factors: risk.factors,
+          detectedAt: new Date(),
+        },
+        turn.sessionId,
+        'summary',
+      ),
     );
   }
 
@@ -839,16 +852,19 @@ export async function handleHighTurnWithoutReflag(
     console.error('[CrisisPipeline] could not tell whether the incident has an adverse-event report; drafting:', err);
   }
   if (!alreadyReported) {
-    import('./adverseEvent.service.js')
-      .then((m) =>
-        risk.subject
-          ? m.draftAdverseEventFromCrisis(turn.sessionId, { subject: risk.subject })
-          : m.draftAdverseEventFromCrisis(turn.sessionId),
-      )
-      .catch((err) => console.error('AE auto-draft failed:', err));
+    started.push(
+      import('./adverseEvent.service.js')
+        .then((m) =>
+          risk.subject
+            ? m.draftAdverseEventFromCrisis(turn.sessionId, { subject: risk.subject })
+            : m.draftAdverseEventFromCrisis(turn.sessionId),
+        )
+        .catch((err) => console.error('AE auto-draft failed:', err)),
+    );
   }
 
   await enqueueCrisisFlagWorkItem(turn.sessionId, 'high', risk.riskScore, risk.factors, risk.subject ?? null);
+  await Promise.allSettled(started);
 }
 
 /** A participant turn that ended this recently before the next one began is

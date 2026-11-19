@@ -1,6 +1,7 @@
 import { pool } from '../config/db.js';
 import { logInterventionAction, type CrisisSubject } from './crisisDetection.service.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
+import { trackBackground } from '../utils/backgroundWork.js';
 import { emitCrisisResources, clearCrisisResourceState } from './crisisResources.js';
 
 // ============================================
@@ -771,9 +772,11 @@ async function executeHighRiskResponse(
     // the audit row live there too). The subject goes with it: the page says
     // who is at risk, and a page about someone else never absorbs one about
     // the participant (or the reverse).
-    import('./crisisPaging.service.js')
-      .then((m) => m.pageHighRisk(sessionId, riskScore, pageFacts))
-      .catch((err) => console.error('Error sending crisis SMS:', err));
+    trackBackground(
+      import('./crisisPaging.service.js')
+        .then((m) => m.pageHighRisk(sessionId, riskScore, pageFacts))
+        .catch((err) => console.error('Error sending crisis SMS:', err)),
+    );
 
     // Steer the live model into a structured safety assessment, or, when the
     // person at risk is someone else, into helping the participant respond.

@@ -2,7 +2,7 @@
 // PAGING). The sandbox check is isolated so a transient lookup error can
 // never swallow a real on-call page, and suppression logging stays out of
 // the paging critical path.
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const {
   poolQueryMock,
@@ -73,6 +73,7 @@ const {
 const { _resetPagingStateForTests, buildRiskPageMessage, PAGE_SUBJECT_LABEL } = await import(
   './crisisPaging.service.js'
 );
+const { _settleBackgroundForTests } = await import('../utils/backgroundWork.js');
 /** The session page text for a first page (no earlier page, no vendor cut). */
 const buildCrisisPageMessage = (
   sessionId: string,
@@ -113,12 +114,6 @@ const waitForCall = async (spy: { mock: { calls: unknown[] } }, times = 1, label
   }
 };
 
-/**
- * Let the fire-and-forget chain settle before asserting something did NOT
- * happen. Polling cannot prove a negative, so this is necessarily a fixed
- * budget — kept deliberately generous, since a too-short settle here produces a
- * FALSE PASS (the page hadn't been attempted yet) rather than a visible failure.
- */
 /** Paging-decision rows crisisPaging.service wrote through the mocked pool:
  *  [session_id, action_type, action_details (parsed), risk_score]. */
 const pagingRows = () =>
@@ -129,9 +124,16 @@ const pagingRows = () =>
       return { sessionId, actionType, details: JSON.parse(details) as Record<string, unknown>, riskScore };
     });
 
-const settle = async () => {
-  for (let i = 0; i < 25; i++) await new Promise((r) => setTimeout(r, 2));
-};
+/**
+ * Let the fire-and-forget page finish: executeGraduatedResponse registers it
+ * with utils/backgroundWork, so this waits for exactly that work (the page and
+ * its audit row) rather than for a fixed number of ticks. It is what makes an
+ * assertion that something did NOT happen mean anything, and (in afterEach)
+ * what keeps one test's page out of the next test's mocks: under
+ * --sequence.shuffle, a page left running by "the card still goes out" landed
+ * as the first sendCrisisAlert call of the test after it.
+ */
+const settle = _settleBackgroundForTests;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -141,6 +143,10 @@ beforeEach(() => {
   sendCrisisAlertMock.mockResolvedValue(undefined);
   isSandboxAccountSessionMock.mockResolvedValue(false);
   _resetPagingStateForTests();
+});
+
+afterEach(async () => {
+  await settle();
 });
 
 describe('executeGraduatedResponse — session timer (ai-therapist-281)', () => {
