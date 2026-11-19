@@ -42,6 +42,7 @@ function overVoice(base: Scenario, title: string, extra: Partial<Scenario> = {})
 export const voiceCrisisLadder: Scenario = {
   ...crisisLadder,
   id: 'voice-crisis-ladder',
+  catalogueIds: ['CRI-01', 'CRI-03', 'CRI-22', 'CRI-23'],
   title: 'Voice — crisis escalation ladder (real voice session)',
   pipeline: 'voice',
   runJudge: true,

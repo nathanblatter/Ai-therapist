@@ -74,15 +74,6 @@ describe('collectKnownGaps / formatKnownGaps', () => {
     expect(block).toContain('detail of crisis-severity-is-high@imminent');
   });
 
-  it('a gap not yet filed (empty ref) still stops gating and is still listed, as "ref not filed"', () => {
-    const unfiled = { knownGap: { ...gap, ref: '' } };
-    const assertions = applyKnownGap(unfiled, [res('crisis-severity-is-high@imminent', false)]);
-    expect(assertions[0].gating).toBe(false);
-    expect(assertions[0].detail).toMatch(/^KNOWN GAP ref not filed: /);
-    const block = formatKnownGaps(collectKnownGaps([{ id: 'crisis-imminent-intent', assertions }]));
-    expect(block).toContain('[ref not filed]');
-  });
-
   it('says so when a listed gap passed, so the marker gets removed', () => {
     const assertions = applyKnownGap({ knownGap: gap }, [res('crisis-severity-is-high@imminent', true)]);
     const block = formatKnownGaps(collectKnownGaps([{ id: 'crisis-imminent-intent', assertions }]));
@@ -109,6 +100,17 @@ describe('validateKnownGap', () => {
   it('requires a Flightdeck reference and a real reason', () => {
     expect(validateKnownGap(scenario({ ...gap, ref: 'see slack' }))).toHaveLength(1);
     expect(validateKnownGap(scenario({ ...gap, reason: 'broken' }))).toHaveLength(1);
+  });
+
+  it('accepts an empty ref (found by an eval, not filed yet) and reports it as UNFILED', () => {
+    const unfiled = { ...gap, ref: '' };
+    expect(validateKnownGap(scenario(unfiled))).toEqual([]);
+    const out = applyKnownGap({ knownGap: unfiled }, [res('crisis-severity-is-high@imminent', false)]);
+    expect(out[0].gating).toBe(false);
+    expect(out[0].knownGap).toBe('UNFILED');
+    const lines = collectKnownGaps([{ id: 's', assertions: out }]);
+    expect(lines).toHaveLength(1);
+    expect(formatKnownGaps(lines)).toContain('[UNFILED]');
   });
 
   it('rejects an empty id list (it would look like a marker and gate nothing differently)', () => {

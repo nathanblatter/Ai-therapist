@@ -15,6 +15,9 @@
 //          sever the browser socket / the xAI socket after the first beat and
 //          verify the session continues — docs/grok-voice.md section 3)
 //        --generated-variants <n>  --generated-operators <a,b>  --variant-cache <dir>
+//        --sample [--sample-date YYYY-MM-DD] [--sample-history <summary.json>]
+//          (weekly-capped nightly sample, every scenario once per UTC week;
+//          see sampling.ts and docs/redteam.md "Sampled nightly")
 //        --gate-generated (opt-in LLM-generated mutations of the safety
 //          scenarios, ai-therapist-109; off by default, never in CI)
 import 'dotenv/config';
@@ -79,7 +82,17 @@ import {
   type NormalizedRun,
   type RunDiff,
 } from './diff.js';
-import { selectSuite, SAFETY_SCENARIOS, type SuiteEntry } from './scenarios/index.js';
+import { selectSuite, SAFETY_SCENARIOS, SAMPLING_PRIORITY_SCENARIOS, type SuiteEntry } from './scenarios/index.js';
+import { CapacityError, nightlySample, utcDate, WEEKDAY_NAMES, type NightlySample } from './sampling.js';
+import {
+  baseScenarioId,
+  lastRunById,
+  loadRollingBaseline,
+  mergeRolling,
+  rollingToNormalized,
+  ROLLING_BASELINE_FILE,
+  type RollingBaseline,
+} from './rollingBaseline.js';
 import { applyKnownGap, reportKnownGaps } from './knownGap.js';
 import {
   buildGeneratedVariants,
@@ -174,6 +187,15 @@ function parseArgs(argv: string[]): RedteamConfig {
         break;
       case '--gate-diff':
         cfg.gateDiff = true;
+        break;
+      case '--sample':
+        cfg.sample = true;
+        break;
+      case '--sample-date':
+        cfg.sampleDate = next();
+        break;
+      case '--sample-history':
+        cfg.sampleHistory = next();
         break;
       case '--gate-quality':
         cfg.gateQuality = true;
@@ -270,7 +292,9 @@ function buildCtx(
   classify: AssertionContext['classify'],
   cfg: RedteamConfig,
   beatId?: string,
-  extra?: Partial<Pick<AssertionContext, 'chatSessionEnded' | 'lastMessageStatus' | 'lastMessageBody' | 'assistant'>>,
+  extra?: Partial<
+    Pick<AssertionContext, 'chatSessionEnded' | 'lastMessageStatus' | 'lastMessageBody' | 'assistant' | 'http'>
+  >,
 ): AssertionContext {
   return {
     scenarioId: scenario.id,
@@ -641,6 +665,39 @@ async function runAssistantScenario(
   return { assertions, judge: null, judgeBreaches: false, sessionId: '', transcript };
 }
 
+/**
+ * HTTP pipeline (docs/eval-scenario-catalogue.md A2 gates, STAFF-10): no
+ * persona, no model, no judge. The scenario's probe drives the real routes on
+ * accounts and rows it seeded itself, and its final assertions read what the
+ * probe recorded. Identical with and without --dry-run: nothing here can call
+ * a model, so there is nothing to stub.
+ */
+async function runHttpScenario(
+  scenario: Scenario,
+  _beats: Beat[],
+  _runJudgeFlag: boolean,
+  client: HarnessClient,
+  _openai: OpenAI | null,
+  cfg: RedteamConfig,
+  _cost: CostTracker,
+  canaries: string[],
+  pool: AssertionContext['pool'],
+  classify: AssertionContext['classify'],
+): Promise<{
+  assertions: AssertionResult[];
+  judge: null;
+  judgeBreaches: false;
+  sessionId: string;
+  transcript?: Turn[];
+}> {
+  if (!scenario.httpProbe) throw new Error(`${scenario.id}: http pipeline scenario has no httpProbe`);
+  if (scenario.setup) await scenario.setup(pool);
+  const http = await scenario.httpProbe({ client, pool, dryRun: cfg.dryRun });
+  const ctx = buildCtx(scenario, '', '', [], client, {}, canaries, pool, classify, cfg, undefined, { http });
+  const assertions = await runAssertions(scenario.assertFinal, ctx);
+  return { assertions, judge: null, judgeBreaches: false, sessionId: '' };
+}
+
 async function runEntry(
   entry: SuiteEntry,
   client: HarnessClient,
@@ -686,9 +743,11 @@ async function runEntry(
         ? runChatScenario
         : scenario.pipeline === 'assistant'
           ? runAssistantScenario
-          : scenario.pipeline === 'voice' && !cfg.dryRun
-            ? (await import('./voiceClient.js')).runVoiceScenario
-            : runRealtimeScenario;
+          : scenario.pipeline === 'http'
+            ? runHttpScenario
+            : scenario.pipeline === 'voice' && !cfg.dryRun
+              ? (await import('./voiceClient.js')).runVoiceScenario
+              : runRealtimeScenario;
     // Scenario fixture (test-only fault injection): installed around the run
     // and always undone, so a failed scenario cannot leak its fault into the next.
     const undoFixture = await scenario.fixture?.({ pool, dryRun: cfg.dryRun });
@@ -731,6 +790,7 @@ async function runEntry(
       durationMs: Date.now() - start,
       generated: generated?.meta,
       ...(voiceMetrics ? { voiceMetrics } : {}),
+      ...(scenario.knownGap ? { knownGap: scenario.knownGap } : {}),
     });
   } catch (err) {
     return ledger({
@@ -745,6 +805,7 @@ async function runEntry(
       durationMs: Date.now() - start,
       error: (err as Error).message,
       generated: generated?.meta,
+      ...(scenario.knownGap ? { knownGap: scenario.knownGap } : {}),
     });
   }
 }
@@ -827,10 +888,52 @@ async function main(): Promise<void> {
     console.error(`[redteam] ${(err as Error).message}`);
     process.exit(2);
   }
-  const entries = selectSuite(cfg.suite, cfg.scenarioId);
+  let entries = selectSuite(cfg.suite, cfg.scenarioId);
   if (entries.length === 0) {
     console.error(`No scenarios matched (suite=${cfg.suite}, scenario=${cfg.scenarioId ?? 'all'})`);
     process.exit(2);
+  }
+  const suiteIds = new Set(selectSuite(cfg.suite).map((e) => e.scenario.id));
+
+  // The previous results (rolling-baseline.json next to the --baseline
+  // summary.json, else that summary.json), read before anything is written
+  // into --out: the diff baseline, and the sampler's record of what ran.
+  const prior = cfg.baseline && cfg.baseline !== 'latest' ? loadRollingBaseline(cfg.baseline) : null;
+
+  // --sample: tonight's slice of the weekly plan (sampling.ts).
+  let sampling: NightlySample | undefined;
+  if (cfg.sample) {
+    if (cfg.scenarioId) {
+      console.error('[redteam] --sample cannot be combined with --scenario');
+      process.exit(2);
+    }
+    const historySrc = cfg.sampleHistory ? loadRollingBaseline(cfg.sampleHistory) : prior;
+    const history = historySrc && historySrc.rolling.suite === cfg.suite ? lastRunById(historySrc.rolling) : null;
+    const date = cfg.sampleDate ?? utcDate(new Date());
+    try {
+      sampling = nightlySample(
+        entries.map((e) => e.scenario.id),
+        new Set(SAMPLING_PRIORITY_SCENARIOS.map((s) => s.id)),
+        date,
+        history,
+      );
+      const runSet = new Set(sampling.run);
+      entries = entries.filter((e) => runSet.has(e.scenario.id));
+      console.log(
+        `[redteam] sampled run ${sampling.week} ${WEEKDAY_NAMES[sampling.weekday]} ${sampling.date}: ` +
+          `${sampling.run.length} of ${sampling.total} scenarios (cap ${sampling.cap}; ${sampling.primaries.length} assigned, ` +
+          `${sampling.catchUp.length} catch-up, ${sampling.repeats.length} repeats` +
+          `${sampling.deferred.length ? `, ${sampling.deferred.length} deferred` : ''})` +
+          (sampling.historyAvailable ? '' : '; no previous results found, catch-up off'),
+      );
+    } catch (err) {
+      if (!(err instanceof CapacityError)) {
+        console.error(`[redteam] --sample: ${(err as Error).message}`);
+        process.exit(2);
+      }
+      // Never silently drop scenarios: over capacity, run everything.
+      console.error(`[redteam] --sample: ${err.message} Running the whole suite unsampled tonight.`);
+    }
   }
 
   console.log(
@@ -929,6 +1032,7 @@ async function main(): Promise<void> {
     scenarios: results,
     discardedVariants,
     costNotes: costNotesForRun,
+    sampling,
   };
   const { junitPath, summaryPath } = writeReports(cfg, summary);
   // A diff from an earlier run in the same --out dir must never be mistaken
@@ -990,7 +1094,7 @@ async function main(): Promise<void> {
   // appended to the GitHub job summary when running in Actions.
   let diffRegressions = false;
   if (cfg.baseline) {
-    const diff = await runBaselineDiff(cfg, summary, persistedRunId);
+    const diff = await runBaselineDiff(cfg, summary, persistedRunId, prior?.rolling ?? null, prior?.file, suiteIds);
     if (diff) {
       diffRegressions = diff.hasRegressions;
       if (diffRegressions && cfg.gateDiff) console.log('[redteam] --gate-diff: regressions vs baseline -> exit 1');
@@ -1004,6 +1108,20 @@ async function main(): Promise<void> {
   // flight; ending the pool would make them log "pool after end". process.exit
   // tears everything down cleanly.
   const gateFailed = !passed && !cfg.allowFail;
+  // Carry each scenario's most recent result forward for tomorrow's diff and
+  // sampler (rollingBaseline.ts). Written on every run, sampled or not.
+  try {
+    const current = normalizeSummary(buildSummaryJson(summary) as Parameters<typeof normalizeSummary>[0], 'this run');
+    const rolling = mergeRolling(prior?.rolling ?? null, current, suiteIds);
+    const nodeFs = await import('node:fs');
+    nodeFs.writeFileSync(`${cfg.outDir}/${ROLLING_BASELINE_FILE}`, JSON.stringify(rolling, null, 2));
+    console.log(
+      `[redteam] wrote ${cfg.outDir}/${ROLLING_BASELINE_FILE} (${Object.keys(rolling.scenarios).length} scenarios)`,
+    );
+  } catch (err) {
+    console.warn(`[redteam] ${ROLLING_BASELINE_FILE} not written (${(err as Error).message})`);
+  }
+
   const diffFailed = diffRegressions && cfg.gateDiff;
   await flushAndExit(gateFailed || diffFailed ? 1 : 0);
 }
@@ -1064,8 +1182,12 @@ async function runGeneratedVariants(
 
 /** Load the baseline named by --baseline: a summary.json path, or `latest`
  *  (newest persisted non-dry run of the same suite, excluding this one). */
-async function loadBaseline(cfg: RedteamConfig, persistedRunId: number | null): Promise<NormalizedRun | null> {
-  const fs = await import('node:fs');
+async function loadBaseline(
+  cfg: RedteamConfig,
+  persistedRunId: number | null,
+  prior: RollingBaseline | null,
+  priorFile: string | undefined,
+): Promise<NormalizedRun | null> {
   if (cfg.baseline === 'latest') {
     try {
       const { getLatestHarnessRunForSuite } = await import('../server/db/index.js');
@@ -1080,25 +1202,25 @@ async function loadBaseline(cfg: RedteamConfig, persistedRunId: number | null): 
       return null;
     }
   }
-  const path = cfg.baseline as string;
-  if (!fs.existsSync(path)) {
-    console.warn(`[redteam] baseline ${path} not found — skipping diff`);
+  // A file baseline was read at startup (main): rolling-baseline.json when the
+  // baseline run wrote one, so each scenario is compared with its own most
+  // recent prior result even when last night ran a different sample.
+  if (!prior) {
+    console.warn(`[redteam] baseline ${cfg.baseline} not found or unreadable — skipping diff`);
     return null;
   }
-  try {
-    return normalizeSummary(JSON.parse(fs.readFileSync(path, 'utf8')), path);
-  } catch (err) {
-    console.warn(`[redteam] baseline ${path} unreadable (${(err as Error).message}) — skipping diff`);
-    return null;
-  }
+  return rollingToNormalized(prior, priorFile ?? String(cfg.baseline));
 }
 
 async function runBaselineDiff(
   cfg: RedteamConfig,
   summary: RunSummary,
   persistedRunId: number | null,
+  prior: RollingBaseline | null,
+  priorFile: string | undefined,
+  suiteIds: ReadonlySet<string>,
 ): Promise<RunDiff | null> {
-  const baseline = await loadBaseline(cfg, persistedRunId);
+  const baseline = await loadBaseline(cfg, persistedRunId, prior, priorFile);
   if (!baseline) return null;
   const current = normalizeSummary(buildSummaryJson(summary) as Parameters<typeof normalizeSummary>[0], 'this run');
   // A variant only diffs against a baseline of the same variant: comparing a
@@ -1110,7 +1232,14 @@ async function runBaselineDiff(
     );
     return null;
   }
-  const diff = diffRuns(baseline, current);
+  // Sampled night: a baseline scenario that is still in the suite but was not
+  // scheduled tonight is "not sampled", never "missing".
+  const diff = diffRuns(
+    baseline,
+    current,
+    undefined,
+    summary.sampling ? { notRunByDesign: (label) => suiteIds.has(baseScenarioId(label)) } : {},
+  );
 
   const fs = await import('node:fs');
   const path = await import('node:path');

@@ -17,6 +17,7 @@ import type { Scenario } from '../types.js';
 
 export const crisisLadder: Scenario = {
   id: 'crisis-ladder',
+  catalogueIds: ['CRI-01'],
   title: 'Crisis escalation ladder (gradual → explicit self-harm)',
   pipeline: 'realtime-text',
   personaSystem:

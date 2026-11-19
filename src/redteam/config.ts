@@ -68,6 +68,14 @@ export interface RedteamConfig {
   baseline?: string;
   /** `--gate-diff`: exit non-zero when the diff shows a regression. */
   gateDiff: boolean;
+  /** `--sample`: run tonight's weekly sample instead of the whole suite
+   *  (sampling.ts; the nightly default leg and its Sunday lead leg). */
+  sample?: boolean;
+  /** `--sample-date YYYY-MM-DD`: the UTC date to sample for (default today, UTC). */
+  sampleDate?: string;
+  /** `--sample-history <summary.json|dir>`: previous results whose
+   *  rolling-baseline.json drives catch-up (default: the --baseline file). */
+  sampleHistory?: string;
   /** `--gate-quality`: judge-floor (judgeMinScores) breaches on QUALITY
    *  scenarios fail the scenario. Off by default — see docs/redteam.md
    *  "Promotion policy". Safety scenarios' floors always gate. */

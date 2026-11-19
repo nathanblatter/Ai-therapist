@@ -46,7 +46,7 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `scenarios/screening/*.ts`, `scenarios/opening/*.ts`, `scenarios/use/*.ts` | Catalogue SCR-*, OPEN-* and USE-* scenarios (eligibility disclosed in session, the pre-session check-in, limits of scope and difficult disclosures). NIGHTLY-tier ones in the full suite, EXT-tier ones in `extended`; SCR-03 is report-only. |
 | `scopeAssertions.ts`, `scopeRubricFixtures.ts` | Their assertions and the synthetic pass and must-fail replies that test them; `scopeRubrics.live.test.ts` runs the fixtures through the real classifier (opt-in). |
 | `participantIdentity.ts` | Refuses to run `requiresReservedParticipant` scenarios unless the harness participant has a reserved userid (OpenAI safety-identifier collision, ai-therapist-306). |
-| `scenarios/crisis/*.ts` | The crisis group from `docs/eval-scenario-catalogue.md` (CRI-03, 04, 06, 08, 09, 10, 12, 17, 24), one catalogue entry per file. Design, measured pass rates and known gaps: `docs/redteam-crisis-scenarios.md`. |
+| `scenarios/crisis/*.ts` | The crisis group from `docs/eval-scenario-catalogue.md` (every CRI id that runs on chat or realtime-text, plus GATE-02), one catalogue entry per file, each scenario tagged with `catalogueIds`. Design, the CRI coverage map, measured pass rates and known gaps: `docs/redteam-crisis-scenarios.md`. |
 | `crisisAssertions.ts` | Assertions for the crisis group: pipeline state, reply regexes, one classifier question per Crisis Protocol promise. |
 | `crisisFixtures.ts` | Test-only fixtures and probes for the crisis group: assessor made unreachable, `end_session` guard probe, session-timer probe. |
 | `knownGap.ts` | Known product gaps: listed assertions report loudly on every run and do not gate until the filed bug is fixed. |
@@ -59,6 +59,7 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `voiceClient.ts`, `liveVoiceClient.ts` | Voice drivers: Grok proxy socket and GPT-Live WebRTC, selected by `system_config.ai_model`. |
 | `relationalAssertions.ts` | REL/LIT-14/USE-08/ARM assertions (sycophancy, dependence, faith, exercise-offer counts, tool log). |
 | `arms.ts` | Forces the proactive_offering arm in-process for the ARM scenarios. |
+| `scenarios/gates/*.ts` | Catalogue GATE-01, GATE-03 to GATE-06 and STAFF-10 on the `http` pipeline: session-start gates, RBAC and audit rows, driven through the real routes with no model and no judge (identical under `--dry-run`). `support.ts` holds the account seeding, probe recorder and clock helper. |
 | `scenarios/relational/*.ts`, `scenarios/arms/*.ts` | Catalogue REL-*, USE-08 and ARM-01/02 scenarios. |
 | `liveVoiceChecks.ts` | GPT-Live checks: which layer answered each turn, client probes, risk/resource assertions, and what a participant gets around a vendor cut (resources at the cut, time to the first recovery words, the crisis line in the opening). |
 | `voiceSummary.ts` | Markdown job summary for `redteam-voice.yml`. |
@@ -74,6 +75,7 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `jobSummary.ts`, `ciSummary.ts` | GitHub job summary and the nightly's red/green verdict (`npm run redteam:ci-summary`). |
 | `configSnapshot.ts` | `--config-snapshot <file>`: load an environment's evaluated configuration into the eval DB (config drift gate, `docs/redteam.md`); a `--variant` still overlays it. |
 | `configEvalClient.ts` | HTTP client the `redteam-config.yml` workflow uses to claim and record config evaluations. |
+| `goldens/` | Goldens runner (`npm run redteam:goldens`): the labelled detector and reply rows in `evals/goldens/*.jsonl` run in bulk through the real pipeline, with a confusion matrix, rates, a row diff and review sheets. See docs/redteam.md "Goldens". |
 | `*.test.ts` | Offline unit tests (assertions, diff, judge policy, suite composition, voice helpers); run in the normal `npm test`. |
 
 Results are written to `redteam-results/` (gitignored). Scheduled in-app runs

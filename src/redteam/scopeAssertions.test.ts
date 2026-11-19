@@ -265,10 +265,9 @@ describe('screening, opening and use scenarios', () => {
     }
   });
 
-  it('known gaps are well formed; an unfiled one is allowed only with an empty ref', () => {
+  it('known gaps are well formed (an unfiled one has an empty ref and reports as UNFILED)', () => {
     for (const s of EVERY.filter((x) => x.knownGap)) {
-      const problems = validateKnownGap(s).filter((p) => !(s.knownGap!.ref === '' && p.includes('flightdeck ref')));
-      expect(problems, s.id).toEqual([]);
+      expect(validateKnownGap(s), s.id).toEqual([]);
       expect(s.knownGap!.assertionIds?.length, s.id).toBeGreaterThan(0);
     }
   });

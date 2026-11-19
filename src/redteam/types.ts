@@ -5,6 +5,7 @@ import type { ProgressionMetrics } from './progression.js';
 import type { CostBreakdown } from './config.js';
 import type { VoiceEvalSpec } from './voice/scenarioTypes.js';
 import type { RunMetrics } from './voice/metrics.js';
+import type { HarnessClient } from './harnessClient.js';
 
 export type { EvalDimensionId };
 
@@ -23,8 +24,32 @@ export type JudgeDimensionId = EvalDimensionId | 'session_progression';
  *  ADMIN data assistant (POST /admin/api/assistant/chat) driven as a logged-in
  *  staff user of `Scenario.assistantRole` (ai-therapist-207): the persona is a
  *  staff member, not a participant, and the thing under test is role scoping,
- *  injection resistance and data exfiltration, not therapy quality. */
-export type Pipeline = 'chat' | 'realtime-text' | 'voice' | 'assistant';
+ *  injection resistance and data exfiltration, not therapy quality. `http` →
+ *  no conversation at all: the scenario's `httpProbe` drives the real routes
+ *  (session-start gates, RBAC, audit rows) and its `assertFinal` checks read
+ *  what the probe recorded (`AssertionContext.http`). Judge-free and
+ *  model-free by construction; it runs the same under --dry-run. */
+export type Pipeline = 'chat' | 'realtime-text' | 'voice' | 'assistant' | 'http';
+
+/** One HTTP call an `http` scenario made, as the assertions see it. */
+export interface HttpStep {
+  status: number;
+  body: unknown;
+}
+
+/** What an `http` scenario's probe recorded: every call by a stable key, plus
+ *  database facts read along the way (row counts, ids, timestamps). */
+export interface HttpProbeRecord {
+  steps: Record<string, HttpStep>;
+  facts: Record<string, unknown>;
+}
+
+/** What the runner hands an `http` scenario's probe. */
+export interface HttpProbeEnv {
+  client: HarnessClient;
+  pool: DbLike;
+  dryRun: boolean;
+}
 
 /** Staff roles the admin assistant serves (mirrors assistant.service.ts). */
 export type AssistantRole = 'therapist' | 'researcher' | 'caseworker';
@@ -131,6 +156,8 @@ export interface AssertionContext {
   lastMessageBody?: unknown;
   /** Set on the assistant pipeline only. */
   assistant?: AssistantTurnState;
+  /** Set on the http pipeline only: what the scenario's probe recorded. */
+  http?: HttpProbeRecord;
   pool: DbLike;
   classify: ClassifyFn;
   dryRun: boolean;
@@ -185,11 +212,9 @@ export interface ScenarioCheckin {
 export interface Scenario {
   id: string;
   title: string;
-  pipeline: Pipeline;
-  /** The docs/eval-scenario-catalogue.md entries this scenario covers (e.g.
-   *  `['SCR-08']`), so coverage can be read off the code instead of the
-   *  catalogue's Coverage labels. */
+  /** docs/eval-scenario-catalogue.md ids this scenario covers (e.g. GATE-01). */
   catalogueIds?: string[];
+  pipeline: Pipeline;
   /** Chat pipeline: the pre-session check-in to submit with /api/chat/start. */
   checkin?: ScenarioCheckin;
   modality?: string;
@@ -237,6 +262,9 @@ export interface Scenario {
   /** GPT-Live voice evaluation mode (src/redteam/voice, docs/redteam.md
    *  "GPT-Live evaluation guide"). Absent = an ordinary voice scenario. */
   voiceEval?: VoiceEvalSpec;
+  /** Required on the http pipeline: drive the real routes and record what
+   *  came back for `assertFinal` to check. Must never call a model. */
+  httpProbe?: (env: HttpProbeEnv) => Promise<HttpProbeRecord>;
 }
 
 export interface JudgeScores {
@@ -287,6 +315,10 @@ export interface ScenarioResult {
   /** GPT-Live runs: the guide's audio, delegation and consumption metrics
    *  (src/redteam/voice/metrics.ts). */
   voiceMetrics?: RunMetrics;
+  /** The scenario's knownGap declaration, carried into summary.json so a
+   *  label-only gap (no assertionIds) is recognisable from the artifact
+   *  (flightdeckReport.ts files nothing for it). */
+  knownGap?: KnownGap;
 }
 
 export interface GeneratedVariantMeta {

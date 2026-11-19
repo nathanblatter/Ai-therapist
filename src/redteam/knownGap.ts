@@ -22,9 +22,9 @@ import type { AssertionResult, Scenario, ScenarioResult } from './types.js';
 export interface KnownGap {
   /** What the product does today and which protocol or prompt line it breaks. */
   reason: string;
-  /** Flightdeck item for the product bug, e.g. `ai-therapist-301`. Empty
-   *  while the gap is waiting for the owner to file it: the gap still reports
-   *  (as "ref not filed"), and validateKnownGap flags the missing ref. */
+  /** Flightdeck item for the product bug, e.g. `ai-therapist-301`; empty
+   *  when the gap was found by an eval and is not filed yet (reported as
+   *  UNFILED). */
   ref: string;
   /** Assertion ids (exact) that report without gating until the bug is fixed.
    *  Omitted: the scenario is only labelled and every assertion still gates. */
@@ -33,12 +33,17 @@ export interface KnownGap {
 
 export const FLIGHTDECK_REF = /^ai-therapist-\d+$/;
 
+/** How a gap with an empty `ref` (found, not yet filed) is labelled in reports. */
+export const UNFILED_REF = 'UNFILED';
+
 /** Problems with a knownGap declaration; empty when it is well formed. */
 export function validateKnownGap(scenario: Pick<Scenario, 'id' | 'knownGap' | 'beats' | 'assertFinal'>): string[] {
   const gap = scenario.knownGap;
   if (!gap) return [];
   const problems: string[] = [];
-  if (!FLIGHTDECK_REF.test(gap.ref)) problems.push(`${scenario.id}: flightdeck ref '${gap.ref}'`);
+  // An empty ref is allowed: a gap found by an eval and not filed yet. It is
+  // still reported on every run, labelled UNFILED, so it cannot be forgotten.
+  if (gap.ref !== '' && !FLIGHTDECK_REF.test(gap.ref)) problems.push(`${scenario.id}: flightdeck ref '${gap.ref}'`);
   if (gap.reason.trim().length < 20) problems.push(`${scenario.id}: reason too short to be useful`);
   if (!gap.assertionIds) return problems;
   if (gap.assertionIds.length === 0) problems.push(`${scenario.id}: assertionIds is empty`);
@@ -64,12 +69,12 @@ export function applyKnownGap(scenario: Pick<Scenario, 'knownGap'>, assertions: 
   const gap = scenario.knownGap;
   if (!gap?.assertionIds?.length) return assertions;
   const listed = new Set(gap.assertionIds);
-  const label = gap.ref || 'ref not filed';
+  const ref = gap.ref || UNFILED_REF;
   return assertions.map((a) => {
     if (!listed.has(a.id)) return a;
     return a.passed
-      ? { ...a, knownGap: gap.ref, detail: `KNOWN GAP ${label} PASSED THIS RUN: ${a.detail}` }
-      : { ...a, gating: false, knownGap: gap.ref, detail: `KNOWN GAP ${label}: ${a.detail}` };
+      ? { ...a, knownGap: ref, detail: `KNOWN GAP ${ref} PASSED THIS RUN: ${a.detail}` }
+      : { ...a, gating: false, knownGap: ref, detail: `KNOWN GAP ${ref}: ${a.detail}` };
   });
 }
 
@@ -85,8 +90,7 @@ export function collectKnownGaps(results: Array<Pick<ScenarioResult, 'id' | 'ass
   const lines: KnownGapLine[] = [];
   for (const r of results) {
     for (const a of r.assertions) {
-      // An empty ref is a gap not yet filed, not "no gap".
-      if (a.knownGap === undefined) continue;
+      if (!a.knownGap) continue;
       lines.push({ scenarioId: r.id, assertionId: a.id, ref: a.knownGap, passed: a.passed, detail: a.detail });
     }
   }
@@ -106,11 +110,11 @@ export function formatKnownGaps(lines: KnownGapLine[]): string {
   );
   out.push('=============================================================');
   for (const l of failing) {
-    out.push(` FAILING  ${l.scenarioId} / ${l.assertionId}  [${l.ref || 'ref not filed'}]`);
+    out.push(` FAILING  ${l.scenarioId} / ${l.assertionId}  [${l.ref}]`);
     out.push(`          ${l.detail}`);
   }
   for (const l of stale) {
-    out.push(` PASSED   ${l.scenarioId} / ${l.assertionId}  [${l.ref || 'ref not filed'}]`);
+    out.push(` PASSED   ${l.scenarioId} / ${l.assertionId}  [${l.ref}]`);
     out.push(`          if the bug is fixed, remove this id from the scenario's knownGap so it gates again`);
   }
   out.push('=============================================================');

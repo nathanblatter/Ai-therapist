@@ -10,6 +10,7 @@ import { costNoteLines, judgeStats } from './report.js';
 import type { CostBreakdown } from './config.js';
 import { aggregateProgression, computeProgression, type ProgressionMetrics } from './progression.js';
 import type { Pipeline, Turn } from './types.js';
+import { WEEKDAY_NAMES, weekdayIndex, type NightlySample } from './sampling.js';
 
 /** The subset of summary.json this module reads (report.ts buildSummaryJson). */
 export interface SummaryFile {
@@ -18,6 +19,8 @@ export interface SummaryFile {
   gitSha?: string | null;
   judgeModel?: string;
   startedAt?: string;
+  /** Sampled nightly (sampling.ts); absent when the whole suite ran. */
+  sampling?: NightlySample | null;
   scenarios?: Array<{
     id: string;
     passed: boolean;
@@ -135,6 +138,43 @@ export function formatCost(summary: SummaryFile): string[] {
   return lines;
 }
 
+/** The sampled-run note: which night, N of M, and when the rest are next due. */
+export function formatSampling(summary: SummaryFile): string[] {
+  const s = summary.sampling;
+  if (!s) return [];
+  const day = WEEKDAY_NAMES[s.weekday] ?? `day ${s.weekday}`;
+  const lines = ['### Sampled run', ''];
+  lines.push(
+    `**Sampled**: ${s.run.length} of ${s.total} scenarios ran (${day} ${s.date}, ${s.week}, nightly cap ${s.cap}): ` +
+      `${s.primaries.length} assigned to tonight, ${s.catchUp.length} catch-up, ${s.repeats.length} repeats. ` +
+      'Every scenario in the suite is scheduled at least once per Monday-to-Sunday UTC week (docs/redteam.md "Sampled nightly").',
+    '',
+  );
+  if (!s.historyAvailable)
+    lines.push('No previous results were found, so catch-up for missed nights was off tonight.', '');
+  if (s.catchUp.length)
+    lines.push(`Catch-up (missed earlier this week): ${s.catchUp.map((id) => `\`${id}\``).join(', ')}`, '');
+  if (s.deferred.length)
+    lines.push(
+      `**Deferred** (missed this week, no slot left tonight): ${s.deferred.map((id) => `\`${id}\``).join(', ')}`,
+      '',
+    );
+  const byDate = new Map<string, string[]>();
+  for (const [id, date] of Object.entries(s.nextDue ?? {})) byDate.set(date, [...(byDate.get(date) ?? []), id]);
+  if (byDate.size) {
+    lines.push(`<details><summary>Not run tonight (${s.total - s.run.length}): next due</summary>`, '');
+    lines.push('| Next due | Count | Scenarios |', '|---|---|---|');
+    for (const date of [...byDate.keys()].sort()) {
+      const ids = byDate.get(date)!.sort();
+      lines.push(
+        `| ${WEEKDAY_NAMES[weekdayIndex(date)]} ${date} | ${ids.length} | ${ids.map((id) => `\`${id}\``).join(', ')} |`,
+      );
+    }
+    lines.push('', '</details>', '');
+  }
+  return lines;
+}
+
 export function formatJobSummary(input: JobSummaryInput): string {
   const title = input.title ?? 'Red-team';
   const { summary } = input;
@@ -163,6 +203,7 @@ export function formatJobSummary(input: JobSummaryInput): string {
     typeof summary.totals?.estCostUsd === 'number' ? `cost $${summary.totals.estCostUsd.toFixed(2)}` : null,
   ].filter(Boolean);
   if (meta.length) lines.push(meta.join(', '), '');
+  lines.push(...formatSampling(summary));
   lines.push(...formatCost(summary));
 
   const scenarios = summary.scenarios ?? [];
