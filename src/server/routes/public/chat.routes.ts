@@ -244,7 +244,12 @@ export default function chatRoutes(): Router {
         // chat sessions could not be assigned to a condition for analysis.
         const checkin = sanitizeCheckin(req.body?.checkin);
         // Memory block when opted in, else the screener cue alone (ai-therapist-345).
-        const memoryBlock = await buildParticipantContextBlock(numericUserId);
+        // A text hand-off (continued_from) continues the flagged session
+        // itself, with its transcript and crisis first message: no
+        // "since you last talked" safety follow-up cue (ai-therapist-344).
+        const memoryBlock = await buildParticipantContextBlock(numericUserId, null, {
+          safetyFollowUp: !isContinuation,
+        });
         const proactiveOffering = await resolveProactiveOffering();
         // Psychoeducation retrieval cue (ai-therapist-202): resolved once and
         // persisted like proactive_offering. Typed chat has no general tool
