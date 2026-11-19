@@ -589,8 +589,21 @@ failed and what the participant can do next.`;
  * can answer; the sideband answers any delegation that still happens
  * (sidebandManager, LIVE_RECOVERY_NO_LOOKUP_COMMENTARY).
  */
-export function buildLiveRecoveryInstructions(opts: { languageName?: string | null; crisisLine: string }): string {
+export function buildLiveRecoveryInstructions(opts: {
+  languageName?: string | null;
+  crisisLine: string;
+  /** See hasStudyContact. Omitted means a study session. */
+  studyContact?: boolean;
+}): string {
   const languageLine = opts.languageName ? `Speak ${opts.languageName}.\n` : '';
+  const whoCanAnswer =
+    opts.studyContact === false
+      ? `If they ask a factual question you cannot answer, such as a question about this service, their data or
+privacy, say plainly that you cannot answer it on this call, and that the people who set them up with this
+service can. Do not name a person, a team or a contact detail you have not been given.`
+      : `If they ask a factual question you cannot answer, such as a question about the study, their data,
+privacy or leaving the study, say plainly that you cannot answer it on this call, and that the research
+team can: the team's contact details are on their consent form.`;
   return `You are a warm, steady voice companion. You were just talking with this person and the call was
 cut off by an automated system on the voice service, not by them and not by any person. You are back now.
 ${languageLine}
@@ -622,9 +635,62 @@ What NOT to do:
 Delegation policy: do not delegate. Answer directly and immediately. Nothing matters more right now
 than staying present in this conversation.
 You have no way to look anything up on this call. Never say you are checking, pulling something up or
-looking into it. If they ask something you cannot answer, such as a question about the study, their data,
-privacy or leaving the study, say plainly that you cannot answer it on this call, and that the research
-team can: the team's contact details are on their consent form. Then stay with them.`;
+looking into it. If they are talking about how they feel, their safety, or thoughts of suicide or
+self-harm, never say you cannot answer: respond to them directly and warmly.
+${whoCanAnswer} Then stay with them.`;
+}
+
+/**
+ * Does this session have a research team and a consent form to point to?
+ *
+ * The delegation fallback (sidebandManager) and the recovery prompt tell a
+ * participant who can answer a question the assistant cannot. In the study
+ * that is the research team, whose contact details are on the consent form.
+ * A demo, sandbox or harness session, and a clinical (therapist pilot)
+ * deployment, have neither, and the assistant must not invent a contact:
+ * those get a neutral line instead.
+ */
+export function hasStudyContact(deploymentMode: unknown, isDemoSession: boolean): boolean {
+  const mode = (deploymentMode as { mode?: unknown } | null | undefined)?.mode;
+  return !isDemoSession && mode !== 'clinical';
+}
+
+/**
+ * How long a delegation's backend may be quiet before the sideband treats it
+ * as stalled (sidebandManager, delegation watchdog), by the backend's
+ * reasoning effort.
+ *
+ * A reasoning backend emits nothing while it reasons. Measured 2026-11-18 on
+ * gpt-6.1-terra with the delegation probe (src/redteam/voice/
+ * delegationProbe.ts): the nested stream is `response.created`, then silence,
+ * then the output items in a burst. The longest silence inside a delegation
+ * was 1.0 s at `low` (one delegation with a tool call) and 4.2 s and 2.1 s at
+ * `high` (two delegations, one with a tool call), each of them the wait
+ * before the reasoning item completed. So the quiet period has to grow with
+ * the effort:
+ *
+ *   none, low      12 s  measured; about 12x the longest gap seen
+ *   medium, unset  20 s  not measured (unset runs the model default, medium)
+ *   high           30 s  measured on two short questions; about 7x
+ *   xhigh, max     60 s  not measured
+ *
+ * These are generous on purpose: a false "I could not get that answer" over
+ * an answer that was about to arrive is worse than a few more seconds of
+ * waiting. Re-measure with the probe before running a backend above `low`.
+ */
+export function delegationStallMs(effort: ReasoningEffort | null): number {
+  switch (effort) {
+    case 'none':
+    case 'low':
+      return 12_000;
+    case 'high':
+      return 30_000;
+    case 'xhigh':
+    case 'max':
+      return 60_000;
+    default:
+      return 20_000;
+  }
 }
 
 export interface LiveSessionConfigInput {
@@ -662,6 +728,8 @@ export interface LiveSessionConfigInput {
    */
   recovery?: {
     crisisLine: string;
+    /** See hasStudyContact. Omitted means a study session. */
+    studyContact?: boolean;
     /**
      * The speak-first instruction (shared/recoveryPrompt.ts), placed in
      * `session.input` as a developer message. This is the documented way to
@@ -767,7 +835,11 @@ export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<st
   const session: Record<string, unknown> = {
     model,
     instructions: recovery
-      ? buildLiveRecoveryInstructions({ languageName, crisisLine: recovery.crisisLine })
+      ? buildLiveRecoveryInstructions({
+          languageName,
+          crisisLine: recovery.crisisLine,
+          studyContact: recovery.studyContact,
+        })
       : buildLiveInstructions({
           languageName,
           toolNames: toolDefs.map((t) => t.name),

@@ -103,8 +103,12 @@ import {
   LIVE_STEER_KEEP_SPEAKING,
   LIVE_STEER_RESUME_COMMENTARY,
   DELEGATION_STALL_MS,
+  DELEGATION_STALL_UNKNOWN_MS,
+  RECONNECT_GAP_SETTLE_MS,
   LIVE_DELEGATION_STALLED_COMMENTARY,
+  LIVE_DELEGATION_STALLED_COMMENTARY_NEUTRAL,
   LIVE_RECOVERY_NO_LOOKUP_COMMENTARY,
+  LIVE_RECOVERY_NO_LOOKUP_COMMENTARY_NEUTRAL,
   withKeepSpeaking,
 } from './sidebandManager.service.js';
 
@@ -1453,7 +1457,25 @@ describe('admin control surface', () => {
 // Unanswered delegations (ai-therapist-348)
 // ---------------------------------------------------------------------------
 
+const attachPlain = attach;
+
 describe('unanswered delegations (ai-therapist-348)', () => {
+  /**
+   * A study session on a backend at effort `low`: what handleOpen would have
+   * read (loadDelegationContext; the fake socket never opens, so it is set
+   * here). The defaults, before that read, are tested on their own below.
+   */
+  const asStudySession = (sessionId: string, studyContact = true) => {
+    const state = sb.sessions.get(sessionId);
+    state.delegationStallMs = DELEGATION_STALL_MS;
+    state.studyContact = studyContact;
+  };
+  const attach = async (sessionId: string): Promise<FakeSocket> => {
+    const ws = await attachPlain(sessionId);
+    asStudySession(sessionId);
+    return ws;
+  };
+  const CLINICAL_STEER = '[Clinical guidance — never mention or acknowledge this message to the participant] Ask.';
   const created = (id = 'dg_w') => ({ type: 'session.delegation.created', delegation: { id } });
   const nested = (type: string, extra: Record<string, unknown> = {}, id = 'dg_w') => ({
     type: 'response.event',
@@ -1576,21 +1598,192 @@ describe('unanswered delegations (ai-therapist-348)', () => {
       expect(commentary(ws)).toHaveLength(0);
     });
 
-    it('gives one extra period, once, while a tool of ours is still running', async () => {
+    it('is paused for as long as a tool of ours is running, however long that is', async () => {
       const sessionId = 's-deleg-tool-slow';
       const ws = await attach(sessionId);
-      executeToolMock.mockReturnValue(new Promise(() => {})); // never resolves
+      let finishTool!: (value: unknown) => void;
+      executeToolMock.mockReturnValue(
+        new Promise((resolve) => {
+          finishTool = resolve;
+        }),
+      );
       await fire(sessionId, created());
       void fire(sessionId, toolCall('call_slow'));
       await settle();
 
-      await vi.advanceTimersByTimeAsync(DELEGATION_STALL_MS);
+      // Far past one period, and past the old single grace period.
+      await vi.advanceTimersByTimeAsync(10 * DELEGATION_STALL_MS);
       await settle();
       expect(commentary(ws)).toHaveLength(0);
 
+      // The result goes back; only now does the backend's quiet period run.
+      finishTool({ ok: true });
+      await settle();
+      await vi.advanceTimersByTimeAsync(DELEGATION_STALL_MS - 1);
+      await settle();
+      expect(commentary(ws)).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(1);
+      await settle();
+      expect(commentary(ws)).toHaveLength(1);
+    });
+
+    it('is paused through a second slow tool in the same delegation', async () => {
+      const sessionId = 's-deleg-two-tools';
+      const ws = await attach(sessionId);
+      const finish: Array<(value: unknown) => void> = [];
+      executeToolMock.mockImplementation(() => new Promise((resolve) => finish.push(resolve)));
+      await fire(sessionId, created());
+      void fire(sessionId, toolCall('call_one'));
+      await settle();
+      await vi.advanceTimersByTimeAsync(2 * DELEGATION_STALL_MS);
+      finish[0]({ ok: true });
+      await settle();
+      await fire(sessionId, nested('response.created'));
+      void fire(sessionId, toolCall('call_two'));
+      await settle();
+      await vi.advanceTimersByTimeAsync(3 * DELEGATION_STALL_MS);
+      await settle();
+      expect(commentary(ws)).toHaveLength(0);
+    });
+
+    it('stands down when a clinical steer went out since the delegation started', async () => {
+      for (const send of ['tryInject', 'injectMessage'] as const) {
+        const sessionId = `s-deleg-steered-${send}`;
+        const ws = await attach(sessionId);
+        await fire(sessionId, created());
+        await vi.advanceTimersByTimeAsync(3_000);
+        await sidebandManager[send](sessionId, 'system', CLINICAL_STEER, false);
+
+        await vi.advanceTimersByTimeAsync(10 * DELEGATION_STALL_MS);
+        await settle();
+        // Only the steer-resume commentary may have been sent, never the fallback.
+        expect(commentary(ws).filter((e) => /could not get/.test(String(e.content)))).toHaveLength(0);
+        const record = fallbackBroadcasts().find((c) => c[3] === sessionId);
+        expect(record![2]).toMatchObject({ suppressed: 'clinical_steer', delivered: false });
+      }
+    });
+
+    it('is not held back by a clinical steer from before the delegation, or by a non-clinical append', async () => {
+      const sessionId = 's-deleg-old-steer';
+      const ws = await attach(sessionId);
+      await sidebandManager.tryInject(sessionId, 'system', CLINICAL_STEER, false);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await fire(sessionId, created());
+      await sidebandManager.tryInject(sessionId, 'system', 'The participant closed the worksheet.', false);
+
+      await vi.advanceTimersByTimeAsync(DELEGATION_STALL_MS);
+      await settle();
+      expect(commentary(ws).filter((e) => e.content === LIVE_DELEGATION_STALLED_COMMENTARY)).toHaveLength(1);
+    });
+
+    it('never talks over a participant who is speaking: it waits until they stop', async () => {
+      const sessionId = 's-deleg-talking';
+      const ws = await attach(sessionId);
+      await fire(sessionId, created());
+      await vi.advanceTimersByTimeAsync(DELEGATION_STALL_MS - 200);
+      // They are mid-sentence when the period runs out, and keep going for 3 s.
+      for (let i = 0; i < 7; i++) {
+        await fire(sessionId, userDelta(' still talking', 20_000 + i * 500));
+        await vi.advanceTimersByTimeAsync(500);
+        expect(commentary(ws)).toHaveLength(0);
+      }
+      // Quiet for 1.5 s: now it is said.
+      await vi.advanceTimersByTimeAsync(2_000);
+      await settle();
+      expect(commentary(ws)).toHaveLength(1);
+    });
+
+    it('drops a deferred fallback when the backend answers while the participant is speaking', async () => {
+      const sessionId = 's-deleg-talking-answered';
+      const ws = await attach(sessionId);
+      await fire(sessionId, created());
+      await vi.advanceTimersByTimeAsync(DELEGATION_STALL_MS - 200);
+      await fire(sessionId, userDelta(' wait', 20_000));
+      await vi.advanceTimersByTimeAsync(400);
+      await fire(sessionId, nested('response.created'));
+      await fire(sessionId, nested('response.completed', { response: { id: 'resp_late', usage: {} } }));
+
+      await vi.advanceTimersByTimeAsync(10 * DELEGATION_STALL_MS);
+      await settle();
+      expect(commentary(ws)).toHaveLength(0);
+    });
+
+    it('puts safety first in its wording, and names nobody outside a study session', async () => {
+      for (const text of [LIVE_DELEGATION_STALLED_COMMENTARY, LIVE_DELEGATION_STALLED_COMMENTARY_NEUTRAL]) {
+        expect(text).toMatch(/thoughts of suicide or self-harm, do not say you could not get an answer: respond/);
+        expect(text).toMatch(/Only if they asked a factual question/);
+        expect(text.length).toBeLessThanOrEqual(1600);
+      }
+      expect(LIVE_DELEGATION_STALLED_COMMENTARY_NEUTRAL).not.toMatch(/research team|consent form|study/);
+
+      const sessionId = 's-deleg-neutral';
+      const ws = await attachPlain(sessionId);
+      asStudySession(sessionId, false);
+      await fire(sessionId, created());
+      await vi.advanceTimersByTimeAsync(DELEGATION_STALL_MS);
+      await settle();
+      expect(commentary(ws)[0].content).toBe(LIVE_DELEGATION_STALLED_COMMENTARY_NEUTRAL);
+    });
+
+    it('before the session context is read: the longer quiet period and the wording that names nobody', async () => {
+      const sessionId = 's-deleg-defaults';
+      const ws = await attachPlain(sessionId);
+      await fire(sessionId, created());
+      await vi.advanceTimersByTimeAsync(DELEGATION_STALL_UNKNOWN_MS - 1);
+      expect(commentary(ws)).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(1);
+      await settle();
+      expect(commentary(ws)[0].content).toBe(LIVE_DELEGATION_STALLED_COMMENTARY_NEUTRAL);
+    });
+
+    it('reads the quiet period from the reasoning effort and the wording from the session, when the socket opens', async () => {
+      const open = async (sessionId: string, effort: unknown, deploymentMode: unknown, isDemo: boolean | null) => {
+        await attachPlain(sessionId);
+        getSystemConfigMock.mockResolvedValue({
+          features: {},
+          live_backend_reasoning_effort: effort,
+          deployment_mode: deploymentMode,
+        });
+        queryMock.mockImplementation((sql: string) =>
+          Promise.resolve({ rows: sql.includes('SELECT is_demo') && isDemo !== null ? [{ is_demo: isDemo }] : [] }),
+        );
+        await sb.handleOpen(sessionId, `live_${sessionId}`);
+        const { delegationStallMs, studyContact } = sb.sessions.get(sessionId);
+        return { delegationStallMs, studyContact };
+      };
+      expect(await open('s-ctx-low', 'low', { mode: 'research' }, false)).toEqual({
+        delegationStallMs: 12_000,
+        studyContact: true,
+      });
+      expect(await open('s-ctx-high', 'high', undefined, false)).toEqual({
+        delegationStallMs: 30_000,
+        studyContact: true,
+      });
+      expect(await open('s-ctx-unset', undefined, { mode: 'research' }, true)).toEqual({
+        delegationStallMs: 20_000,
+        studyContact: false,
+      });
+      expect((await open('s-ctx-clinical', 'max', { mode: 'clinical' }, false)).studyContact).toBe(false);
+      expect((await open('s-ctx-no-row', 'low', { mode: 'research' }, null)).studyContact).toBe(false);
+    });
+
+    it('keeps watching an unfinished delegation across a sideband reconnect, and answers none twice', async () => {
+      const sessionId = 's-deleg-reconnect';
+      await attach(sessionId);
+      await fire(sessionId, created('dg_open'));
+      await fire(sessionId, created('dg_done'));
+      await fire(sessionId, nested('response.completed', { response: { id: 'resp_done', usage: {} } }, 'dg_done'));
+      const old = sb.sessions.get(sessionId);
+      sb.clearTimers(old);
+      sb.sessions.delete(sessionId);
+
+      const ws = await attach(sessionId);
+      sb.carryDelegationWatches(sessionId, old, sb.sessions.get(sessionId));
+      await fire(sessionId, created('dg_open')); // a replay must not reset or double it
       await vi.advanceTimersByTimeAsync(DELEGATION_STALL_MS);
       await settle();
       expect(commentary(ws)).toHaveLength(1);
+      expect(fallbackBroadcasts()[0][2]).toMatchObject({ delegationId: 'dg_open' });
     });
 
     it('gives the continuation a full quiet period from when our tool result goes back', async () => {
@@ -1642,11 +1835,15 @@ describe('unanswered delegations (ai-therapist-348)', () => {
       const sessionId = 's-deleg-disconnected';
       const ws = await attach(sessionId);
       await fire(sessionId, created());
+      const watch = sb.sessions.get(sessionId).delegationWatches.get('dg_w');
+      expect(watch.timer).not.toBeNull();
       const disconnected = sidebandManager.disconnect(sessionId, { graceMs: 0 });
 
       await vi.advanceTimersByTimeAsync(10 * DELEGATION_STALL_MS);
       await disconnected;
       await settle();
+      // The timer itself is gone, not merely guarded against when it fires.
+      expect(watch.timer).toBeNull();
       expect(commentary(ws)).toHaveLength(0);
       expect(fallbackRecords()).toHaveLength(0);
     });
@@ -1705,8 +1902,113 @@ describe('unanswered delegations (ai-therapist-348)', () => {
         backendModel: BACKEND_MODEL,
         delegationMode: 'client',
       });
+      asStudySession(sessionId);
       return ws as unknown as FakeSocket;
     }
+
+    it('never tells a participant who is talking about their safety that it cannot answer', () => {
+      for (const text of [LIVE_RECOVERY_NO_LOOKUP_COMMENTARY, LIVE_RECOVERY_NO_LOOKUP_COMMENTARY_NEUTRAL]) {
+        expect(text).toContain(
+          'If they were talking about how they feel, their safety, or thoughts of suicide or self-harm, do not say ' +
+            'you cannot answer: respond to them directly and warmly now, as your instructions say.',
+        );
+        expect(text).toContain('Only if they asked a factual question you cannot answer');
+        expect(text).toMatch(/Either way, stay with them\.$/);
+        expect(text.length).toBeLessThanOrEqual(1600);
+      }
+      // The approved study wording, whole.
+      expect(LIVE_RECOVERY_NO_LOOKUP_COMMENTARY).toBe(
+        'You cannot look anything up on this call, so do not say you are checking or looking into it. If they were ' +
+          'talking about how they feel, their safety, or thoughts of suicide or self-harm, do not say you cannot ' +
+          'answer: respond to them directly and warmly now, as your instructions say. Only if they asked a factual ' +
+          'question you cannot answer, such as about the study, their data, privacy or leaving the study, say ' +
+          'plainly that you cannot answer that on this call, that the research team can, and that the ' +
+          "team's contact details are on their consent form. Either way, stay with them.",
+      );
+      expect(LIVE_RECOVERY_NO_LOOKUP_COMMENTARY_NEUTRAL).not.toMatch(/research team|consent form|study/);
+    });
+
+    it('names nobody outside a study session (demo, sandbox, clinical deployment)', async () => {
+      const sessionId = 's-rec-deleg-neutral';
+      const ws = await attachClientDelegated(sessionId);
+      asStudySession(sessionId, false);
+      await fire(sessionId, created('item_rec_n'));
+      await settle();
+      expect(commentary(ws)[0].content).toBe(LIVE_RECOVERY_NO_LOOKUP_COMMENTARY_NEUTRAL);
+    });
+
+    it('waits for a participant who is still speaking, then answers', async () => {
+      const sessionId = 's-rec-deleg-talking';
+      const ws = await attachClientDelegated(sessionId);
+      await fire(sessionId, userDelta(' what happens to my', 1_000));
+      await fire(sessionId, created('item_rec_t'));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(commentary(ws)).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await settle();
+      expect(commentary(ws).map((e) => e.delegation_id)).toEqual(['item_rec_t']);
+    });
+
+    describe('a sideband that rejoins a recovery session (reconnect, post-deploy reattach)', () => {
+      const open = async (sessionId: string, opts: Record<string, unknown>): Promise<FakeSocket> => {
+        const ws = (await sidebandManager.connect(sessionId, `live_${sessionId}`, 'sk-test', {
+          model: MODEL,
+          backendModel: BACKEND_MODEL,
+          ...opts,
+        })) as unknown as FakeSocket;
+        queryMock.mockImplementation((sql: string) =>
+          Promise.resolve({ rows: sql.includes('SELECT is_demo') ? [{ is_demo: false }] : [] }),
+        );
+        await sb.handleOpen(sessionId, `live_${sessionId}`);
+        ws.send.mockClear();
+        return ws;
+      };
+
+      it('sends the general answer once, with no delegation id: one may have been created while it was away', async () => {
+        const sessionId = 's-rec-gap';
+        const ws = await open(sessionId, { delegationMode: 'client' });
+        await vi.advanceTimersByTimeAsync(RECONNECT_GAP_SETTLE_MS - 1);
+        expect(commentary(ws)).toHaveLength(0);
+        await vi.advanceTimersByTimeAsync(1);
+        await settle();
+        const sent = commentary(ws);
+        expect(sent).toHaveLength(1);
+        expect(sent[0].content).toBe(LIVE_RECOVERY_NO_LOOKUP_COMMENTARY);
+        expect(sent[0].delegation_id).toBeNull();
+        expect(fallbackBroadcasts()[0][2]).toMatchObject({ reason: 'reconnect_gap', delegationId: null });
+
+        await vi.advanceTimersByTimeAsync(60_000);
+        await settle();
+        expect(commentary(ws)).toHaveLength(1);
+      });
+
+      it('waits for the participant to stop speaking first', async () => {
+        const sessionId = 's-rec-gap-talking';
+        const ws = await open(sessionId, { delegationMode: 'client' });
+        await vi.advanceTimersByTimeAsync(RECONNECT_GAP_SETTLE_MS - 300);
+        await fire(sessionId, userDelta(' I was saying', 5_000));
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(commentary(ws)).toHaveLength(0);
+        await vi.advanceTimersByTimeAsync(1_500);
+        await settle();
+        expect(commentary(ws)).toHaveLength(1);
+      });
+
+      it('sends nothing on the opening attach, on an ordinary session, or after the session closed', async () => {
+        const opening = await open('s-rec-gap-opening', { delegationMode: 'client', initialAttach: true });
+        const ordinary = await open('s-rec-gap-ordinary', {});
+        const closed = await open('s-rec-gap-closed', { delegationMode: 'client' });
+        await fire('s-rec-gap-closed', { type: 'session.closed', reason: 'close_requested', usage: { seconds: 5 } });
+        closed.send.mockClear();
+        await vi.advanceTimersByTimeAsync(60_000);
+        await settle();
+        const noLookup = (ws: FakeSocket) =>
+          commentary(ws).filter((e) => /cannot look anything up/.test(String(e.content)));
+        expect(noLookup(opening)).toHaveLength(0);
+        expect(noLookup(ordinary)).toHaveLength(0);
+        expect(noLookup(closed)).toHaveLength(0);
+      });
+    });
 
     it('answers a delegation at once, against its id, with who can answer the question', async () => {
       const sessionId = 's-rec-deleg';

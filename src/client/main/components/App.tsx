@@ -1796,11 +1796,7 @@ export default function App() {
         const name = err instanceof Error ? err.name : String(err);
         // AbortError is a play() overtaken by a newer source, not a refusal.
         if (name === 'AbortError') return;
-        reportClientEvent(
-          'data_channel_error',
-          { stage: 'assistant_audio_play_refused', name, recovery },
-          newSessionId,
-        );
+        reportClientEvent('audio_play_refused', { name, recovery }, newSessionId);
         // Retried on the events that actually unlock sound. On a touch screen
         // that is the END of a touch (pointerup, touchend, click), not
         // pointerdown, which grants no activation there: a single
