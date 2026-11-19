@@ -638,9 +638,7 @@ describe('memory tools: what may be stored, read back and forgotten', () => {
       { memory_id: 3, fact: 'Their sister is called Ana.', session_id: null, created_at: at },
       { memory_id: 4, fact: 'Something they asked to be forgotten.', session_id: null, created_at: at },
     ]);
-    getUserMemorySuppressionsMock.mockResolvedValue([
-      { created_at: at, applied_at: at, suppressed_memory_ids: [4] },
-    ]);
+    getUserMemorySuppressionsMock.mockResolvedValue([{ created_at: at, applied_at: at, suppressed_memory_ids: [4] }]);
     const r = (await run('recall_previous_sessions', {})) as {
       previous_sessions: Array<{ headline?: string; follow_up?: string }>;
       remembered_facts: string[];
@@ -664,9 +662,7 @@ describe('memory tools: what may be stored, read back and forgotten', () => {
       { memory_id: 4, fact: 'Forgotten thing.', created_at: at, similarity: 0.8 },
       { memory_id: 3, fact: 'Their sister is called Ana.', created_at: at, similarity: 0.7 },
     ]);
-    getUserMemorySuppressionsMock.mockResolvedValue([
-      { created_at: at, applied_at: at, suppressed_memory_ids: [4] },
-    ]);
+    getUserMemorySuppressionsMock.mockResolvedValue([{ created_at: at, applied_at: at, suppressed_memory_ids: [4] }]);
     const r = (await run('recall_relevant_history', { query: 'family' })) as { memories: Array<{ fact: string }> };
     expect(r.memories.map((m) => m.fact)).toEqual(['Their sister is called Ana.']);
   });

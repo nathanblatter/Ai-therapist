@@ -44,10 +44,7 @@ const VERY = String.raw`(?:totally |completely |perfectly |always |now )?`;
  *  everything, including the model-written summaries and case profile. */
 const INSTRUCTION_PATTERNS: RegExp[] = [
   // "you agreed to ...", "the assistant promised ..."
-  new RegExp(
-    String.raw`\b${ASSISTANT}\s+(?:have |has |had |already )?(?:agreed|promised|consented|committed)\b`,
-    'i',
-  ),
+  new RegExp(String.raw`\b${ASSISTANT}\s+(?:have |has |had |already )?(?:agreed|promised|consented|committed)\b`, 'i'),
   // A name or a role for the assistant.
   new RegExp(String.raw`\b${ASSISTANT}\b[^.!?]{0,30}\b(?:called|named|go by|goes by|name is|nicknamed)\b`, 'i'),
   new RegExp(String.raw`\b(?:call|name|rename|address)\s+${ASSISTANT}\b`, 'i'),
@@ -122,10 +119,7 @@ const DOSE_FIGURE = /\b\d+(?:\.\d+)?\s?(?:mg|mcg|milligrams?|micrograms?|ml|g|gr
  * and case profile, where only the unmistakable shapes are removed.
  */
 export function screenMemoryText(text: string, kind: 'fact' | 'notes' = 'fact'): MemoryScreenResult {
-  const t = text
-    .replace(/[‘’]/g, "'")
-    .replace(/\s+/g, ' ')
-    .trim();
+  const t = text.replace(/[‘’]/g, "'").replace(/\s+/g, ' ').trim();
   if (!t) return { ok: true };
   if (CREDENTIAL_AS_LICENCE.test(t)) return { ok: false, reason: 'credential_as_licence' };
   if (isPermission(t)) return { ok: false, reason: 'permission' };
@@ -135,8 +129,7 @@ export function screenMemoryText(text: string, kind: 'fact' | 'notes' = 'fact'):
   return { ok: true };
 }
 
-export const isMemorySafe = (text: string, kind: 'fact' | 'notes' = 'fact'): boolean =>
-  screenMemoryText(text, kind).ok;
+export const isMemorySafe = (text: string, kind: 'fact' | 'notes' = 'fact'): boolean => screenMemoryText(text, kind).ok;
 
 /** Keep only the strings that pass the notes screen. */
 export function screenList(items: readonly string[] | undefined | null): string[] {

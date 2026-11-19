@@ -78,7 +78,13 @@ export interface CheckItem {
   text: string;
 }
 
-const PROFILE_LIST_FACETS = ['presenting_concerns', 'recurring_themes', 'stressors', 'support_system', 'values'] as const;
+const PROFILE_LIST_FACETS = [
+  'presenting_concerns',
+  'recurring_themes',
+  'stressors',
+  'support_system',
+  'values',
+] as const;
 
 /** The memory-facing text of a summary: exactly the fields promptContext and
  *  the recall tools read. */
@@ -121,7 +127,9 @@ export function stripProfile(prefix: string, profile: CaseProfile, flagged: Read
     }
   }
   if (Array.isArray(profile.coping_repertoire)) {
-    out.coping_repertoire = profile.coping_repertoire.filter((_, i) => !flagged.has(`${prefix}:coping_repertoire:${i}`));
+    out.coping_repertoire = profile.coping_repertoire.filter(
+      (_, i) => !flagged.has(`${prefix}:coping_repertoire:${i}`),
+    );
   }
   if (flagged.has(`${prefix}:screener_trend:0`)) out.screener_trend = '';
   return out as CaseProfile;

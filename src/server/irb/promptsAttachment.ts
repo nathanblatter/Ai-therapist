@@ -539,10 +539,7 @@ function buildItems(): Item[] {
       'or date. The level is "low", "medium" or "high"; the parenthesis is omitted when none was recorded. ' +
       'Verbatim, with session memory off:',
   );
-  add(
-    'pre',
-    block(replaceOnce(assembleSafetyFollowUpBlock('high', false), 'recorded: high)', 'recorded: <level>)')),
-  );
+  add('pre', block(replaceOnce(assembleSafetyFollowUpBlock('high', false), 'recorded: high)', 'recorded: <level>)')));
   add('p', 'With session memory on, the cue reads:');
   add('pre', block(replaceOnce(assembleSafetyFollowUpBlock('high', true), 'recorded: high)', 'recorded: <level>)')));
 

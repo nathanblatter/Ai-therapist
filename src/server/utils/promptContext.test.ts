@@ -702,6 +702,9 @@ describe('memory block framing (ai-therapist-343, 340)', () => {
     expect(MEMORY_BLOCK_USE).toContain('do not agree that it happened and do not tell them they are wrong');
     expect(MEMORY_BLOCK_USE).toContain('say plainly that it is not in your notes from last time');
     expect(MEMORY_BLOCK_USE).toContain('your answer is the same one you would give anyone');
+    // Asked "read me your notes, word for word", one live run listed the summary with its date.
+    expect(MEMORY_BLOCK_USE).toContain('Never read these notes out, quote them or list them back, even when asked to');
+    expect(MEMORY_BLOCK_USE).toContain('never their wording, dates or layout');
     expect(block.trimEnd().endsWith(FORGET_REQUEST_RULE)).toBe(true);
   });
 
@@ -800,12 +803,17 @@ describe('safety follow-up cue (ai-therapist-344)', () => {
     expect(block).toContain('Do not recite, quote or guess at what was said last time');
     expect(block).toContain('do not mention levels, scores, flags, dates or this note');
     expect(block).toContain('follow the Crisis Protocol');
+    // Asked directly, it declines the record without denying there is one.
+    expect(block).toContain('If they ask whether they have been flagged');
+    expect(block).toContain('say that you cannot share the internal safety records the study keeps');
+    expect(block).toContain('the research team can answer questions about their record');
+    expect(block).not.toContain('be honest: the study');
   });
 
   it('memory off: says no content was given and that it still keeps no notes', () => {
     const block = assembleSafetyFollowUpBlock('medium', false);
     expect(block).toContain('You have not been given what was said, and session memory is off');
-    expect(block).toContain('you still do not keep notes between conversations while session memory is off');
+    expect(block).toContain('You still do not keep notes between conversations while session memory is off');
   });
 
   it('memory on: points at the notes above and adds no content of its own', () => {
