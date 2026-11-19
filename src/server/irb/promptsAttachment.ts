@@ -29,6 +29,7 @@ import {
   buildCheckinBlock,
   buildLeadConversationBlock,
   buildScreenerCadenceBlock,
+  SCREENER_CUE_HEADING,
   buildToolGuidanceBlock,
 } from '../utils/promptContext.js';
 import { buildPhaseTexts } from '../utils/phaseGuidance.js';
@@ -103,7 +104,12 @@ import {
   RECOVERY_INTERIM_SPOKEN_LINE_NO_VOICE,
   buildRecoverySpeakFirstNudge,
 } from '../../shared/recoveryPrompt.js';
-import { LIVE_STEER_KEEP_SPEAKING, LIVE_STEER_RESUME_COMMENTARY } from '../services/sidebandManager.service.js';
+import {
+  LIVE_DELEGATION_STALLED_COMMENTARY,
+  LIVE_RECOVERY_NO_LOOKUP_COMMENTARY,
+  LIVE_STEER_KEEP_SPEAKING,
+  LIVE_STEER_RESUME_COMMENTARY,
+} from '../services/sidebandManager.service.js';
 import { REDACTION_BATCH_INSTRUCTIONS, REDACTION_MODEL, REDACTION_PROMPT } from '../services/redaction.service.js';
 import {
   SESSION_NAME_MODEL,
@@ -302,7 +308,7 @@ function buildItems(): Item[] {
       'it only in the psychoeducation-cue research arm (conditional, see A.6); ' +
       '(6) the leading-the-conversation block, only while that feature flag is on (conditional, A.14); ' +
       '(7) for logged-in returning participants who opted in to session memory, a returning-participant context ' +
-      'block (A.7); and ' +
+      'block (A.7); every other logged-in participant receives the screener-cadence block alone instead (A.7); and ' +
       '(8) a pre-session check-in block, only if the participant filled in the optional check-in form (A.8).',
   );
   add(
@@ -486,6 +492,14 @@ function buildItems(): Item[] {
       .filter((line) => line.startsWith('- '))
       .join('\n'),
   );
+  add(
+    'p',
+    'A logged-in participant whose prompt has no returning-participant block (session memory off, which is the ' +
+      'default, or on with nothing to recall yet) receives the screener-cadence lines on their own, so the PHQ-2 ' +
+      'and GAD-2 are offered to every participant on the same weekly cadence. Nothing else from the block above is ' +
+      'included: no scores, summaries or remembered facts. Verbatim, for a participant who has never taken either:',
+  );
+  add('pre', block(`\n\n${SCREENER_CUE_HEADING}${buildScreenerCadenceBlock([], now)}`));
 
   add('h2', 'A.8 Pre-session check-in block');
   add(
@@ -599,6 +613,14 @@ function buildItems(): Item[] {
   add('pre', buildLiveRecoveryInstructions({ languageName: '<language name>', crisisLine: '<crisis line>' }));
   add(
     'note',
+    'The replacement session has nothing to look information up with. If the voice model nevertheless tries to ' +
+      'look something up, the server answers that attempt with this instruction, once the participant has ' +
+      'stopped speaking. It is also sent once if the server’s monitoring connection to a replacement session ' +
+      'is re-established, in case an attempt was made while it was away:',
+  );
+  add('pre', LIVE_RECOVERY_NO_LOOKUP_COMMENTARY);
+  add(
+    'note',
     'So that the model speaks first, this instruction is placed in the replacement session when it is created and ' +
       'sent again by the server as the session starts; the server re-sends it if the model has not spoken after 4 ' +
       'and 8 seconds. <phone> and <text line> are the configured crisis contact (988 and HOME to 741741 when none ' +
@@ -665,6 +687,15 @@ function buildItems(): Item[] {
       'was owed and the participant is not speaking, the server sends this:',
   );
   add('pre', LIVE_STEER_RESUME_COMMENTARY);
+  add(
+    'note',
+    'When the voice model hands a question to the reasoning model (A.9) and the reasoning model does not come ' +
+      'back (no activity for 12 seconds at the reasoning setting the study runs, longer at higher settings), the ' +
+      'server sends the instruction below so the participant is not left waiting. It is not sent if any guidance ' +
+      'in B.1 to B.5 was delivered since the question was handed over, and it waits until the participant has ' +
+      'stopped speaking:',
+  );
+  add('pre', LIVE_DELEGATION_STALLED_COMMENTARY);
 
   add('h2', 'B.1 Risk-adaptive de-escalation steering');
   add(

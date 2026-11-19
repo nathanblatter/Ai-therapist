@@ -18,6 +18,8 @@ import {
   buildLiveRecoveryInstructions,
   LIVE_CLIENT_EVENTS,
   resolveBackendReasoningEffort,
+  delegationStallMs,
+  hasStudyContact,
 } from './liveSessionConfig.js';
 import type { ToolDefinition } from '../services/toolRegistry.service.js';
 
@@ -468,6 +470,41 @@ describe('recovery session startup input (ai-therapist-293)', () => {
   it('has no startup input at all without a speak-first instruction', () => {
     expect(build({ recovery: { crisisLine: '988' } })).not.toHaveProperty('input');
     expect(build({ recovery: { crisisLine: '988', speakFirst: '   ' } })).not.toHaveProperty('input');
+  });
+});
+
+describe('delegation fallback context (ai-therapist-348)', () => {
+  it('lengthens the quiet period with the reasoning effort; unset runs the model default', () => {
+    expect(delegationStallMs('none')).toBe(12_000);
+    expect(delegationStallMs('low')).toBe(12_000);
+    expect(delegationStallMs('medium')).toBe(20_000);
+    expect(delegationStallMs(null)).toBe(20_000);
+    expect(delegationStallMs('high')).toBe(30_000);
+    expect(delegationStallMs('xhigh')).toBe(60_000);
+    expect(delegationStallMs('max')).toBe(60_000);
+  });
+
+  it('only a real study session has a research team and a consent form to point to', () => {
+    expect(hasStudyContact({ mode: 'research' }, false)).toBe(true);
+    expect(hasStudyContact(undefined, false)).toBe(true); // the row is absent on older databases
+    expect(hasStudyContact({ mode: 'research' }, true)).toBe(false); // demo, sandbox, harness
+    expect(hasStudyContact({ mode: 'clinical' }, false)).toBe(false); // therapist pilot
+  });
+
+  it('the recovery prompt puts safety first and points a factual question to the research team', () => {
+    const study = buildLiveRecoveryInstructions({ languageName: null, crisisLine: '988' }).replace(/\s+/g, ' ');
+    expect(study).toContain('never say you cannot answer: respond to them directly and warmly');
+    expect(study).toContain("the research team can: the team's contact details are on their consent form");
+    expect(build({ recovery: { crisisLine: '988' } }).instructions).toContain('research');
+  });
+
+  it('the recovery prompt names nobody outside a study session', () => {
+    const neutral = buildLiveRecoveryInstructions({ languageName: null, crisisLine: '988', studyContact: false });
+    expect(neutral).not.toMatch(/research team|consent form|the study/);
+    expect(neutral.replace(/\s+/g, ' ')).toContain('Do not name a person, a team or a contact detail');
+    expect(neutral.replace(/\s+/g, ' ')).toContain('never say you cannot answer');
+    const viaConfig = build({ recovery: { crisisLine: '988', studyContact: false } }).instructions as string;
+    expect(viaConfig).not.toMatch(/research team|consent form/);
   });
 });
 

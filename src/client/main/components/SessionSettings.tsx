@@ -248,12 +248,12 @@ export default function SessionSettings({
       />
 
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4"
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-modal-title"
       >
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto animate-fadeIn">
+        <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92dvh] sm:max-h-[90vh] sheet-safe-bottom overflow-y-auto animate-fadeIn">
           {/* Header */}
           <header className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
             <h2 id="settings-modal-title" className="text-lg font-semibold text-gray-800">

@@ -473,6 +473,22 @@ export async function runCrisisPipeline(
         }
 
         console.log(`Session ${turn.sessionId} flagged as ${severity} risk (score: ${risk.riskScore}, ${channel})`);
+      } else if (severity === 'high' && alreadyHigh) {
+        // A high turn that the re-flag rule above let pass. Correct when the
+        // stored high flag came from the participant (the on-call was paged
+        // for it). Not when it is only the recovery-continuation stamp, which
+        // is written at the inherited score, or at 100: nothing said in a
+        // recovery session could then ever flag or page. crisisPaging.service
+        // tells the two apart and applies the usual folding. It also pages for
+        // a turn at the critical level (90 and up) whatever the stored flag,
+        // unless a critical page already went out in the last 15 minutes: an
+        // attempt in progress (95) after "tonight" (85) is not 10 points above
+        // the stored score and would otherwise reach nobody. Fire-and-forget,
+        // like the page in executeHighRiskResponse; no flag, no second
+        // adverse-event draft, no steering change.
+        import('./crisisPaging.service.js')
+          .then((m) => m.pageHighTurnWithoutReflag(turn.sessionId, risk.riskScore, subject ? { subject } : {}))
+          .catch((err) => console.error('[CrisisPipeline] page for a high turn without re-flag failed:', err));
       }
     }
 

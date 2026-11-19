@@ -152,8 +152,12 @@ export const START_ROUTES = {
   chat: '/api/chat/start',
   live: '/api/live/session',
   grok: '/api/grok/session',
-  create: '/api/sessions/create',
 } as const;
+
+/** A start route that was removed because it skipped the consent and limit
+ *  gates (ai-therapist-323). GATE-04 still probes it so it cannot come back
+ *  unnoticed: it must not answer 200 or create a row. */
+export const REMOVED_CREATE_ROUTE = '/api/sessions/create';
 export type StartRoute = keyof typeof START_ROUTES;
 
 export function postStart(agent: Agent, route: StartRoute): PromiseLike<{ status: number; body: unknown }> {

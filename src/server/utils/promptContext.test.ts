@@ -80,6 +80,9 @@ const {
   buildPracticeBlock,
   buildScreenerCadenceBlock,
   assembleMemoryBlock,
+  buildScreenerCueBlock,
+  buildParticipantContextBlock,
+  SCREENER_CUE_HEADING,
 } = await import('./promptContext.js');
 
 describe('assembleMemoryBlock: incomplete summaries (ai-therapist-346)', () => {
@@ -529,5 +532,61 @@ describe('buildLeadConversationBlock (features.lead_conversation_enabled)', () =
     // and points back at the exercise-offering section instead.
     expect(LEAD_CONVERSATION_BLOCK).toContain('decided by the section on offering exercises; follow it');
     expect(LEAD_CONVERSATION_BLOCK).not.toMatch(/start_|find_worksheet|suggest_modality_technique/);
+  });
+});
+
+// ai-therapist-345: the consent form promises the PHQ-2/GAD-2 to every
+// participant, and memory is off by default, so the cadence cue cannot live
+// only inside the memory block.
+describe('screener cue independent of memory (ai-therapist-345)', () => {
+  const now = new Date('2026-11-18T18:00:00Z');
+  const daysAgo = (d: number) => new Date(now.getTime() - d * 24 * 60 * 60 * 1000);
+
+  it('memory OFF: the prompt context is the screener cue alone, with no memory content', async () => {
+    getUserMemoryEnabledMock.mockResolvedValue(false);
+    getUserScaleHistoryMock.mockResolvedValue([{ scale: 'phq2', score: 5, created_at: daysAgo(8), session_id: 's1' }]);
+    getRecentUserSummariesMock.mockResolvedValue([
+      {
+        session_id: 's1',
+        summary: { headline: 'Canary headline' },
+        session_name: null,
+        ended_at: now,
+        created_at: now,
+      },
+    ]);
+    const block = await buildParticipantContextBlock(42);
+    expect(block).toContain(SCREENER_CUE_HEADING);
+    expect(block).toMatch(/PHQ-2 last administered 8 days ago .{1,6} it is due this week/);
+    expect(block).toMatch(/GAD-2 has never been administered/);
+    // Nothing else: no returning-participant heading, no summary, no score.
+    expect(block).not.toContain('## Returning participant');
+    expect(block).not.toContain('Canary headline');
+    expect(block).not.toMatch(/score|5\/6/i);
+    expect(getRecentUserSummariesMock).not.toHaveBeenCalled();
+  });
+
+  it('memory ON with context: the memory block alone, carrying the cadence exactly once', async () => {
+    getUserScaleHistoryMock.mockResolvedValue([{ scale: 'gad2', score: 2, created_at: daysAgo(3), session_id: 's1' }]);
+    const block = await buildParticipantContextBlock(42);
+    expect(block).toContain('## Returning participant');
+    expect(block).not.toContain(SCREENER_CUE_HEADING);
+    expect(block.match(/GAD-2 last administered/g)).toHaveLength(1);
+  });
+
+  it('memory ON but nothing to recall yet (first session): still gets the cue', async () => {
+    const block = await buildParticipantContextBlock(42);
+    expect(block).toContain(SCREENER_CUE_HEADING);
+    expect(block).toMatch(/PHQ-2 has never been administered/);
+  });
+
+  it('anonymous: no cue (no history to keep the once-a-week window on)', async () => {
+    expect(await buildScreenerCueBlock(null)).toBe('');
+    expect(await buildParticipantContextBlock(null)).toBe('');
+    expect(getUserScaleHistoryMock).not.toHaveBeenCalled();
+  });
+
+  it('a lookup failure never blocks a session start', async () => {
+    getUserScaleHistoryMock.mockRejectedValue(new Error('db down'));
+    await expect(buildScreenerCueBlock(42, now)).resolves.toBe('');
   });
 });

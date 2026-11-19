@@ -5,7 +5,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
-const { insertClientEventMock } = vi.hoisted(() => ({ insertClientEventMock: vi.fn() }));
+const { insertClientEventMock, getStudyStatusMock } = vi.hoisted(() => ({
+  insertClientEventMock: vi.fn(),
+  getStudyStatusMock: vi.fn(),
+}));
+
+vi.mock('../../db/studyStatus.queries.js', () => ({ getStudyStatus: getStudyStatusMock }));
 
 vi.mock('../../db/index.js', () => ({
   insertClientEvent: insertClientEventMock,
@@ -33,6 +38,7 @@ function makeApp(sessionUserId: number | null = null) {
 beforeEach(() => {
   vi.clearAllMocks();
   insertClientEventMock.mockResolvedValue(undefined);
+  getStudyStatusMock.mockResolvedValue('active');
 });
 
 describe('capDetail', () => {
@@ -132,6 +138,19 @@ describe('POST /api/client-events', () => {
     expect(insertClientEventMock).toHaveBeenCalledWith(
       expect.objectContaining({ detail: expect.objectContaining({ truncated: true }) }),
     );
+  });
+
+  it("drops a withdrawn participant's beacon: 204, nothing stored (ai-therapist-322)", async () => {
+    getStudyStatusMock.mockResolvedValue('withdrawn');
+    const res = await request(makeApp(9)).post('/api/client-events').send({ kind: 'js_error' });
+    expect(res.status).toBe(204);
+    expect(insertClientEventMock).not.toHaveBeenCalled();
+  });
+
+  it("still stores a paused participant's beacon (pausing is not withdrawing)", async () => {
+    getStudyStatusMock.mockResolvedValue('paused');
+    await request(makeApp(9)).post('/api/client-events').send({ kind: 'js_error' });
+    expect(insertClientEventMock).toHaveBeenCalledWith(expect.objectContaining({ userId: 9 }));
   });
 
   it('still returns 204 when the insert fails (beacons are fire-and-forget)', async () => {

@@ -56,7 +56,6 @@ vi.mock('../db/index.js', () => ({
 const {
   executeGraduatedResponse,
   maybeSteerSession,
-  buildCrisisPageMessage,
   THIRD_PARTY_PAGE_LABEL,
   THIRD_PARTY_GUIDANCE,
   CHAT_THIRD_PARTY_GUIDANCE,
@@ -64,6 +63,15 @@ const {
   HARM_TO_OTHERS_GUIDANCE,
   RISK_TO_OTHERS_PAGE_LABEL,
 } = await import('./crisisIntervention.service.js');
+const { _resetPagingStateForTests, buildRiskPageMessage, PAGE_SUBJECT_LABEL } = await import(
+  './crisisPaging.service.js'
+);
+/** The session page text for a first page (no earlier page, no vendor cut). */
+const buildCrisisPageMessage = (
+  sessionId: string,
+  riskScore: number,
+  subject: 'own' | 'third_party' | 'harm_to_others' = 'own',
+) => buildRiskPageMessage(sessionId, riskScore, { previousPage: null, unpagedCut: null, now: 0 }, subject);
 
 /**
  * Wait until a fire-and-forget spy has been called.
@@ -97,6 +105,16 @@ const waitForCall = async (spy: { mock: { calls: unknown[] } }, times = 1, label
  * budget — kept deliberately generous, since a too-short settle here produces a
  * FALSE PASS (the page hadn't been attempted yet) rather than a visible failure.
  */
+/** Paging-decision rows crisisPaging.service wrote through the mocked pool:
+ *  [session_id, action_type, action_details (parsed), risk_score]. */
+const pagingRows = () =>
+  poolQueryMock.mock.calls
+    .filter((c) => typeof c[0] === 'string' && c[0].includes('INSERT INTO intervention_actions'))
+    .map((c) => {
+      const [sessionId, actionType, details, riskScore] = c[1] as [string, string, string, number | null];
+      return { sessionId, actionType, details: JSON.parse(details) as Record<string, unknown>, riskScore };
+    });
+
 const settle = async () => {
   for (let i = 0; i < 25; i++) await new Promise((r) => setTimeout(r, 2));
 };
@@ -108,6 +126,7 @@ beforeEach(() => {
   logInterventionActionMock.mockResolvedValue(undefined);
   sendCrisisAlertMock.mockResolvedValue(undefined);
   isSandboxAccountSessionMock.mockResolvedValue(false);
+  _resetPagingStateForTests();
 });
 
 describe('executeGraduatedResponse — session timer (ai-therapist-281)', () => {
@@ -180,7 +199,17 @@ describe('executeGraduatedResponse — high-risk paging', () => {
     await executeGraduatedResponse('sess-1', 'high', 90);
     await waitForCall(sendCrisisAlertMock, 1, 'sendCrisisAlert');
     expect(sendCrisisAlertMock).toHaveBeenCalledTimes(1);
-    expect(logInterventionActionMock).toHaveBeenCalledWith('sess-1', 'crisis_sms_alert', { riskScore: 90 });
+    // The page text says WHY: a risk score, as opposed to a vendor cut.
+    expect(String(sendCrisisAlertMock.mock.calls[0][0])).toMatch(/RISK SCORE 90\/100/);
+    await settle();
+    expect(pagingRows()).toEqual([
+      expect.objectContaining({
+        sessionId: 'sess-1',
+        actionType: 'crisis_sms_alert',
+        riskScore: 90,
+        details: expect.objectContaining({ riskScore: 90, paging: expect.objectContaining({ kind: 'risk' }) }),
+      }),
+    ]);
   });
 
   it('suppresses the page only on an affirmative sandbox=true (suppression logged out-of-band)', async () => {
@@ -188,11 +217,13 @@ describe('executeGraduatedResponse — high-risk paging', () => {
     await executeGraduatedResponse('sbx-1', 'high', 90);
     await settle();
     expect(sendCrisisAlertMock).not.toHaveBeenCalled();
-    expect(logInterventionActionMock).toHaveBeenCalledWith(
-      'sbx-1',
-      'external_api_called',
-      expect.objectContaining({ suppressed: 'crisis_sms_alert', reason: 'sandbox' }),
-    );
+    expect(pagingRows()).toEqual([
+      expect.objectContaining({
+        sessionId: 'sbx-1',
+        actionType: 'external_api_called',
+        details: expect.objectContaining({ suppressed: 'crisis_sms_alert', reason: 'sandbox' }),
+      }),
+    ]);
   });
 
   it('FAILS TOWARD PAGING: a throwing sandbox lookup still sends the real page', async () => {
@@ -205,6 +236,7 @@ describe('executeGraduatedResponse — high-risk paging', () => {
   it('a throwing suppression log cannot resurrect or break anything (sandbox path)', async () => {
     isSandboxAccountSessionMock.mockResolvedValue(true);
     logInterventionActionMock.mockRejectedValue(new Error('log down'));
+    poolQueryMock.mockRejectedValue(new Error('log down'));
     await expect(executeGraduatedResponse('sbx-1', 'high', 90)).resolves.toBeUndefined();
     await settle();
     expect(sendCrisisAlertMock).not.toHaveBeenCalled();
@@ -277,18 +309,26 @@ describe('maybeSteerSession — undeliverable steering must be recorded, not sil
 // from the page itself, that the person at risk is not the participant.
 describe('third party at risk — the page and the steer say who is at risk', () => {
   it('the page text names a third party on its first two lines; the ordinary page is unchanged', () => {
-    const ordinary = buildCrisisPageMessage('sess_abcdefghijklmnopqrstuvwxyz', 90);
+    const ordinary = buildCrisisPageMessage('sess_abcdefghijklmnopqrstuvwxyz', 80);
     expect(ordinary).toBe(
-      'URGENT: AI-Therapist HIGH crisis flag\nSession sess_abcdefghijk… — risk 90/100\n' +
+      'URGENT: AI-Therapist HIGH crisis flag\nWhy: RISK SCORE 80/100 from what the participant said.\n' +
+        'Session sess_abcdefghijk...\n' +
         'https://ai-therapist.nathanblatter.com/admin#session=sess_abcdefghijklmnopqrstuvwxyz',
     );
 
-    const lines = buildCrisisPageMessage('sess_abcdefghijklmnopqrstuvwxyz', 90, 'third_party').split('\n');
+    const lines = buildCrisisPageMessage('sess_abcdefghijklmnopqrstuvwxyz', 80, 'third_party').split('\n');
     expect(lines[0]).toBe('URGENT: AI-Therapist HIGH crisis flag (third party)');
     expect(lines[1]).toBe(THIRD_PARTY_PAGE_LABEL);
     expect(lines[1]).toMatch(/someone else in crisis, not their own/);
-    // PHI-free, like the ordinary page: prefix, score, link. Nothing else.
-    expect(lines.slice(2)).toEqual(ordinary.split('\n').slice(1));
+    expect(lines[2]).toBe('Why: RISK SCORE 80/100 from what the participant reported about someone else.');
+    // PHI-free, like the ordinary page: prefix and link. Nothing else.
+    expect(lines.slice(3)).toEqual(ordinary.split('\n').slice(2));
+  });
+
+  it('the paging service and the dashboard use the same label text', () => {
+    expect(PAGE_SUBJECT_LABEL.third_party).toBe(THIRD_PARTY_PAGE_LABEL);
+    expect(PAGE_SUBJECT_LABEL.harm_to_others).toBe(RISK_TO_OTHERS_PAGE_LABEL);
+    expect(PAGE_SUBJECT_LABEL.own).toBeNull();
   });
 
   it('pages with that text and records the subject on the page row and the emergency row', async () => {
@@ -297,10 +337,8 @@ describe('third party at risk — the page and the steer say who is at risk', ()
     await settle();
 
     expect(sendCrisisAlertMock.mock.calls[0][0]).toContain(THIRD_PARTY_PAGE_LABEL);
-    expect(logInterventionActionMock).toHaveBeenCalledWith('sess-3p', 'crisis_sms_alert', {
-      riskScore: 90,
-      subject: 'third_party',
-    });
+    const page = pagingRows().find((r) => r.sessionId === 'sess-3p' && r.actionType === 'crisis_sms_alert');
+    expect(page?.details).toMatchObject({ riskScore: 90, paging: { kind: 'risk', subject: 'third_party' } });
     expect(logInterventionActionMock).toHaveBeenCalledWith(
       'sess-3p',
       'high_risk_emergency',
@@ -370,7 +408,8 @@ describe('third party at risk — the page and the steer say who is at risk', ()
 
     expect(sendCrisisAlertMock.mock.calls[0][0]).not.toContain('THIRD PARTY');
     expect(sidebandManagerMock.injectMessage).toHaveBeenCalledWith(s, 'system', SAFETY_PROTOCOL_GUIDANCE, false);
-    expect(logInterventionActionMock).toHaveBeenCalledWith(s, 'crisis_sms_alert', { riskScore: 90 });
+    const page = pagingRows().find((r) => r.sessionId === s && r.actionType === 'crisis_sms_alert');
+    expect(page?.details).toMatchObject({ riskScore: 90, paging: { kind: 'risk', subject: 'own' } });
     expect(logInterventionActionMock).toHaveBeenCalledWith(s, 'safety_protocol', { riskScore: 90 });
   });
 });
@@ -384,7 +423,8 @@ describe('risk to others — the page says so and the steer de-escalates', () =>
     expect(lines[0]).toBe('URGENT: AI-Therapist HIGH crisis flag (risk to others)');
     expect(lines[1]).toBe(RISK_TO_OTHERS_PAGE_LABEL);
     expect(lines[1]).toMatch(/harming another person, not self-harm/);
-    expect(lines).toHaveLength(4);
+    expect(lines[2]).toBe('Why: RISK SCORE 80/100 from what the participant said.');
+    expect(lines).toHaveLength(5);
   });
 
   it('pages, records the subject, steers with the de-escalation text and does not push the crisis-line card', async () => {
@@ -399,10 +439,8 @@ describe('risk to others — the page says so and the steer de-escalates', () =>
     await settle();
 
     expect(sendCrisisAlertMock.mock.calls[0][0]).toContain(RISK_TO_OTHERS_PAGE_LABEL);
-    expect(logInterventionActionMock).toHaveBeenCalledWith(s, 'crisis_sms_alert', {
-      riskScore: 80,
-      subject: 'harm_to_others',
-    });
+    const page = pagingRows().find((r) => r.sessionId === s && r.actionType === 'crisis_sms_alert');
+    expect(page?.details).toMatchObject({ riskScore: 80, paging: { kind: 'risk', subject: 'harm_to_others' } });
     const injected = sidebandManagerMock.injectMessage.mock.calls.map((c) => c[2] as string);
     expect(injected).toContain(HARM_TO_OTHERS_GUIDANCE);
     expect(injected).not.toContain(SAFETY_PROTOCOL_GUIDANCE);

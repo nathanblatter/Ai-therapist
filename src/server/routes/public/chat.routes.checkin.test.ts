@@ -45,12 +45,16 @@ vi.mock('../../utils/promptContext.js', () => ({
   },
   buildCheckinBlock: () => '',
   buildMemoryBlock: async () => '',
+  buildParticipantContextBlock: async () => '',
   buildToolGuidanceBlock: () => '',
   buildLeadConversationBlock: () => '',
 }));
 vi.mock('../../services/toolRegistry.service.js', () => ({ toolRegistry: { getEnabledToolDefinitions: vi.fn() } }));
 vi.mock('../../middleware/consent.js', () => ({
   requireConsent: (_req: unknown, _res: unknown, next: () => void) => next(),
+}));
+vi.mock('../../middleware/studyStatus.js', () => ({
+  requireActiveStudyStatus: (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
 vi.mock('../../utils/adminBroadcast.js', () => ({
   broadcastAdminEvent: vi.fn().mockResolvedValue(undefined),

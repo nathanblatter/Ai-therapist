@@ -15,6 +15,9 @@ import {
 import { getUserProfileBundle } from '../db/participantProfile.queries.js';
 // Module import (not the barrel) for the same mockability reason as above.
 import { listUserAssignments, type PracticeAssignment } from '../db/practiceAssignments.queries.js';
+// Module import for the same reason: the screener cue reads scale history on
+// its own, independent of the memory bundle.
+import { getUserScaleHistory } from '../db/returningContext.queries.js';
 import { SCALE_MIN_INTERVAL_DAYS, daysSinceScaleAdministered } from './scales.js';
 import { createLogger } from './logger.js';
 
@@ -481,4 +484,50 @@ export async function buildMemoryBlock(userId: number | null, sessionId: string 
     log.error({ err }, `Failed to build memory block for user ${userId}`);
     return '';
   }
+}
+
+/** Heading of the standalone screener block (memory off, or memory on with nothing to recall). */
+export const SCREENER_CUE_HEADING = '## Screeners (PHQ-2 / GAD-2)';
+
+/**
+ * The screener cadence cue on its own, for a participant whose prompt has no
+ * memory block (ai-therapist-345). The consent form says the agent
+ * "periodically administers" the PHQ-2 and GAD-2 to every participant, not
+ * only to those who opted into session memory, and memory is off by default;
+ * while the cue lived only inside the memory block, a default participant was
+ * never offered a screener.
+ *
+ * Carries nothing but the cadence lines: when each screener was last given
+ * and whether it is due. No scores, no summaries, no facts, no other memory
+ * content. The once-a-week window is a consent commitment the server enforces
+ * at persistence for everyone, so telling the model about it is not memory.
+ *
+ * Empty for anonymous sessions: with no account there is no history to window
+ * on, so the model cannot be told a screener is due without risking a second
+ * one inside a week.
+ */
+export async function buildScreenerCueBlock(userId: number | null, now: Date = new Date()): Promise<string> {
+  if (!userId) return '';
+  try {
+    const history = await getUserScaleHistory(userId, 1);
+    return `\n\n${SCREENER_CUE_HEADING}${buildScreenerCadenceBlock(history, now)}`;
+  } catch (err) {
+    log.error({ err }, `Failed to build screener cue for user ${userId}`);
+    return '';
+  }
+}
+
+/**
+ * The per-participant context appended to the base prompt at session start:
+ * the returning-participant memory block when there is one (it carries the
+ * screener cadence lines itself), otherwise the standalone screener cue. Never
+ * both, so the cadence appears exactly once. Every start route calls this
+ * rather than buildMemoryBlock directly.
+ */
+export async function buildParticipantContextBlock(
+  userId: number | null,
+  sessionId: string | null = null,
+): Promise<string> {
+  const memory = await buildMemoryBlock(userId, sessionId);
+  return memory || (await buildScreenerCueBlock(userId));
 }

@@ -27,6 +27,50 @@ or credible thoughts of harming another person):
 No automated message beyond the agent's own protocol is sent to the
 participant — a trained human decides the response.
 
+### What a page means, and when you will NOT get a second one
+
+Every page has a `Why:` line. Read it first (`docs/crisis.md`, "Whether a
+high-severity event becomes an SMS"; code: `crisisPaging.service`):
+
+- **`Why: RISK SCORE n/100`** ("URGENT: ... HIGH crisis flag"): the detector
+  scored something the participant said as high risk. "(ESCALATED)" means the
+  score has since reached 90 or more.
+- **`Why: VENDOR CUT`**: the voice vendor's content filter ended the
+  participant's voice session. The page says what their risk was:
+  - "during a HIGH crisis flag" (URGENT): they were at high risk and lost the
+    assistant mid-conversation.
+  - "NOT a high risk score ... MEDIUM": they were at medium risk. The filter
+    often cuts the assistant's own screening question, so the participant's
+    answer may be what was lost. Review the transcript; do not read "not high"
+    as "no concern".
+  - "could NOT be read": the system could not determine their risk. Treat it
+    as possibly serious.
+  - "the participant has NOT come back": a session was cut and the participant
+    has not said anything in any session for 3 minutes. If it also says "at
+    HIGH risk" it is URGENT.
+- **`Why: VENDOR SESSION LIMIT`**: a voice session reached the vendor's
+  maximum length during a high flag; the app reconnects the participant.
+
+One participant, one incident, few texts. After a page is **delivered**, later
+events for the **same participant** in the next **15 minutes** (the
+acknowledgement target below) that say nothing new or worse are **not texted
+again**. They are recorded and appear on the dashboard: a banner in Live
+Monitoring, and "external api called" rows with a "Not paged: ..." line in
+Crisis Management → Interventions. You are texted again inside the 15 minutes
+only for something new or more serious: a higher level, or the vendor cutting
+a session you were just told is high risk. So after any page, **keep the
+dashboard open for that participant for at least 15 minutes**: silence on the
+phone does not mean nothing further happened.
+
+A vendor cut of a session with **no** risk flag is not texted at the cut. It
+is shown on the dashboard, and you are texted 3 minutes later only if the
+participant has not spoken again. That 3-minute check does not survive a
+server restart or deploy; the dashboard record of the cut does.
+
+A text counts as delivered when the SMS relay accepts it. If your phone was
+off or out of coverage, texts for that participant may have been folded for
+up to 15 minutes: on coming back into coverage, check the dashboard.
+
 **A page that says "third party" (since 2026-11-18).** When the participant
 is reporting that SOMEONE ELSE is in crisis (a roommate, a friend, a family
 member), the page's first line ends `(third party)` and its second line reads

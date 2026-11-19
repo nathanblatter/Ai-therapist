@@ -269,8 +269,8 @@ What the context wake changes downstream:
   safety-protocol steer.
 - In a session **already flagged high**, a context-wake turn scored high does not force the
   safety-protocol steer again (it follows the ordinary 3-minute cooldown) and does not re-flag
-  or re-page unless its score exceeds the stored score by more than 10, the existing re-flag
-  rule. Without this, every short answer in a crisis conversation would restart the
+  unless its score exceeds the stored score by more than 10, the existing re-flag rule. A
+  re-flag asks for a page; whether one is sent is the paging policy's decision (below). Without this, every short answer in a crisis conversation would restart the
   assessment protocol. Keyword turns are unchanged and still force.
 - **A subject label never stands on a turn that also carries the participant's own risk**
   (review of PR 65). The label switches off the suicide ladder, swaps the steer for one that
@@ -520,7 +520,51 @@ Responses are tiered by severity/score:
   stops or cuts a reply, with `severity: null` and a `reason`; see `docs/gpt-live.md`
   section 7.
 - **Medium severity**: real-time dashboard alert plus a work-queue item for the study team.
-  No SMS page.
+  No SMS page for the flag itself; a vendor cut of a medium-risk voice session does page
+  (below).
+- **Whether a high-severity event becomes an SMS** is decided in one place,
+  `crisisPaging.service.ts` (ai-therapist-350; before it, one person in one crisis produced
+  four texts in 2.5 minutes because each recovery session is a new session id and "risk is
+  high" and "the vendor ended the session" paged independently). The rules:
+  - The first page for a participant always goes out at once.
+  - De-duplication is **per participant, across sessions**, for **15 minutes** from the last
+    *delivered* page (the on-call acknowledgement target in `docs/on-call-sop.md`; the window
+    is not extended by folded events). An event that says nothing new or worse than a page
+    already delivered in that window is folded into it: no SMS, an `external_api_called`
+    intervention row with `reason: folded_into_recent_page` and the `action_id` of the page
+    it was folded into, and a `session:page-decision` event to the admin dashboards. Anonymous
+    sessions have no participant to follow, so they de-duplicate per session only.
+  - New, worse information pages immediately inside the window: a higher level (vendor cut at
+    medium, then high, then a high score of 90 or more, the stand-in for "attempt in
+    progress"), or the first vendor termination of a high-risk session.
+  - **A recovery session's high flag is a stamp, not a disclosure.** A recovery session is
+    flagged high the moment it starts, at the score of the participant's last flagged session
+    or at 100 when there is none, so the re-flag rule (severity rise, or more than 10 above
+    the stored score) cannot fire in it and a disclosure there writes no `flagged` event.
+    The pipeline therefore hands every high turn that was not re-flagged to
+    `pageHighTurnWithoutReflag`: it requests a page (same folding as any other) when the
+    session's only high flag is the `recovery_continuation` stamp, and does nothing when a
+    real high flag exists. No flag, adverse-event draft or steer is added by that path.
+  - **Vendor content-filter cut**, by the participant's peak risk in the incident (crisis
+    flags, and the scores the assessor gave their turns in `risk_score_history`, on this
+    session or on the participant's other sessions in the last two hours; the automatic
+    `recovery_continuation` stamp does not count): **high** pages once per incident;
+    **medium** pages once per incident, worded "vendor cut, NOT a high risk score" (the filter
+    typically cuts the screening question itself, so the answer is what was lost); **none**
+    does not page at the cut: it is recorded, shown on the dashboard, and checked again after
+    3 minutes, when the on-call is paged if the participant has not spoken in any session
+    since (the filter can end a session before the last words reach us). That later page
+    states the participant's risk as it is when the check runs: if the turn the filter cut on
+    was scored high after the cut, it is an URGENT page at the high level, not "nothing they
+    said was flagged". The check is an in-process timer: a restart or deploy inside the 3
+    minutes loses it, and only the dashboard record remains. Unreadable risk is treated as
+    medium, not as none.
+  - Only a page known to be delivered absorbs another. Lookup failures, timeouts (2 s) and an
+    undelivered page all fail toward paging.
+  - Every page text has a `Why:` line: `RISK SCORE n/100`, `VENDOR CUT`, or
+    `VENDOR SESSION LIMIT`.
+  Not covered (unchanged): system alerts (assessor outage, spend cap, lost monitoring
+  connection, eval drift) and thread-message alerts, which have their own throttles or none.
 - **Risk score >= 25 (low and up)**: the system injects hidden de-escalation steering
   guidance into the model's context (`session.instructions.append` over the sideband for
   voice sessions; system message for chat). This changes how the agent responds — grounding, safety-checking,

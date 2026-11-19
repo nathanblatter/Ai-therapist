@@ -47,7 +47,7 @@ function LikertRow({ label, value, onChange }: { label: string; value: number | 
               role="radio"
               aria-checked={value === v}
               onClick={() => onChange(v)}
-              className={`w-10 h-10 rounded-full text-sm font-medium border transition-colors ${
+              className={`w-11 h-11 sm:w-10 sm:h-10 rounded-full text-sm font-medium border transition-colors ${
                 value === v
                   ? 'bg-blue-600 text-white border-blue-600'
                   : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'
@@ -220,7 +220,7 @@ export default function PostSessionScreen({ data, onDismiss }: PostSessionScreen
   };
 
   return (
-    <div className="flex items-center justify-center h-full px-4 overflow-y-auto py-8">
+    <div className="flex items-center justify-center h-full sm:px-4 overflow-y-auto py-4 sm:py-8">
       <div className="w-full max-w-xl space-y-6">
         <div className="text-center">
           <h2 className="text-2xl font-semibold text-gray-800">Session complete</h2>
@@ -268,7 +268,10 @@ export default function PostSessionScreen({ data, onDismiss }: PostSessionScreen
               </div>
               {submitError && <p className="text-sm text-red-600 mb-2">{submitError}</p>}
               <div className="flex justify-end gap-3 mt-4">
-                <button onClick={onDismiss} className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2">
+                <button
+                  onClick={onDismiss}
+                  className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2 min-h-[44px]"
+                >
                   Skip
                 </button>
                 <button
@@ -276,7 +279,7 @@ export default function PostSessionScreen({ data, onDismiss }: PostSessionScreen
                   disabled={
                     submitting || (helpfulness === null && ease === null && wouldReturn === null && !comments.trim())
                   }
-                  className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-5 py-2.5 rounded-lg"
+                  className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-5 py-2.5 min-h-[44px] rounded-lg"
                 >
                   {submitting ? 'Submitting...' : 'Submit feedback'}
                 </button>
@@ -286,7 +289,7 @@ export default function PostSessionScreen({ data, onDismiss }: PostSessionScreen
         </div>
 
         <div className="text-center">
-          <button onClick={onDismiss} className="text-sm text-blue-600 hover:underline">
+          <button onClick={onDismiss} className="text-sm text-blue-600 hover:underline min-h-[44px] px-2">
             Return to start
           </button>
         </div>
