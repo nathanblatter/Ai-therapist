@@ -184,6 +184,17 @@ export interface PageDecision {
   foldedIntoSessionId?: string;
 }
 
+/** What one paging channel did with a page, as stored on the page's row. */
+interface ChannelRecord {
+  channel: string;
+  ok: boolean;
+  error: string | null;
+  messageIds: string[];
+  parts: number;
+  partsAccepted: number;
+  ms: number;
+}
+
 /** A page this participant's on-call has (or is about to have) received. */
 interface PriorPage {
   actionId: number | null;
@@ -745,13 +756,40 @@ async function send(
   };
   ledger.set(key, [...(ledger.get(key) ?? []), entry]);
 
+  // Every configured channel at once (iMessage bridge, AWS SMS). DELIVERED,
+  // for the folding rule, means at least one channel accepted the page: the
+  // on-call has it, so a repeat may be folded. A page no channel accepted
+  // absorbs nothing, exactly as an undelivered page did with one channel.
   let ok = false;
+  let channels: ChannelRecord[] = [];
+  let skipped: string | null = null;
   try {
-    const { sendCrisisAlert } = await import('./crisisAlert.service.js');
-    ok = (await sendCrisisAlert(message)) === true;
+    const { sendCrisisAlertDetailed } = await import('./crisisAlert.service.js');
+    const delivery = await sendCrisisAlertDetailed(message);
+    ok = delivery?.delivered === true;
+    skipped = delivery?.skipped ?? null;
+    channels = (delivery?.channels ?? []).map((c) => ({
+      channel: c.channel,
+      ok: c.ok === true,
+      error: c.error ?? null,
+      messageIds: c.messageIds ?? [],
+      parts: c.parts,
+      partsAccepted: c.partsAccepted,
+      ms: c.ms,
+    }));
   } catch (err) {
     log.error({ err }, `[paging] page failed for ${sessionId.substring(0, 12)}...`);
   }
+  const failed = channels.filter((c) => !c.ok);
+  const channelNote =
+    failed.length === 0
+      ? ''
+      : ok
+        ? ` Delivered by ${channels
+            .filter((c) => c.ok)
+            .map((c) => c.channel)
+            .join(' + ')}; FAILED on ${failed.map((c) => `${c.channel} (${c.error ?? 'error'})`).join(', ')}.`
+        : ` Every paging channel failed: ${failed.map((c) => `${c.channel} (${c.error ?? 'error'})`).join(', ')}.`;
   entry.settled = true;
   entry.delivered = ok;
   // An undelivered page absorbs nothing: hand the claim back.
@@ -774,7 +812,12 @@ async function send(
         riskScore: request.riskScore,
         followsActionId: previousPage?.actionId ?? null,
         ...request.facts,
-        summary: `${ok ? 'Paged on-call' : 'Page attempted, not delivered'}: ${request.summary}`,
+        // Per channel: attempted, accepted or not, provider message ids. No
+        // phone number and no message text. Empty when nothing was attempted
+        // (`channelsSkipped` says why: paging disabled, or not configured).
+        channels,
+        channelsSkipped: skipped,
+        summary: `${ok ? 'Paged on-call' : 'Page attempted, not delivered'}: ${request.summary}${channelNote}`,
       },
     },
     request.riskScore,
@@ -783,8 +826,12 @@ async function send(
   resolveRecorded(actionId);
 
   const decision: PageDecision = { outcome: ok ? 'paged' : 'not_delivered', kind, level, actionId };
-  if (kind !== 'risk')
-    notifyAdmins(request, decision, `${ok ? 'On-call paged' : 'Page not delivered'}: ${request.summary}`);
+  // A channel that failed is shown on the dashboards for every kind of page,
+  // risk pages included: with all of them down nobody was texted, and with
+  // one down the redundancy is gone. (A risk page that went out cleanly has
+  // its own dashboard alert and needs no notice here.)
+  if (kind !== 'risk' || failed.length > 0)
+    notifyAdmins(request, decision, `${ok ? 'On-call paged' : 'Page NOT delivered'}: ${request.summary}${channelNote}`);
   return decision;
 }
 

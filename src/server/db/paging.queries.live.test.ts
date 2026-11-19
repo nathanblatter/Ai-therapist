@@ -34,7 +34,9 @@ vi.mock('../config/db.js', () => ({
   },
 }));
 // The pager is a mock in every test of this file: nothing here can text anyone.
-vi.mock('../services/crisisAlert.service.js', () => ({ sendCrisisAlert: sendCrisisAlertMock }));
+vi.mock('../services/crisisAlert.service.js', async () =>
+  (await import('../testing/alertMock.js')).alertModuleMock(sendCrisisAlertMock),
+);
 
 const {
   getIncidentChainSessionIds,

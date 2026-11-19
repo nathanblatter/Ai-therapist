@@ -16,9 +16,10 @@ When a participant's message trips the imminent-risk detector
    immediate safety, and surfaces 988, the Crisis Text Line, and CAPS.
 2. The **admin dashboard** shows a real-time crisis alert to every monitoring
    researcher (Crisis Management view).
-3. The **on-call phone is paged by SMS/iMessage** with a link to the session
+3. The **on-call phone is paged by text** with a link to the session
    (`crisisAlert.service`; destination phone is admin-configurable in System
-   Config → crisis_alert, so rotation requires no redeploy).
+   Config → crisis_alert, so rotation requires no redeploy). See "How you are
+   reached" below.
 4. Session monitoring frequency is elevated; every event and system action is
    logged (`crisis_events`, intervention log).
 
@@ -79,9 +80,46 @@ session the app opens after a vendor cut) pages like any other and is on the
 record as a crisis flag of its own, with its score; if the incident had no
 adverse-event draft yet, one is drafted then.
 
-A text counts as delivered when the SMS relay accepts it. If your phone was
-off or out of coverage, texts for that participant may have been folded for
-up to 15 minutes: on coming back into coverage, check the dashboard.
+A text counts as delivered when at least one channel accepts it (see below).
+"Accepted" means the bridge or AWS took the message; neither can confirm it
+reached your handset.
+If your phone was off or out of coverage, texts for that participant may have
+been folded for up to 15 minutes: on coming back into coverage, check the
+dashboard.
+
+### How you are reached, and what to do if texts stop
+
+A page can reach your phone two ways, and the system uses every way that is
+configured, at the same time (`docs/on-call-paging-setup.md`):
+
+- **iMessage**, from the study's bridge (a Mac mini). This is the original
+  channel.
+- **A carrier SMS from the study's toll-free number**, through AWS, once the
+  account owner has set it up and switched it on. **[Not yet active: until the
+  toll-free number is verified and the two `CRISIS_SMS_*` settings are in
+  place, pages arrive by iMessage only.]**
+
+With both on, **you get each page twice, once per channel**. That is intended:
+either one failing still reaches you. The two say the same thing. The SMS copy
+of a long page arrives as numbered parts, "(1/2)", "(2/2)"; read all parts. If
+a part is missing, open the dashboard rather than wait for it. Save both
+senders in your contacts and exempt them from Do Not Disturb. **Do not reply
+STOP to the toll-free number**: that opts your phone out and the SMS channel
+stops reaching you until the coordinator has it reversed.
+
+If texts stop, or you get a page on only one channel:
+
+1. **You are still on call.** Open the dashboard (Live Monitoring and Crisis
+   Management) and keep it open; it shows every alert whether or not a text
+   went out. A red "Page NOT delivered" notice there means no channel accepted
+   that page: treat the session as if you had been paged.
+2. Tell the study coordinator at once (contact card, section 7). One channel
+   missing is a degraded pager, not a broken one, but it is fixed the same day.
+3. The coordinator runs the test page (`npm run page:test`, see section 6) to
+   see which channel is failing, and fixes it from the table in
+   `docs/on-call-paging-setup.md` ("If texts stop").
+4. If neither channel can be restored quickly, the coordinator and PI decide
+   whether to pause new sessions (quiet-hours switch) until paging works.
 
 ## 2. On-call rotation
 
@@ -89,7 +127,10 @@ up to 15 minutes: on coming back into coverage, check the dashboard.
   period. [Roster + rotation length: weekly? — decide with the RA team.]
 - The rotation is changed by updating the on-call phone in System Config →
   crisis_alert (researcher role required). The change takes effect on the next
-  alert; verify by sending a test page after each handoff.
+  alert and moves both channels; verify by sending a test page after each
+  handoff (`npm run page:test` on the app host, section 6). Enter the phone in
+  international form (`+1...`): the SMS channel refuses anything it cannot
+  read as a phone number.
 - On-call researchers must have completed [CITI human-subjects training +
   the crisis-response walkthrough with the PI/clinical support].
 
@@ -187,6 +228,18 @@ On acknowledging a page:
   repeats hourly until it is fixed.
 - After every deploy touching the crisis path: run the red-team smoke suite
   (CI does this automatically) and send one manual test page.
+- **Test page.** `docker compose exec app npm run page:test` on the app host
+  sends one text per configured channel, each beginning "TEST PAGE" and naming
+  its channel, and prints which channels accepted it. It is not a participant
+  event and needs no response beyond confirming to the coordinator that every
+  expected text arrived. It can only be run from a shell on the app host.
+- **Paging failures are shown, not paged** (there is no second pager to report
+  a broken one). When every channel refuses a page the server logs
+  `ON-CALL PAGE NOT DELIVERED`, sends `system:on-call-paging-failed` to the
+  researcher room, and a participant page shows "Page NOT delivered" in Live
+  Monitoring. When one of two channels fails the page still goes out and the
+  same places say paging is degraded. Each page's record lists what every
+  channel did (Crisis Management → Interventions, `paging.channels`).
 
 ## 7. Contact card
 

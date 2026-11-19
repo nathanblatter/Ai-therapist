@@ -200,7 +200,9 @@ vi.mock('../db/paging.queries.js', () => ({
     },
   ),
 }));
-vi.mock('./crisisAlert.service.js', () => ({ sendCrisisAlert: sendCrisisAlertMock }));
+vi.mock('./crisisAlert.service.js', async () =>
+  (await import('../testing/alertMock.js')).alertModuleMock(sendCrisisAlertMock),
+);
 vi.mock('./suppression.js', () => ({ sessionSuppressesCrisisPaging: isSandboxMock }));
 vi.mock('../utils/adminBroadcast.js', () => ({ broadcastAdminEventForSession: broadcastMock }));
 
