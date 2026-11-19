@@ -968,7 +968,9 @@ is deleted (`deleteUser`), found by the participant recorded at session start
 and by the participant's session ids read just before (the delete sets
 `therapy_sessions.user_id` to NULL); a session an admin deletes
 (`deleteSession`); and, after each content wipe, every kept turn from before the
-wipe's cutoff (the check-in, which the wipe does not touch, stays). If such a
+wipe's cutoff (the check-in, which the wipe does not touch, stays; a session
+that lost turns is marked partial, because an open session is not yet redacted
+and keeps its stored text through the wipe). If such a
 session goes on (a voice call still open), its later turns start a new partial
 record, as after a restart. The demo-account answer
 (`utils/sessionAccounts.ts`) is forgotten 2 minutes after the session ends. Kept
