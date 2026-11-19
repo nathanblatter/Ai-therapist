@@ -249,17 +249,26 @@ export function forgetParticipantTurns(
 /**
  * A content wipe nulled every stored message created before `cutoffMs`: drop
  * the remembered turns from before it too, so no copy outlives the stored
- * text. The check-in is kept (the wipe does not touch it), and so is whether
- * the session started here: the database lost the same turns, so the copy is
- * as complete as the record. Returns how many turns were dropped. Never throws.
+ * text. The check-in is kept (the wipe does not touch it).
+ *
+ * A session that lost turns here is no longer complete (PR #91 review): the
+ * wipe only nulls REDACTED messages by default, and a session is redacted when
+ * it ends, so a session still open keeps its stored text while this copy loses
+ * it. Scoring such a session from this copy as if complete would score a turn
+ * on less context than it had, outside the context-blind rule; marked partial,
+ * the stored history is preferred when it was read, and the context-blind rule
+ * applies when it was not (fails toward paging). Returns how many turns were
+ * dropped. Never throws.
  */
 export function forgetTurnsBefore(cutoffMs: number): number {
   if (!Number.isFinite(cutoffMs)) return 0;
   let dropped = 0;
   for (const record of sessions.values()) {
     const kept = record.turns.filter((t) => t.at >= cutoffMs);
+    if (kept.length === record.turns.length) continue;
     dropped += record.turns.length - kept.length;
     record.turns = kept;
+    record.startedHere = false;
   }
   return dropped;
 }

@@ -204,9 +204,11 @@ describe('dropped at once', () => {
     expect(recentTurns('a1')).toBeNull();
   });
 
-  it('a content wipe: the turns before its cutoff; the check-in and completeness stay', () => {
+  it('a content wipe: the turns before its cutoff; the check-in stays, and a session that lost turns is partial', () => {
     const t0 = Date.now();
     rememberSessionStart('s1', { topic: 'sleep' });
+    rememberSessionStart('s3', null);
+    rememberTurn('s3', 'user', 'all recent', { at: t0 - 60_000 });
     rememberTurn('s1', 'user', 'old', { at: t0 - 3 * 3_600_000 });
     rememberTurn('s1', 'assistant', 'at the cutoff', { at: t0 - 3_600_000 });
     rememberTurn('s1', 'user', 'new', { at: t0 - 60_000 });
@@ -215,9 +217,15 @@ describe('dropped at once', () => {
     expect(forgetTurnsBefore(t0 - 3_600_000)).toBe(2);
 
     expect(contents('s1')).toEqual(['assistant:at the cutoff', 'user:new']);
-    expect(recentTurns('s1')?.complete).toBe(true);
+    // An open session keeps its stored (unredacted) text through the wipe, so
+    // this copy is now short of it: partial, so the pipeline prefers the
+    // stored history or applies the context-blind rule (PR #91 review).
+    expect(recentTurns('s1')?.complete).toBe(false);
     expect(rememberedCheckin('s1')).toBe('sleep');
     expect(contents('s2')).toEqual([]);
+    // A session that lost nothing stays complete.
+    expect(contents('s3')).toEqual(['user:all recent']);
+    expect(recentTurns('s3')?.complete).toBe(true);
   });
 
   it('a content wipe with no usable cutoff drops nothing', () => {
