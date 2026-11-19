@@ -52,6 +52,11 @@ interface Features {
   /** Participant-facing reflections view (ai-therapist-204). Default off;
    *  changes what participants see, so enable only with IRB sign-off. */
   participant_reflections_enabled?: boolean;
+  /** Voice sessions that end without usable participant audio also get an
+   *  automatic technical_failure row on the Study Ops deviation list
+   *  (ai-therapist-372). Default off: that list feeds the IRB packet and its
+   *  auto rows cannot be deleted. The server logs the problem either way. */
+  participant_audio_auto_deviation?: boolean;
 }
 
 interface AiToolInfo {
@@ -1330,6 +1335,24 @@ export default function SystemConfig() {
               type="checkbox"
               checked={features.session_recording_enabled === true}
               onChange={(e) => updateFeatures('session_recording_enabled', e.target.checked)}
+              className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
+            />
+          </div>
+
+          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            <div>
+              <p className="font-medium text-gray-900">Flag lost participant audio as a protocol deviation</p>
+              <p className="text-xs text-gray-600">
+                When a voice session ends with its participant track missing, much shorter than the session, or silent
+                while the mic was on, add an automatic technical-failure row to the Study Ops deviation list. That list
+                feeds the IRB packet and automatic rows cannot be deleted. Off by default; the server log records the
+                problem either way.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={features.participant_audio_auto_deviation === true}
+              onChange={(e) => updateFeatures('participant_audio_auto_deviation', e.target.checked)}
               className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
             />
           </div>

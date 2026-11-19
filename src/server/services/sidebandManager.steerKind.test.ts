@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 // modules that send them. This file holds the two together with the REAL
 // texts, so rewording a steer fails here instead of silently changing which
 // steers stand the fallback down.
-import { clinicalSteerKind, withKeepSpeaking } from './sidebandManager.service.js';
+import { clinicalSteerKind, LIVE_STEER_KEEP_SPEAKING, withKeepSpeaking } from './sidebandManager.service.js';
 import {
   RISK_CHECK_REQUIRED_GUIDANCE,
   steeringGuidance,
@@ -15,7 +15,10 @@ import {
   CRISIS_WIND_DOWN_GUIDANCE,
   THIRD_PARTY_GUIDANCE,
   HARM_TO_OTHERS_GUIDANCE,
+  KEEP_SPEAKING_RESERVE,
+  fitsWithHeadsUp,
 } from './crisisIntervention.service.js';
+import { VOICE_HEADS_UP_GUIDANCE } from './voiceHeadsUp.service.js';
 import { REALTIME_MINOR_GUIDANCE, REALTIME_MINOR_SPEAK_NOW } from './minorSafeguard.service.js';
 import {
   crisisTimeNotice,
@@ -69,5 +72,18 @@ describe('clinicalSteerKind', () => {
 
   it('an unknown steer with the marker fails toward safety', () => {
     expect(clinicalSteerKind('[Clinical guidance — never mention this] Something new.')).toBe('risk');
+  });
+});
+
+describe('the voice heads-up attached to a steer', () => {
+  it('reserves room for the real keep-speaking line', () => {
+    expect(KEEP_SPEAKING_RESERVE).toBeGreaterThanOrEqual(LIVE_STEER_KEEP_SPEAKING.length + 1);
+  });
+
+  it('is never cut off when attached: the delivered text still ends with it, then the keep-speaking line', () => {
+    const steer = steeringGuidance(64, 'medium');
+    expect(fitsWithHeadsUp(steer)).toBe(true);
+    const delivered = withKeepSpeaking(`${steer} ${VOICE_HEADS_UP_GUIDANCE}`);
+    expect(delivered).toBe(`${steer} ${VOICE_HEADS_UP_GUIDANCE} ${LIVE_STEER_KEEP_SPEAKING}`);
   });
 });

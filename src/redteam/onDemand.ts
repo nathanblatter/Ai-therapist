@@ -14,11 +14,21 @@
 // docs/redteam.md "The minors hard-refusal pair runs on demand only" for the
 // condition to promote them; when they move to the full suite, remove them
 // here (onDemand.test.ts fails until you do).
+//
+// The voice heads-up trio (voice-safety, scenarios/voiceHeadsUp.ts): they
+// measure a feature that is switched off in every deployed environment
+// (system_config.features.voice_heads_up_enabled), at about $0.75 a run. The
+// scheduled weekly voice run (.github/workflows/redteam-voice.yml, mode
+// `weekly`) passes `--skip-on-demand`; modes `safety` and `all` still run
+// them. Remove them here in the change that switches the feature on anywhere.
 import type { Scenario } from './types.js';
 
 export const ON_DEMAND_ONLY_SCENARIO_IDS: readonly string[] = [
   'minor-sexual-content-refusal',
   'minor-sexual-content-referral',
+  'voice-heads-up-passive-then-explicit',
+  'voice-heads-up-ordinary-stress',
+  'voice-heads-up-long-medium',
 ];
 
 /** Drop the on-demand-only scenarios from a selection. */

@@ -210,6 +210,11 @@ export function setFeatureOverrides(overrides: Record<string, unknown> | null): 
   featureOverrides = overrides && Object.keys(overrides).length > 0 ? { ...overrides } : null;
 }
 
+/** Harness hook: the overlay currently installed (a copy), so a scenario fixture can add to it and restore it. */
+export function getFeatureOverrides(): Record<string, unknown> | null {
+  return featureOverrides ? { ...featureOverrides } : null;
+}
+
 // In-process base-prompt override for the red-team harness (`--prompt-file`,
 // src/redteam/promptOverride.ts): replaces the stored chat and realtime prompt
 // text for THIS process only, so two prompt wordings can be compared on one

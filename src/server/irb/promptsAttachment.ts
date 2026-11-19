@@ -117,6 +117,7 @@ import {
   VOICE_RETURN_FAILED_NOTICE,
 } from '../../shared/textHandoff.js';
 import { NARROW_TURN_DOCUMENTATION_PROMPT } from '../services/chatTherapy.service.js';
+import { VOICE_HEADS_UP_GUIDANCE, VOICE_HEADS_UP_STEER } from '../services/voiceHeadsUp.service.js';
 import {
   RECOVERY_INTERIM_SPOKEN_LINE,
   RECOVERY_INTERIM_SPOKEN_LINE_NO_VOICE,
@@ -898,6 +899,24 @@ function buildItems(): Item[] {
   add('pre', steeringGuidance(ph('<risk score>'), 'medium'));
   add('h3', 'Voice sessions — high severity');
   add('pre', steeringGuidance(ph('<risk score>'), 'high'));
+  add('h3', 'Voice sessions — one-time notice that the conversation continues in writing (off unless enabled)');
+  add(
+    'p',
+    'Only when the study team switches it on (system_config features.voice_heads_up_enabled; it is off by ' +
+      'default) and typed chat is available. The voice service ends a call on its own when a participant says ' +
+      'something explicitly suicidal, and the conversation then continues in typed chat. So that the voice does ' +
+      'not simply vanish, the first time a voice session scores medium or high this sentence is added to the end ' +
+      'of the guidance above, asking the model to say once, inside its reply, that the conversation continues in ' +
+      'writing if the voice drops. It is repeated at most once, only if the model did not say it; the server ' +
+      'checks what the model actually said.',
+  );
+  add('pre', VOICE_HEADS_UP_GUIDANCE);
+  add(
+    'note',
+    'When the guidance above is not sent on that turn (it was sent less than three minutes earlier) or would not ' +
+      'fit with it in one instruction, the sentence is sent on its own as:',
+  );
+  add('pre', VOICE_HEADS_UP_STEER);
   add('h3', 'Typed-chat sessions');
   add('pre', buildChatSteeringGuidance(ph('<risk score>'), 'medium'));
 
