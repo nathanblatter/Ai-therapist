@@ -21,6 +21,12 @@ const log = createLogger('clientEventsRoutes');
 
 export const CLIENT_EVENT_KINDS = [
   'js_error',
+  // End of a voice session: the participant's mute/unmute history for the
+  // assistant's voice on their own device, as offsets in ms from the start of
+  // the session's audio, plus muted and total ms and how many crisis signals
+  // arrived while muted. Numbers only. Playback only: the recording, the
+  // transcript and the model are unaffected by mute (lib/speakerMute.ts).
+  'speaker_timeline',
   'unhandled_rejection',
   'webrtc_failed',
   'webrtc_disconnected',

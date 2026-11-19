@@ -1057,6 +1057,70 @@ turn(s) persisted immediately before it (no assistant turn between, within
 8 of 8 explicit-intent and attempt disclosures scored high. The 900 ms gap
 itself is unchanged.
 
+### Muting the assistant's voice (speaker button, 2026-11-19)
+
+A voice session has a speaker button next to the mic button
+(`SessionControls.tsx`, `AgentVoiceMute.tsx`; rules in `lib/speakerMute.ts`).
+It silences the assistant **on the participant's device only**. It is a
+toggle button (`aria-pressed`, label "Mute the assistant's voice", 48 px).
+
+Where the mute is applied, and why the recording is safe:
+
+- **GPT-Live:** `audio.muted` on the `<audio>` element that plays the remote
+  WebRTC track. The recording tee (`startMixedTee`) reads the remote
+  `MediaStream` itself, not the element, so `mixed.wav` keeps the assistant's
+  voice while muted. The remote track is never disabled and the tee's source
+  is never touched. `muted`, not `volume`: iOS Safari ignores `volume` on media
+  elements. The element keeps playing while muted, so unmuting needs no new
+  `play()` and no new user gesture (if the element was paused because autoplay
+  had been refused, the unmute tap also retries `play()`).
+- **Grok:** an output `GainNode` between the playback chain and
+  `ctx.destination`, after the `MediaStreamAudioDestinationNode` that feeds the
+  orb and the tee (`createPlaybackChain` in `grokVoiceClient.ts`). Playback
+  already runs through Web Audio there, so a gain works on iOS too, and the
+  context keeps running at gain 0.
+- Nothing is sent to the model, and the server-side transcript is unchanged.
+  Echo cancellation: with the voice muted there is nothing to echo, so it can
+  only get easier; the one theoretical cost is the canceller re-adapting for a
+  moment after an unmute.
+
+So the session does not seem frozen while muted: the button turns amber with a
+crossed speaker, a status line under the orb says so and offers "Tap to hear
+the assistant", the orb still pulses with the assistant's audio (it reads the
+stream, not the speakers), and the captions (the chat log, which is always on
+in voice) keep showing what the assistant says.
+
+Reset rules: every session the participant starts begins unmuted, including a
+return to voice from a text hand-off. A text hand-off chat has no voice, so the
+control is gone there. The one exception is a recovery voice session after a
+vendor cut (only used where typed chat is off): it continues the same
+conversation without the participant touching anything, so it keeps the mute
+they had at the cut (`speakerMutedAtStart`).
+
+**Crisis rule: nothing unmutes on the participant's behalf.** A participant who
+muted may have done so because someone came into the room (the base prompt
+already treats a second voice as a privacy concern), and saying crisis content
+out loud then could expose them; they are also, by definition, looking at the
+screen. So `session:crisis-emergency` and the crisis messages leave the mute as
+it is; the resource card opens exactly as before, with a pinned "Tap to hear
+the assistant" prompt at its top while muted. The browser's own spoken lines
+at a vendor cut (the recovery line, the hand-off bridge and the "could not
+continue" line, `startInterimSpeech`) are skipped when the voice was muted at
+the cut (`mayBrowserSpeakAtCut`). The hold screen, the numbers and the hand-off
+are not delayed or changed.
+
+Study record: one `speaker_timeline` client event per voice session, sent at
+teardown (and by beacon on page hide), numbers only, shaped like the
+`mic_timeline` event: `toggles` as `[ms since the session's audio started, 1
+audible / 0 muted]` (first entry at 0, at most 60), `truncated`, `mutedMs`,
+`totalMs`, and `crisisSignalsWhileMuted`. Every voice session reports one, so
+"never muted" is a row with `mutedMs: 0`, not a missing row.
+
+Checks: `lib/speakerMute.test.ts` (state, reset and crisis rules, the event,
+and the recording tap still fed while muted) and
+`npx tsx scripts/speaker-mute-check.ts` (headless Chromium: silence at the Grok
+output and signal at the tee for both paths).
+
 ---
 
 ## 8. Voices
