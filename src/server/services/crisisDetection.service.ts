@@ -684,12 +684,38 @@ const HELP_STEP_PATTERN = new RegExp(
     '|a (?:counselor|counsellor|therapist|doctor|friend)|the (?:counseling center|crisis line|hotline|lifeline|counselor|doctor)|caps|988|an appointment|that appointment|the appointment|someone i trust)\\b',
 );
 
-/** Does the message announce a step toward help (see HELP_STEP_PATTERN)? Exported for tests. */
+// Words that turn "I'll text my sister" into something else: a sequence
+// ("... and THEN I'm going to do it", "I'll call my mom FIRST", "one LAST
+// time"), a farewell in other words (sorry, love, a note, a will), or the
+// means. Review of PR 65, round 2, on the live assessor: with only the
+// farewell signals excluded, the cap held ALL of these at 64, each assessed
+// 80-85 with stated intent and a time or plan:
+//   "I'll text my sister to tell her I love her and then I'm going to do it tonight."
+//   "I'm going to do it tonight. I'll call my mom first."
+//   "I want to see my family one last time before I do it."
+//   "I should tell my mom where the note is. I've decided."
+//   "I could go to my dad's gun safe, I know the code."
+//   "I'll tell my roommate I'm sorry and then take all of them."
+// A regex that outranks the assessor on intent has to be this narrow: any of
+// these words and the assessor's score stands.
+const HELP_STEP_DISQUALIFIERS =
+  /\b(?:then|after|afterwards|before|first|last|one more|sorry|love|goodbye|bye|notes?|letters?|(?:my|a|the) will|pills?|meds|gun|rope|knife|blade|bridge|all of (?:it|them)|that's it|where|code)\b/;
+/** Intent signals other than the bare "going to do it" the help step explains. */
+const HELP_STEP_COMPATIBLE_SIGNALS = new Set([
+  'going to do it (implicit referent)',
+  'going to do it (subject dropped)',
+]);
+
+/** Does the message announce a step toward help (see HELP_STEP_PATTERN) and
+ *  nothing that makes it more than that? Exported for tests. */
 export function announcesHelpStep(content: string): boolean {
   if (!content) return false;
   const text = normalizeForScreen(content);
   if (!HELP_STEP_PATTERN.test(text)) return false;
-  return !matchContextSignals(text).some((s) => s.kind === 'farewell');
+  if (HELP_STEP_DISQUALIFIERS.test(text)) return false;
+  // A goodbye, a means question, "I've decided", "I have a plan", "it will be
+  // over soon": the message says more than the step.
+  return !matchContextSignals(text).some((s) => !HELP_STEP_COMPATIBLE_SIGNALS.has(s.label));
 }
 
 // ============================================
@@ -697,14 +723,49 @@ export function announcesHelpStep(content: string): boolean {
 // ============================================
 // Both parts are required: "... if I fail this quiz" and "lol". Used for one
 // thing only (see the cap in analyzeMessageRisk).
-const JOKE_MARKER = /\b(?:lol|lmao|lmfao|rofl|haha+|hehe+|jk)\b/;
-const CONDITIONAL_TRIGGER = /\bif (?:i|my|this|that|we|he|she|they|the|another|one more)\b/;
+//
+// Narrowed in review (PR 65, round 2). A laugh is how many real disclosures
+// are softened, and "if" is a common word; as first written (a laugh marker
+// and "if I / he / this ..." anywhere in the message) the cap held every one
+// of these at 64 on the live assessor:
+//   "i'm going to kill myself tonight lol, if i can find where my mom hid the pills"  (assessed 90)
+//   "lol i've been thinking about suicide every day and if i'm honest i have a plan" (85)
+//   "I'm going to kill myself if I fail this, lol, not even joking"                  (80)
+//   "if he leaves me I'll kill myself haha"                                          (65)
+//   "honestly idk if i can keep going, i want to kill myself lol"                    (65)
+//   "jk... unless? if i'm being real i do want to kill myself"                       (75)
+// So now:
+//  - "jk" is not a laugh (it is a retraction, and "jk... unless?" is not one);
+//  - the condition is about the participant's own task or day ("if I fail",
+//    "if this meeting", "if my code"), never about another person leaving,
+//    dying or doing something ("if he leaves me");
+//  - "idk if", "wonder if", "not sure if" is "whether", not a condition;
+//  - the crisis keyword and the condition are in the SAME sentence;
+//  - nothing in the message insists it is meant ("not joking", "serious",
+//    "for real", "if I'm honest", "I mean it") or names a time ("tonight");
+//  - and in analyzeMessageRisk the assessor must not have scored it 85 or
+//    more or observed a plan, a time or an attempt (`acute`).
+const JOKE_MARKER = /\b(?:lol|lmao|lmfao|rofl|haha+|hehe+)\b/;
+const CONDITIONAL_TRIGGER =
+  /(?<!\b(?:idk|know|wonder|wondering|sure|see|asking|asked|ask|tell) )\bif (?:i|my|this|that|we|the|another|one more)\b(?! (?:am|'m|was|were) (?:being )?(?:honest|real|serious|truthful))/;
+const MEANT_SERIOUSLY =
+  /\b(?:not (?:even |really |actually )?(?:joking|kidding|a joke)|n't (?:even |really |actually )?(?:joking|kidding|a joke)|serious(?:ly)?|for real|fr|mean it|meant it|honest(?:ly)?|being real|truth(?:fully)?|plan(?:ned|ning)?|tonight|today|tomorrow|this (?:weekend|week|evening)|right now)\b/;
 
-/** Exported for tests. */
+/**
+ * A crisis keyword and a condition about the participant's own task in one
+ * sentence, a laugh marker somewhere in the message, and nothing that insists
+ * it is meant or names a time. Exported for tests.
+ */
 export function isConditionalJoke(content: string): boolean {
   if (!content) return false;
   const text = normalizeForScreen(content);
-  return JOKE_MARKER.test(text) && CONDITIONAL_TRIGGER.test(text);
+  if (!JOKE_MARKER.test(text) || MEANT_SERIOUSLY.test(text)) return false;
+  return text
+    .split(/[.!?\n]+/)
+    .some(
+      (sentence) =>
+        CONDITIONAL_TRIGGER.test(sentence) && COMPILED_KEYWORDS.some(({ pattern }) => pattern.test(sentence)),
+    );
 }
 
 // ============================================
@@ -1126,9 +1187,8 @@ export async function needsContextAssessment(sessionId: string, content: string)
   const fragment = !ctx.lookupFailed && !contextIsMediumOrAbove(ctx) && isLowContentFragment(content);
   if (ctx.elevated && !fragment) return true;
   // The reply to an assistant safety question (see repliesToSafetyQuestion).
-  // A failed read means "assess": the question may be there. Only a reply
-  // that looks like an answer is woken this way (see analyzeMessageRisk).
-  if (!looksLikeAnAnswer(content)) return false;
+  // A failed read means "assess": the question may be there. Any reply to a
+  // safety question is assessed, whatever its length (see analyzeMessageRisk).
   try {
     return repliesToSafetyQuestion(await getRecentSessionMessages(sessionId, 4));
   } catch (err) {
@@ -2017,11 +2077,22 @@ export async function analyzeMessageRisk(
     // followed a question, a song lyric after a bereavement check-in came
     // back 50 ("passive ideation") on two runs of three and flagged the
     // session, whichever way the assessor was told to read it.
-    const answersSafetyQuestion =
-      keywordFree &&
-      message.source !== 'checkin' &&
-      looksLikeAnAnswer(message.content) &&
-      repliesToSafetyQuestion(conversationHistory);
+    //
+    // Review of PR 65, round 2: the turn right after a safety question is
+    // ALWAYS assessed, whatever its length. With the wake limited to replies
+    // that look like an answer, these came back 0 with no assessor call in a
+    // calm session (live): "The thought comes and goes but this week it has
+    // been there pretty much every single night when I am alone in my room",
+    // "Well when you ask it like that I have to say the idea has crossed my
+    // mind a few times since the breakup happened". A long answer is still an
+    // answer, and it is the one turn of a calm session where a disclosure is
+    // most likely. The cost is one assessor call per reply to a safety
+    // question, and the lyric above may flag medium again (no page). Whether
+    // the assessor is TOLD the turn is an answer still follows
+    // looksLikeAnAnswer, so a long change of subject is read on its own words.
+    const followsSafetyQuestion =
+      keywordFree && message.source !== 'checkin' && repliesToSafetyQuestion(conversationHistory);
+    const answersSafetyQuestion = followsSafetyQuestion && looksLikeAnAnswer(message.content);
     // A filler-only fragment ("would stop", "ok", "wait") in a session that has
     // never reached medium is not worth an assessment and has been over-read
     // into one (ai-therapist-349): the session's earlier low-band turn alone
@@ -2029,7 +2100,7 @@ export async function analyzeMessageRisk(
     const fragmentSkipped =
       keywordFree &&
       contextSignals.length === 0 &&
-      !answersSafetyQuestion &&
+      !followsSafetyQuestion &&
       sessionContext.elevated &&
       !sessionContext.lookupFailed &&
       !contextIsMediumOrAbove(sessionContext) &&
@@ -2038,7 +2109,7 @@ export async function analyzeMessageRisk(
       keywordFree &&
       !isSweep &&
       !isModerationWake &&
-      (contextSignals.length > 0 || (sessionContext.elevated && !fragmentSkipped) || answersSafetyQuestion);
+      (contextSignals.length > 0 || (sessionContext.elevated && !fragmentSkipped) || followsSafetyQuestion);
 
     if (keywordAnalysis.keywordScore > 0 || isSweep || isModerationWake || isContextWake) {
       try {
@@ -2190,6 +2261,8 @@ export async function analyzeMessageRisk(
       sessionContext.recentPeak < RISK_BANDS.high &&
       !(sessionContext.flagged && sessionContext.flaggedSeverity === 'high') &&
       keywordAnalysis.keywordScore === 0 &&
+      // An attempt observed by the assessor is never held back by the screen.
+      llm?.acute !== 'attempt' &&
       announcesHelpStep(message.content)
     ) {
       riskScore = RISK_BANDS.high - 1;
@@ -2215,6 +2288,9 @@ export async function analyzeMessageRisk(
       riskScore >= RISK_BANDS.high &&
       keywordAnalysis.keywordScore > 0 &&
       !contextIsMediumOrAbove(sessionContext) &&
+      // The assessor's own reading outranks the screen when it is specific:
+      // a plan, a time or an attempt observed, or the top of the range.
+      (!llm || (llm.acute === 'none' && llm.risk_score < 85)) &&
       isConditionalJoke(message.content)
     ) {
       riskScore = RISK_BANDS.high - 1;

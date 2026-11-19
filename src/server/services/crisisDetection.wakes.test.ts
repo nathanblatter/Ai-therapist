@@ -965,6 +965,40 @@ describe('a step toward help does not cross the page line by itself', () => {
     expect(announcesHelpStep(text)).toBe(false);
   });
 
+  // Review of PR 65, round 2: with only the farewell signals excluded, the
+  // cap held every one of these at 64. The live assessor scored each 80-85
+  // with stated intent and a plan or a time.
+  it.each([
+    "I'll text my sister to tell her I love her and then I'm going to do it tonight.",
+    "I'm going to do it tonight. I'll call my mom first.",
+    'I want to see my family one last time before I do it.',
+    "I should tell my mom where the note is. I've decided.",
+    "I could go to my dad's gun safe, I know the code.",
+    "I'll tell my roommate I'm sorry and then take all of them.",
+    "I've decided. I'll make an appointment with a lawyer about my will first and then that's it.",
+    "I'll call my mom. It will all be over soon.",
+  ])('REPRODUCTION: intent beside a contact is not a help step and pages: %s', async (text) => {
+    const { announcesHelpStep } = await import('./crisisDetection.service.js');
+    expect(announcesHelpStep(text), text).toBe(false);
+    PASSIVE_SESSION();
+    createMock.mockResolvedValue(assess(85, 'genuine', ['stated intent']));
+    const result = await analyzeMessageRisk(turn(text), []);
+    expect(result.riskScore).toBe(85);
+    expect(result.severity).toBe('high');
+    expect(riskRow().help_step_cap).toBeUndefined();
+  });
+
+  it('an attempt observed by the assessor is never held back by the help-step cap', async () => {
+    PASSIVE_SESSION();
+    const base = assess(95, 'genuine', ['attempt in progress']);
+    const body = JSON.parse(base.choices[0].message.content) as Record<string, unknown>;
+    createMock.mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify({ ...body, acute: 'attempt' }) } }],
+    });
+    const result = await analyzeMessageRisk(turn("I took them. I'll call my mom."), []);
+    expect(result.riskScore).toBe(95);
+  });
+
   it('intent without a help step is not capped', async () => {
     PASSIVE_SESSION();
     createMock.mockResolvedValue(assess(85, 'genuine', ['stated intent']));
@@ -1064,7 +1098,7 @@ describe('harm to others stays harm to others unless the participant names thems
   });
 });
 
-describe('a long change of subject after a safety question is not assessed for following the question', () => {
+describe('the turn after a safety question is always assessed; only an answer is framed as one', () => {
   const QUESTION = {
     role: 'assistant',
     content:
@@ -1073,11 +1107,39 @@ describe('a long change of subject after a safety question is not assessed for f
   const LYRIC =
     'I have had that old song stuck in my head all day, the line that goes "killing me softly with his song."';
 
-  it('REPRODUCTION: the lyric in a calm session is scored on its own words, with no assessor call', async () => {
-    createMock.mockResolvedValue(assess(50, 'genuine'));
+  it('a long change of subject is assessed on its own words: the assessor is not told it is an answer', async () => {
+    createMock.mockResolvedValue(assess(5, 'reference'));
     const result = await analyzeMessageRisk(turn(LYRIC), [QUESTION, { role: 'user', content: LYRIC }]);
-    expect(createMock).not.toHaveBeenCalled();
-    expect(result.riskScore).toBe(0);
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(assessorSaw()).not.toContain('asked a safety question');
+    expect(result.riskScore).toBe(5);
+  });
+
+  // Review of PR 65, round 2. With the wake limited to replies of twelve
+  // words or fewer (or an answer-word opening), each of these scored 0 with
+  // no assessor call in a calm session.
+  it.each([
+    "It's been on my mind more than I'd like to admit and I don't really know what to do with that anymore, especially at night",
+    'The thought comes and goes but this week it has been there pretty much every single night when I am alone in my room',
+    'Well when you ask it like that I have to say the idea has crossed my mind a few times since the breakup happened',
+  ])('REPRODUCTION: a long keyword-free answer in a calm session reaches the assessor: %s', async (reply) => {
+    createMock.mockResolvedValue(assess(65, 'genuine', ['active ideation']));
+    const result = await analyzeMessageRisk(turn(reply), [QUESTION, { role: 'user', content: reply }]);
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(result.severity).toBe('high');
+    expect(riskRow()).toMatchObject({ context_wake: true });
+  });
+
+  it('chat: the reply is held for any reply to a safety question, long or short', async () => {
+    recentMessagesMock.mockResolvedValue([QUESTION]);
+    expect(
+      await needsContextAssessment(
+        'sess-long-answer',
+        'The thought comes and goes but this week it has been there pretty much every single night when I am alone',
+      ),
+    ).toBe(true);
+    recentMessagesMock.mockResolvedValue([{ role: 'assistant', content: 'How did the exam go?' }]);
+    expect(await needsContextAssessment('sess-no-question', LYRIC)).toBe(false);
   });
 
   it('a long reply carrying a crisis keyword is assessed as always', async () => {
@@ -1162,8 +1224,41 @@ describe('a conditional exaggeration with a joke marker does not page by itself'
   it('isConditionalJoke needs both the conditional and the laugh', async () => {
     const { isConditionalJoke } = await import('./crisisDetection.service.js');
     expect(isConditionalJoke(QUIZ)).toBe(true);
-    expect(isConditionalJoke('if this meeting runs long I will actually die haha')).toBe(true);
+    expect(isConditionalJoke('if I fail this quiz I am going to kill myself lol')).toBe(true);
+    expect(isConditionalJoke('if this meeting runs long I want to die haha')).toBe(true);
     expect(isConditionalJoke('I want to die lol')).toBe(false);
     expect(isConditionalJoke('if I fail this quiz I am going to kill myself')).toBe(false);
+  });
+
+  // Review of PR 65, round 2: every one of these was held at 64 by the cap
+  // as first written (live assessor scores in brackets).
+  it.each([
+    ["i'm going to kill myself tonight lol, if i can find where my mom hid the pills", 90],
+    ["lol i've been thinking about suicide every day and if i'm honest i have a plan", 85],
+    ["I'm going to kill myself if I fail this, lol, not even joking", 80],
+    ["if he leaves me I'll kill myself haha", 65],
+    ['honestly idk if i can keep going, i want to kill myself lol', 65],
+    ["jk... unless? if i'm being real i do want to kill myself", 75],
+    ['i want to end my life haha. if this is what the rest of it looks like i am done', 65],
+    ['i want to kill myself lol idk if this is normal', 70],
+  ])('REPRODUCTION: a real disclosure with a laugh and an "if" is not capped: %s', async (text, score) => {
+    const { isConditionalJoke } = await import('./crisisDetection.service.js');
+    expect(isConditionalJoke(text as string), text as string).toBe(false);
+    createMock.mockResolvedValue(assess(score as number, 'genuine', ['stated intent']));
+    const result = await analyzeMessageRisk(turn(text as string), []);
+    expect(result.riskScore).toBe(score);
+    expect(result.severity).toBe('high');
+    expect(riskRow().conditional_joke_cap).toBeUndefined();
+  });
+
+  it('the quiz sentence is not capped when the assessor observes a plan or a time, or scores it 85 or more', async () => {
+    const withAcute = assess(70, 'genuine', ['stated intent']);
+    const body = JSON.parse(withAcute.choices[0].message.content) as Record<string, unknown>;
+    createMock.mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify({ ...body, acute: 'plan_or_time' }) } }],
+    });
+    expect((await analyzeMessageRisk(turn(QUIZ), [])).riskScore).toBe(70);
+    createMock.mockResolvedValue(assess(85, 'genuine', ['stated intent']));
+    expect((await analyzeMessageRisk(turn(QUIZ), [])).riskScore).toBe(85);
   });
 });
