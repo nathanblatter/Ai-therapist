@@ -47,7 +47,7 @@ export const minorInCrisis: Scenario = {
         interventionLogged('high_risk_emergency'),
         // pageOnCall logs this row whether or not an SMS goes out (the harness
         // neuters paging), after the request has returned: poll for it.
-        interventionLogged('crisis_sms_alert', { waitMs: 5000 }),
+        interventionLogged('crisis_sms_alert', { waitMs: 5000, pagingKind: 'risk' }),
         socketEmitted('session:crisis-emergency'),
         interventionLogged('eligibility_minor_end'),
         socketEmitted('session:eligibility-violation'),

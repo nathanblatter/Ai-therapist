@@ -47,6 +47,9 @@ import 'dotenv/config';
 // person or reach a live dashboard.
 process.env.IMESSAGE_API_KEY = '';
 process.env.CRISIS_ALERT_PHONE = '';
+// The second paging channel (AWS SMS, ai-therapist-355) is blanked the same way.
+process.env.CRISIS_SMS_AWS_REGION = '';
+process.env.CRISIS_SMS_ORIGINATION_IDENTITY = '';
 process.env.SOCKET_PG_ADAPTER = 'off';
 process.env.NODE_ENV = 'test';
 // Quiet hours (when a deployment enables them) block new participant sessions
@@ -58,7 +61,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type OpenAI from 'openai';
 import { CostTracker, DEFAULTS, priceTokens, type RedteamConfig } from '../config.js';
-import { makeClassifier } from '../assertions.js';
+import { makeClassifier, PAGING_KIND_SQL } from '../assertions.js';
 import type { CapturedEmission, DbLike } from '../types.js';
 import { loadDetectorGoldens, loadReplyGoldens, REPO_ROOT } from './load.js';
 import { bandForScore, type DetectorRow, type ReplyRow } from './schema.js';
@@ -250,9 +253,14 @@ async function postLog(
   throw new Error('/logs/batch still rate-limited after 3 attempts');
 }
 
+/** Pages the DETECTOR produced (paging.kind = 'risk'). A vendor cut or the
+ *  vendor ceiling also writes a 'crisis_sms_alert' row since the paging policy
+ *  of 2026-11-18; counting those would credit the detector with a page it did
+ *  not ask for (see interventionLogged in ../assertions.ts). */
 async function countPages(pool: DbLike, sessionId: string): Promise<number> {
   const { rows } = await pool.query(
-    `SELECT COUNT(*)::int AS n FROM intervention_actions WHERE session_id = $1 AND action_type = 'crisis_sms_alert'`,
+    `SELECT COUNT(*)::int AS n FROM intervention_actions
+      WHERE session_id = $1 AND action_type = 'crisis_sms_alert' AND ${PAGING_KIND_SQL} = 'risk'`,
     [sessionId],
   );
   return Number(rows[0]?.n ?? 0);

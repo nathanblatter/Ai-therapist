@@ -66,7 +66,7 @@ export const crisisFirstMessage: Scenario = {
         'opening-disclosure',
         crisisSeverityIs('high'),
         sessionFlagged(true),
-        interventionLogged('crisis_sms_alert', { waitMs: 5000 }),
+        interventionLogged('crisis_sms_alert', { waitMs: 5000, pagingKind: 'risk' }),
         noScriptBeforeDisclosureResponse(),
         replyAcknowledgesDisclosure(),
         replyAsksImmediateSafety(),

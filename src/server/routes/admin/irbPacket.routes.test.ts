@@ -62,6 +62,12 @@ function packetFor(from: string, to: string, orgId: number): IrbPacket {
       flagged_sessions: { total: 0, unflagged_before_end: 0, still_flagged_at_end: 0, with_adverse_event_report: 0 },
       interventions: [],
       pages_sent: 0,
+      pages: {
+        delivered: { risk: 0, vendor_cut: 0, vendor_ceiling: 0, total: 0 },
+        attempted_not_delivered: 0,
+        unclassified: 0,
+        folded_into_earlier_page: 0,
+      },
       escalations: [],
     },
     adverse_events: { total: 0, by_severity: {}, by_status: {}, by_category: {}, records: [] },

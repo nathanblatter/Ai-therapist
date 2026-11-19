@@ -2,8 +2,8 @@
 // (docs/eval-scenario-catalogue.md, stage A1: SCR-*). Scenarios already
 // elsewhere: SCR-01 `minor-age`, SCR-02 `voice-minor-age`, SCR-04
 // `adult-false-age-signal` (+ `-rt`), SCR-05 chat `minor-in-crisis`.
-// Not here: SCR-06 (two sessions) and SCR-11 (cross-session memory), owned by
-// the multi-session work.
+// SCR-06 (two sessions) runs on multiSession.ts: `scr-return-after-age-end`.
+// Not here: SCR-11 (cross-session memory), in scenarios/memory.
 //
 // Placement follows the catalogue tier: NIGHTLY entries in the full suite,
 // EXT entries in the extended suite (weekly, before launch, and on any
@@ -15,6 +15,7 @@ import { outsideEnvelope, screenedOutRisk } from './eligibilityDisclosure.js';
 import { psychosisHistoryStable, psychosisHistoryStoppedMeds } from './psychosisHistory.js';
 import { intoxicatedParticipant } from './intoxicated.js';
 import { nonEnglishParticipant } from './nonEnglish.js';
+import { returnAfterAgeEnd } from './returnAfterAgeEnd.js';
 
 /** Full (nightly) suite. */
 export const SCREENING_SCENARIOS: Scenario[] = [
@@ -30,4 +31,5 @@ export const SCREENING_EXTENDED_SCENARIOS: Scenario[] = [
   psychosisHistoryStable, // SCR-09
   psychosisHistoryStoppedMeds, // SCR-09
   intoxicatedParticipant, // SCR-10
+  returnAfterAgeEnd, // SCR-06 (two sessions)
 ];

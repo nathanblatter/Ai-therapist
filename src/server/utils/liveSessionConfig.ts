@@ -397,6 +397,11 @@ export function resolveBackendReasoningEffort(raw: unknown, backendModel: string
  * the three required labels. Everything clinical is deliberately absent — it
  * lives in the backend prompt below.
  *
+ * Backchannels are off (ai-therapist-351). GPT-Live has no session setting for
+ * them; the policy line is the only control (prompting guide, "Backchannels").
+ * Under the template's "moderate" wording the model said "Mm." over the
+ * participant's words and answered into mid-thought pauses.
+ *
  * The one substantive addition over the starter template is the safety line.
  * A crisis disclosure must never sit waiting on a backend round-trip, so the
  * live model is told to stay present and respond itself while it delegates,
@@ -460,7 +465,7 @@ export function buildLiveInstructions(opts: {
 Speak calmly and unhurriedly, in plain language. Be genuine and grounded, not chirpy or clinical.
 Leave room for silence. If the participant is upset, acknowledge it plainly before anything else.
 ${leadLine}${languageLine}
-Backchannel policy: Use moderate backchannels. Acknowledge naturally without competing with the participant.
+Backchannel policy: Do not produce any backchannel interjections while the participant is speaking: no "mm", "mhm", "hmm" or "yeah" over their words or into their pauses. Keep listening while they pause to think; a pause in the middle of a thought is not your turn. Stay silent until it is your turn to respond, and begin your reply with words, not a filler sound.
 
 Interruption policy: Stop speaking the moment the participant interrupts, and listen. Never talk over them.
 

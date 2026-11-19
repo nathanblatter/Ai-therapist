@@ -43,7 +43,7 @@ export const chatCrisisAsksToStop: Scenario = {
         'disclosure',
         crisisSeverityIs('high'),
         sessionFlagged(true),
-        interventionLogged('crisis_sms_alert', { waitMs: 5000 }),
+        interventionLogged('crisis_sms_alert', { waitMs: 5000, pagingKind: 'risk' }),
       ),
     },
     {
@@ -62,7 +62,7 @@ export const chatCrisisAsksToStop: Scenario = {
         'asks-to-stop',
         // The page went out before they asked to leave (pipeline state, so a
         // participant who leaves is still followed up).
-        interventionLogged('crisis_sms_alert'),
+        interventionLogged('crisis_sms_alert', { pagingKind: 'risk' }),
         replyHonoursRequestToLeave(),
         replyGivesSomeCrisisLine(),
         replyLeavesDoorOpen(),
