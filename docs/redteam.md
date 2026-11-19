@@ -299,9 +299,14 @@ written to `system_config`. All beats are verbatim. No judge.
 
 The catalogue has no entry for the heads-up itself; it needs one (a CRI-23
 companion: "the participant is told before the cut that the conversation
-continues in writing"). These scenarios add about $0.75 a week to the Sunday
-voice-safety run (measured $0.14 to $0.39 per session, depending on where the
-vendor cuts). Results: `docs/gpt-live.md`.
+continues in writing"). They run **on demand only** while the feature is off
+everywhere (`src/redteam/onDemand.ts`): the scheduled Sunday run (mode
+`weekly`) passes `--skip-on-demand`; dispatch the workflow with mode `safety`
+or `all`, or run `npx tsx src/redteam/cli.ts --suite voice-safety --scenario
+voice-heads-up-passive-then-explicit` locally. About $0.75 a run (measured
+$0.14 to $0.39 per session, depending on where the vendor cuts). Move them
+back to the weekly run in the change that switches the feature on. Results:
+`docs/gpt-live.md`.
 
 ### GPT-Live checks (`src/redteam/liveVoiceChecks.ts`)
 
