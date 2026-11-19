@@ -97,6 +97,63 @@ export async function getParticipantFlagEvents(
 }
 
 /**
+ * What the risk assessor actually scored for the participant's own turns:
+ * the highest medium and the highest high score in risk_score_history, on
+ * this session and on the same participant's other sessions since `since`.
+ *
+ * Needed beside the flag events because a turn can score high WITHOUT a flag
+ * event being written. The pipeline re-flags an already-flagged session only
+ * when severity rises or the score exceeds the stored one by more than 10,
+ * and a recovery session is stamped high from its first second (at the
+ * inherited score, or 100 when there is none). A real disclosure in a
+ * recovery session therefore leaves no 'flagged' event of its own; without
+ * this read, the cut of that session would be classified "no risk".
+ * `severity` is the band stored when the turn was scored, so this does not
+ * carry a copy of the thresholds.
+ */
+export async function getParticipantAssessedRisk(
+  sessionId: string,
+  userId: number | null,
+  since: Date,
+): Promise<ParticipantFlagRow[]> {
+  const result = await pool.query<{ severity: string | null; risk_score: number | string | null }>(
+    `SELECT h.severity, MAX(h.risk_score) AS risk_score
+       FROM risk_score_history h
+       JOIN therapy_sessions ts ON ts.session_id = h.session_id
+      WHERE h.severity IN ('medium', 'high')
+        AND (h.session_id = $1
+             OR ($2::int IS NOT NULL AND ts.user_id = $2::int AND h.calculated_at >= $3))
+      GROUP BY h.severity`,
+    [sessionId, userId, since],
+  );
+  return result.rows.map((row) => ({
+    session_id: sessionId,
+    severity: row.severity,
+    risk_score: row.risk_score === null ? null : Number(row.risk_score),
+  }));
+}
+
+/**
+ * Is this session's high flag nothing but the automatic recovery-continuation
+ * stamp? True when the stamp's event exists and no other 'flagged' event at
+ * high severity does: nobody has yet been paged about anything the
+ * participant said in this session.
+ */
+export async function highFlagIsContinuationStampOnly(sessionId: string): Promise<boolean> {
+  const result = await pool.query<{ stamped: boolean; real_high: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM crisis_events ce
+                     WHERE ce.session_id = $1 AND ce.event_type = 'flagged'
+                       AND ce.risk_factors @> '["recovery_continuation"]'::jsonb) AS stamped,
+            EXISTS (SELECT 1 FROM crisis_events ce
+                     WHERE ce.session_id = $1 AND ce.event_type = 'flagged' AND ce.severity = 'high'
+                       AND NOT COALESCE(ce.risk_factors @> '["recovery_continuation"]'::jsonb, FALSE)) AS real_high`,
+    [sessionId],
+  );
+  const row = result.rows[0];
+  return row?.stamped === true && row.real_high !== true;
+}
+
+/**
  * Has this participant said anything, in any session (the recovery session
  * and the typed-chat fallback are new session ids), since `since`? Every
  * participant turn is persisted before it is scored, so a row here means the

@@ -45,6 +45,8 @@ import {
   getPagingParticipantUserId,
   getRecentPagingRecords,
   getParticipantFlagEvents,
+  getParticipantAssessedRisk,
+  highFlagIsContinuationStampOnly,
   participantSpokeSince,
   insertPagingRecord,
   type PagingRecordRow,
@@ -401,17 +403,42 @@ export function buildVendorCutMessage(
   );
 }
 
-/** A cut that was not paged at the time, and the participant has been silent since. */
+/**
+ * A cut that was not paged at the time, and the participant has been silent
+ * since. `peak` is their risk as it stands NOW, not at the cut: the turn the
+ * filter cut on can be scored a second or two after the cut, so "nothing was
+ * flagged" may no longer be true three minutes later, and the text must not
+ * say it then.
+ */
 export function buildVendorCutSilenceMessage(
   sessionId: string,
   silentForMs: number,
   ctx: Pick<MessageContext, 'previousPage' | 'now'>,
+  peak: { severity: PeakSeverity; riskScore: number | null } = { severity: 'none', riskScore: null },
 ): string {
   const minutes = Math.max(1, Math.round(silentForMs / 60_000));
+  const score = peak.riskScore === null ? '' : ` (${peak.riskScore}/100)`;
+  if (peak.severity === 'high') {
+    return lines(
+      'URGENT: AI-Therapist voice session ENDED BY THE VENDOR FILTER at HIGH risk, and the participant has NOT come back',
+      `Why: VENDOR CUT, then ${minutes} min of silence. Their risk is HIGH${score}; they have not spoken in any ` +
+        'session since the cut.',
+      `Session ${shortId(sessionId)}`,
+      followUpLine(ctx),
+      'Review the transcript and reach out.',
+      adminLink(sessionId),
+    );
+  }
   return lines(
     'AI-Therapist: voice session ended by the vendor filter, and the participant has NOT come back',
-    `Why: VENDOR CUT, then ${minutes} min of silence. NOT a high risk score: nothing they said was flagged, ` +
-      'but the filter can end a session before their last words reach us, so those may not have been assessed.',
+    peak.severity === 'medium'
+      ? `Why: VENDOR CUT, then ${minutes} min of silence. NOT a high risk score: risk was MEDIUM${score}, ` +
+          'but the filter can end a session before their last words reach us, so those may not have been assessed.'
+      : peak.severity === 'unknown'
+        ? `Why: VENDOR CUT, then ${minutes} min of silence. Their risk level could NOT be read, so treat it as ` +
+          'possibly serious.'
+        : `Why: VENDOR CUT, then ${minutes} min of silence. NOT a high risk score: nothing they said was flagged, ` +
+          'but the filter can end a session before their last words reach us, so those may not have been assessed.',
     `Session ${shortId(sessionId)}`,
     followUpLine(ctx),
     'Review the transcript and consider reaching out.',
@@ -703,7 +730,11 @@ async function send(
  * A session was flagged HIGH (risk pipeline, or the model's escalate_to_human
  * at high urgency). Never throws.
  */
-export async function pageHighRisk(sessionId: string, riskScore: number): Promise<PageDecision> {
+export async function pageHighRisk(
+  sessionId: string,
+  riskScore: number,
+  facts: Record<string, unknown> = {},
+): Promise<PageDecision> {
   const level = riskPageLevel(riskScore);
   try {
     return await dispatchPage({
@@ -711,7 +742,7 @@ export async function pageHighRisk(sessionId: string, riskScore: number): Promis
       kind: 'risk',
       level,
       riskScore,
-      facts: { severity: 'high' },
+      facts: { severity: 'high', ...facts },
       summary: `high risk flag, score ${riskScore}/100.`,
       buildMessage: (ctx) => buildRiskPageMessage(sessionId, riskScore, ctx),
     });
@@ -720,6 +751,39 @@ export async function pageHighRisk(sessionId: string, riskScore: number): Promis
     log.error({ err }, '[paging] high-risk paging failed unexpectedly; sending directly');
     return await sendDirect(sessionId, 'risk', level, buildRiskPageMessage(sessionId, riskScore, bareContext()));
   }
+}
+
+/**
+ * A turn scored HIGH in a session that is already flagged high, and the
+ * pipeline's re-flag rule did not fire (same severity, score not more than 10
+ * above the stored one), so no flag and no page were produced for it.
+ *
+ * That is right when the stored flag came from the participant: the on-call
+ * was paged for it. It is wrong in a recovery session. There the flag is the
+ * automatic continuation stamp, written at the inherited score or at 100 when
+ * the session it continues was never flagged, so a real disclosure can never
+ * exceed it by 10 and would reach nobody: the cut that started the recovery
+ * is no longer an SMS when the participant had no risk flag, and they "came
+ * back", so the silence check stays quiet too.
+ *
+ * So: when the session's only high flag is that stamp, this turn is the first
+ * the on-call would hear of the participant's risk, and a page is requested,
+ * under the same folding as any other. A lookup that fails or is slow pages.
+ * Returns null when the session has a real high flag. Never throws.
+ */
+export async function pageHighTurnWithoutReflag(sessionId: string, riskScore: number): Promise<PageDecision | null> {
+  let stampOnly = true;
+  try {
+    stampOnly = (await withTimeout(highFlagIsContinuationStampOnly(sessionId), 'continuation stamp check')) !== false;
+  } catch (err) {
+    log.error(
+      { err },
+      `[paging] could not tell whether ${sessionId.substring(0, 12)}... is flagged only by the recovery stamp; ` +
+        'paging (fail toward paging)',
+    );
+  }
+  if (!stampOnly) return null;
+  return await pageHighRisk(sessionId, riskScore, { trigger: 'high_turn_in_recovery_session' });
 }
 
 function bareContext(): MessageContext {
@@ -776,16 +840,21 @@ export async function runVendorCutSilenceCheck(sessionId: string, cutAt: number)
       return null;
     }
     const silentForMs = Date.now() - cutAt;
+    // Their risk as it stands now. There was no flag at the cut, but the turn
+    // the filter cut on may have been scored since (the assessor answers a
+    // second or two after the vendor closes the session).
+    const peak = await resolveIncidentPeak(sessionId, { flagged: false, severity: null });
     return await dispatchPage({
       sessionId,
       kind: 'vendor_cut',
-      level: PAGE_LEVEL.mediumVendorCut,
-      riskScore: null,
-      facts: { cause: 'content_filter', peakSeverity: 'none', trigger: 'participant_silent_after_cut' },
+      level: vendorCutLevel(peak.severity) ?? PAGE_LEVEL.mediumVendorCut,
+      riskScore: peak.riskScore,
+      facts: { cause: 'content_filter', peakSeverity: peak.severity, trigger: 'participant_silent_after_cut' },
       summary:
         'the vendor content filter ended this voice session and the participant has not spoken in any session ' +
-        `for ${Math.round(silentForMs / 1000)} s since; no risk flag before the cut.`,
-      buildMessage: (ctx) => buildVendorCutSilenceMessage(sessionId, silentForMs, ctx),
+        `for ${Math.round(silentForMs / 1000)} s since; participant risk now: ${peak.severity}` +
+        `${peak.riskScore === null ? '' : ` (${peak.riskScore}/100)`}.`,
+      buildMessage: (ctx) => buildVendorCutSilenceMessage(sessionId, silentForMs, ctx, peak),
     });
   } catch (err) {
     log.error({ err }, `[paging] silence check failed for ${short}...`);
@@ -796,10 +865,13 @@ export async function runVendorCutSilenceCheck(sessionId: string, cutAt: number)
 const SEVERITY_ORDER: Record<string, number> = { none: 0, low: 0, medium: 1, high: 2 };
 
 /**
- * The participant's peak risk in this incident: the highest crisis flag on
- * this session, or on any session of the same participant in the last
- * INCIDENT_LOOKBACK_MS, not counting the automatic "recovery continuation"
- * stamp. `sessionRow` is the caller's own read of the session row, used only
+ * The participant's peak risk in this incident: the highest crisis flag, or
+ * the highest score the assessor gave one of their turns, on this session or
+ * on any session of the same participant in the last INCIDENT_LOOKBACK_MS,
+ * not counting the automatic "recovery continuation" stamp. The assessed
+ * scores are read as well as the flags because a recovery session, being
+ * stamped high already, does not get a flag event for a real disclosure (see
+ * getParticipantAssessedRisk in db/paging.queries). `sessionRow` is the caller's own read of the session row, used only
  * where the events cannot answer:
  *   - an anonymous session has no participant to follow back through a
  *     recovery chain, so its own flag (continuation stamp included) stands;
@@ -821,8 +893,12 @@ export async function resolveIncidentPeak(
     const { userId, events } = await withTimeout(
       (async () => {
         const id = await getPagingParticipantUserId(sessionId);
-        const found = await getParticipantFlagEvents(sessionId, id, new Date(Date.now() - INCIDENT_LOOKBACK_MS));
-        return { userId: id, events: found ?? [] };
+        const since = new Date(Date.now() - INCIDENT_LOOKBACK_MS);
+        const [flags, assessed] = await Promise.all([
+          getParticipantFlagEvents(sessionId, id, since),
+          getParticipantAssessedRisk(sessionId, id, since),
+        ]);
+        return { userId: id, events: [...(flags ?? []), ...(assessed ?? [])] };
       })(),
       'incident risk lookup',
     );

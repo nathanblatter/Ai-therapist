@@ -25,6 +25,8 @@ const { db, sendCrisisAlertMock, isSandboxMock, broadcastMock } = vi.hoisted(() 
     sessions: new Map<string, number | null>(),
     rows: [] as FakeRow[],
     events: [] as FakeEvent[],
+    /** risk_score_history: what the assessor scored a participant turn. */
+    assessed: [] as Array<{ session_id: string; severity: string; risk_score: number; at: number }>,
     /** Participant turns: [session id, time]. */
     spoke: [] as Array<{ session_id: string; at: number }>,
     failLookups: false,
@@ -67,6 +69,25 @@ vi.mock('../db/paging.queries.js', () => ({
           (userId !== null && db.sessions.get(e.session_id) === userId && e.created_at.getTime() >= since.getTime())),
     );
   }),
+  getParticipantAssessedRisk: vi.fn(async (sessionId: string, userId: number | null, since: Date) => {
+    await lookupGate();
+    return db.assessed
+      .filter(
+        (a) =>
+          (a.severity === 'medium' || a.severity === 'high') &&
+          (a.session_id === sessionId ||
+            (userId !== null && db.sessions.get(a.session_id) === userId && a.at >= since.getTime())),
+      )
+      .map((a) => ({ session_id: sessionId, severity: a.severity, risk_score: a.risk_score }));
+  }),
+  highFlagIsContinuationStampOnly: vi.fn(async (sessionId: string) => {
+    await lookupGate();
+    const own = db.events.filter((e) => e.session_id === sessionId);
+    return (
+      own.some((e) => e.risk_factors.includes('recovery_continuation')) &&
+      !own.some((e) => e.severity === 'high' && !e.risk_factors.includes('recovery_continuation'))
+    );
+  }),
   participantSpokeSince: vi.fn(async (userId: number, since: Date) => {
     await lookupGate();
     return db.spoke.some((m) => db.sessions.get(m.session_id) === userId && m.at > since.getTime());
@@ -92,6 +113,7 @@ vi.mock('../utils/adminBroadcast.js', () => ({ broadcastAdminEventForSession: br
 
 import {
   pageHighRisk,
+  pageHighTurnWithoutReflag,
   pageVendorTermination,
   pageCovers,
   priorPageFromRow,
@@ -133,6 +155,11 @@ const flag = (sessionId: string, severity: 'medium' | 'high', score: number, fac
 const continuation = (sessionId: string, inheritedScore: number): void =>
   flag(sessionId, 'high', inheritedScore, ['recovery_continuation']);
 
+/** A participant turn the assessor scored, with no flag event of its own. */
+const assessed = (sessionId: string, severity: 'low' | 'medium' | 'high', score: number): void => {
+  db.assessed.push({ session_id: sessionId, severity, risk_score: score, at: Date.now() });
+};
+
 const speaks = (sessionId: string): void => {
   db.spoke.push({ session_id: sessionId, at: Date.now() });
 };
@@ -150,6 +177,7 @@ beforeEach(() => {
   db.sessions.clear();
   db.rows.length = 0;
   db.events.length = 0;
+  db.assessed.length = 0;
   db.spoke.length = 0;
   db.failLookups = false;
   db.hangLookups = false;
@@ -640,7 +668,117 @@ describe('a vendor cut that was not paged is checked again: did the participant 
   });
 });
 
+describe('a recovery session is stamped high, and that stamp must not hide a real disclosure', () => {
+  // The pipeline re-flags an already-high session only when a score exceeds
+  // the stored one by more than 10. A recovery session is stamped high at the
+  // inherited score, or at 100 when the session it continues had no flag, so
+  // a disclosure in it writes no 'flagged' event and asked for no page.
+  it('no-risk cut, then a high turn in the recovery session: the on-call is paged for the turn', async () => {
+    const s1 = session('s1', 7);
+    const s2 = session('s2', 7);
+    expect((await cut(s1, { flagged: false, severity: null })).outcome).toBe('no_page');
+    at(10_000);
+    continuation(s2, 100);
+    at(40_000);
+    speaks(s2);
+    assessed(s2, 'high', 90);
+    const decision = await pageHighTurnWithoutReflag(s2, 90);
+    expect(decision).toMatchObject({ outcome: 'paged', kind: 'risk', level: PAGE_LEVEL.critical });
+    expect(texts()[0]).toMatch(/HIGH crisis flag\nWhy: RISK SCORE 90\/100/);
+    expect(paging(rowsOf('paged')[0])).toMatchObject({ trigger: 'high_turn_in_recovery_session' });
+    // The next high turn says nothing new inside the window.
+    at(60_000);
+    expect((await pageHighTurnWithoutReflag(s2, 92))?.outcome).toBe('folded');
+    expect(sendCrisisAlertMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('a session with a real high flag is left to the re-flag rule: nothing is requested', async () => {
+    const s = session('s1', 7);
+    flag(s, 'high', 80);
+    await pageHighRisk(s, 80);
+    at(20 * MIN);
+    expect(await pageHighTurnWithoutReflag(s, 85)).toBeNull();
+    // A recovery session that has since been flagged for real, too.
+    const s2 = session('s2', 7);
+    continuation(s2, 80);
+    flag(s2, 'high', 95);
+    expect(await pageHighTurnWithoutReflag(s2, 96)).toBeNull();
+    expect(sendCrisisAlertMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails toward paging when the stamp cannot be read', async () => {
+    const s = session('s1', 7);
+    db.failLookups = true;
+    expect((await pageHighTurnWithoutReflag(s, 80))?.outcome).toBe('paged');
+  });
+
+  it('the cut of a recovery session is judged by what the assessor scored there, not only by flag events', async () => {
+    const s1 = session('s1', 7);
+    const s2 = session('s2', 7);
+    await cut(s1, { flagged: false, severity: null });
+    at(10_000);
+    continuation(s2, 100);
+    at(40_000);
+    assessed(s2, 'low', 30);
+    assessed(s2, 'high', 90);
+    const decision = await cut(s2, { flagged: true, severity: 'high' });
+    expect(decision).toMatchObject({ outcome: 'paged', level: PAGE_LEVEL.high });
+    expect(texts()[0]).toMatch(/ENDED BY THE VENDOR FILTER during a HIGH crisis flag/);
+    expect(texts()[0]).toMatch(/HIGH \(90\/100\)/);
+  });
+
+  it('a medium turn in a recovery session makes its cut a medium cut; a low one changes nothing', async () => {
+    const s2 = session('s2', 7);
+    continuation(s2, 100);
+    assessed(s2, 'low', 30);
+    expect((await cut(s2, { flagged: true, severity: 'high' })).outcome).toBe('no_page');
+    assessed(s2, 'medium', 55);
+    expect(await cut(s2, { flagged: true, severity: 'high' })).toMatchObject({
+      outcome: 'paged',
+      level: PAGE_LEVEL.mediumVendorCut,
+    });
+  });
+});
+
+describe('the silence check reports the risk as it stands when it runs', () => {
+  it('the turn the filter cut on was scored high after the cut: the text does not say "nothing was flagged"', async () => {
+    const s1 = session('s1', 7);
+    const cutAt = Date.now();
+    expect((await cut(s1, { flagged: false, severity: null })).outcome).toBe('no_page');
+    at(2_000);
+    flag(s1, 'high', 85);
+    expect((await pageHighRisk(s1, 85)).outcome).toBe('paged');
+
+    at(VENDOR_CUT_SILENCE_CHECK_MS);
+    const decision = await runVendorCutSilenceCheck(s1, cutAt);
+    // "They are at high risk AND gone" is new: not folded into the risk page.
+    expect(decision).toMatchObject({ outcome: 'paged', kind: 'vendor_cut', level: PAGE_LEVEL.high });
+    expect(texts()[1]).toMatch(/^URGENT: .*at HIGH risk, and the participant has NOT come back/);
+    expect(texts()[1]).toMatch(/Their risk is HIGH \(85\/100\)/);
+    expect(texts()[1]).not.toMatch(/nothing they said was flagged|NOT a high risk score/);
+    expect(paging(db.rows[db.rows.length - 1])).toMatchObject({ peakSeverity: 'high', riskScore: 85 });
+  });
+
+  it('unreadable risk at check time is said to be unreadable', async () => {
+    const s1 = session('s1', 7);
+    db.failLookups = true;
+    const decision = await runVendorCutSilenceCheck(s1, Date.now() - VENDOR_CUT_SILENCE_CHECK_MS);
+    expect(decision?.outcome).toBe('paged');
+    expect(texts()[0]).toMatch(/could NOT be read/);
+    expect(texts()[0]).not.toMatch(/nothing they said was flagged/);
+  });
+});
+
 describe('the window', () => {
+  it('a page time-stamped in the future (database clock ahead of the app) absorbs nothing', () => {
+    const now = T0;
+    const future = { at: now + 30_000, level: PAGE_LEVEL.high, kinds: ['risk' as const] };
+    expect(pageCovers(future, { kind: 'risk', level: PAGE_LEVEL.high }, now)).toBe(false);
+    const edge = { at: now - PAGE_FOLD_WINDOW_MS, level: PAGE_LEVEL.high, kinds: ['risk' as const] };
+    expect(pageCovers(edge, { kind: 'risk', level: PAGE_LEVEL.high }, now)).toBe(false);
+    expect(pageCovers({ ...edge, at: edge.at + 1 }, { kind: 'risk', level: PAGE_LEVEL.high }, now)).toBe(true);
+  });
+
   it('after the window the same severity pages again', async () => {
     const s = session('s1', 7);
     await pageHighRisk(s, 80);
