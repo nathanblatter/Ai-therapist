@@ -82,7 +82,9 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 20));
 /** Yield to I/O without touching (possibly faked) setTimeout. */
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 async function until(condition: () => boolean): Promise<void> {
-  for (let i = 0; i < 2000 && !condition(); i++) await tick();
+  // Bounded by elapsed time, not a tick count (see toolRegistry.escalateOrder.test.ts).
+  const deadline = performance.now() + 15_000;
+  while (!condition() && performance.now() < deadline) await tick();
   expect(condition()).toBe(true);
 }
 
