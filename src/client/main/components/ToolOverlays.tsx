@@ -3,7 +3,7 @@
 // record, private journal, session recap, safety plan card, and PHQ-2/GAD-2
 // screener form. One overlay at a time, dispatched by `kind`.
 import { useState, useEffect, useRef } from 'react';
-import { X, Phone, MessageSquare, CheckCircle } from 'react-feather';
+import { X, Phone, MessageSquare, CheckCircle, AlertCircle } from 'react-feather';
 
 // ---------- shared ----------
 
@@ -18,7 +18,7 @@ export type ToolUI =
   | { kind: 'thought_record' }
   | { kind: 'journal'; prompt: string }
   | { kind: 'recap'; focus: string; techniques?: string[]; takeaway: string }
-  | { kind: 'safety_plan'; plan: SafetyPlanData }
+  | { kind: 'safety_plan'; plan: SafetyPlanData; unconfirmed?: boolean }
   | { kind: 'scale'; scale: string }
   | { kind: 'values_sort' }
   | { kind: 'fear_ladder' }
@@ -362,10 +362,25 @@ const PLAN_SECTIONS: { key: keyof SafetyPlanData; label: string }[] = [
 ];
 
 // Also rendered read-only from the between-sessions Home view (ai-therapist-121).
-export function SafetyPlanCard({ plan, onClose }: { plan: SafetyPlanData; onClose: () => void }) {
+export function SafetyPlanCard({
+  plan,
+  onClose,
+  unconfirmed = false,
+}: {
+  plan: SafetyPlanData;
+  onClose: () => void;
+  /** The save did not confirm (typed chat, ai-therapist-367): say so plainly. */
+  unconfirmed?: boolean;
+}) {
   return (
     <Shell title="Your safety plan" onClose={onClose} wide>
       <div className="px-6 py-5 space-y-4">
+        {unconfirmed && (
+          <p role="status" className="flex gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <AlertCircle size={16} className="flex-shrink-0 mt-0.5" aria-hidden="true" />
+            <span>This plan may not have been saved. Take a screenshot so you keep it.</span>
+          </p>
+        )}
         {PLAN_SECTIONS.map(({ key, label }) => {
           const items = plan[key];
           if (!items || items.length === 0) return null;
@@ -794,7 +809,7 @@ export default function ToolOverlays({
     case 'recap':
       return <Recap focus={ui.focus} techniques={ui.techniques} takeaway={ui.takeaway} onClose={onClose} />;
     case 'safety_plan':
-      return <SafetyPlanCard plan={ui.plan} onClose={onClose} />;
+      return <SafetyPlanCard plan={ui.plan} unconfirmed={ui.unconfirmed === true} onClose={onClose} />;
     case 'scale':
       return <ScaleForm scale={ui.scale} sessionId={sessionId} onClose={onClose} onResult={onInvisibleMessage} />;
     case 'values_sort':

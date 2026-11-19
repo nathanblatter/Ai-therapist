@@ -1,6 +1,7 @@
 import { pool } from '../config/db.js';
 import { logInterventionAction, type CrisisSubject } from './crisisDetection.service.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
+import { trackBackground } from '../utils/backgroundWork.js';
 import { emitCrisisResources, clearCrisisResourceState } from './crisisResources.js';
 
 // ============================================
@@ -767,9 +768,11 @@ async function executeHighRiskResponse(
     // the participant (or the reverse). Requested before the first database
     // write below, so a slow database delays the record, not the page
     // (ai-therapist-366).
-    import('./crisisPaging.service.js')
-      .then((m) => m.pageHighRisk(sessionId, riskScore, pageFacts))
-      .catch((err) => console.error('Error sending crisis SMS:', err));
+    trackBackground(
+      import('./crisisPaging.service.js')
+        .then((m) => m.pageHighRisk(sessionId, riskScore, pageFacts))
+        .catch((err) => console.error('Error sending crisis SMS:', err)),
+    );
 
     await logInterventionAction(sessionId, 'high_risk_emergency', {
       riskScore,

@@ -42,7 +42,7 @@ describe('executeLoggedToolCall', () => {
     const r = await executeLoggedToolCall('sess_1', 'log_mood', { mood: 'ok' }, 'call_1');
     await settle();
 
-    expect(r).toEqual({ result: { mood: 'ok' }, success: true });
+    expect(r).toEqual({ result: { mood: 'ok' }, success: true, timedOut: false });
     expect(executeToolMock).toHaveBeenCalledWith('log_mood', { mood: 'ok' }, { sessionId: 'sess_1', channel: 'chat' });
 
     const types = insertMessagesBatchMock.mock.calls.map((c) => c[0][0].message_type);
@@ -64,7 +64,7 @@ describe('executeLoggedToolCall', () => {
     const r = await executeLoggedToolCall('sess_1', 'find_worksheet', { q: 'x' }, 'call_2', 'realtime');
     await settle();
 
-    expect(r).toEqual({ result: { error: 'boom', success: false }, success: false });
+    expect(r).toEqual({ result: { error: 'boom', success: false }, success: false, timedOut: false });
     const last = insertMessagesBatchMock.mock.calls.at(-1)![0][0];
     expect(last.content).toBe('Tool error: find_worksheet');
     expect(last.metadata).toMatchObject({ status: 'failed', error: 'boom', channel: 'realtime' });
@@ -72,11 +72,20 @@ describe('executeLoggedToolCall', () => {
     expect(broadcastMock.mock.calls.at(-1)![2]).toMatchObject({ status: 'failed', error: 'boom' });
   });
 
+  it('says when the failure was the registry timeout (the write may still land)', async () => {
+    const { ToolTimeoutError } = await import('./toolTimeouts.js');
+    executeToolMock.mockRejectedValueOnce(new ToolTimeoutError('create_safety_plan', 5000));
+    const r = await executeLoggedToolCall('sess_1', 'create_safety_plan', {}, 'call_t');
+    expect(r.success).toBe(false);
+    expect(r.timedOut).toBe(true);
+    expect(r.result).toMatchObject({ success: false, error: expect.stringContaining('may still go through') });
+  });
+
   it('still executes the tool when transcript logging fails', async () => {
     insertMessagesBatchMock.mockRejectedValue(new Error('db down'));
     executeToolMock.mockResolvedValueOnce('done');
     const r = await executeLoggedToolCall('sess_1', 'remember_this', {}, 'call_3');
-    expect(r).toEqual({ result: 'done', success: true });
+    expect(r).toEqual({ result: 'done', success: true, timedOut: false });
   });
 
   it('skips socket broadcasts when no io server is attached', async () => {

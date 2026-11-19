@@ -14,11 +14,16 @@
  */
 import { insertMessagesBatch } from '../db/index.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
+import { isToolTimeoutError } from './toolTimeouts.js';
 
 export interface ExecutedToolCall {
   /** Handler result on success, or an { error, success:false } envelope on failure. */
   result: unknown;
   success: boolean;
+  /** The registry's timeout answered the call (toolTimeouts.ts): the handler
+   *  may still finish, and a write it was making may still land. Implies
+   *  success === false. */
+  timedOut?: boolean;
 }
 
 /**
@@ -103,7 +108,7 @@ export async function executeLoggedToolCall(
       );
     }
 
-    return { result, success: true };
+    return { result, success: true, timedOut: false };
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`[ToolExecution] Tool ${toolName} failed for session ${sessionId.substring(0, 12)}...:`, error);
@@ -140,6 +145,6 @@ export async function executeLoggedToolCall(
       .then((db) => db.insertToolInvocation(sessionId, toolName, null, false))
       .catch((err) => console.error('[ToolExecution] Failed to log tool invocation:', err));
 
-    return { result: { error: errorMessage, success: false }, success: false };
+    return { result: { error: errorMessage, success: false }, success: false, timedOut: isToolTimeoutError(error) };
   }
 }
