@@ -24,7 +24,13 @@ import {
   executeGraduatedResponse,
   CHAT_SAFETY_PROTOCOL_GUIDANCE,
 } from './crisisIntervention.service.js';
-import { getRecentSessionMessages, getSessionAccessInfo, getSessionCrisisState } from '../db/index.js';
+import {
+  getRecentSessionMessages,
+  getSessionAccessInfo,
+  getSessionCrisisState,
+  recordRecoveryDisclosure,
+  incidentHasCrisisAdverseEvent,
+} from '../db/index.js';
 import { sessionSuppressesSafetyPipeline } from './suppression.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { enqueueWorkItem } from './workQueue.service.js';
@@ -288,48 +294,19 @@ export async function runCrisisPipeline(
         await executeGraduatedResponse(turn.sessionId, severity, risk.riskScore);
         flagged = true;
 
-        // Work-queue hook (caseworker portal): pool item for the client's care
-        // team. Only sessions with a logged-in participant enqueue — anonymous
-        // sessions have no care team (a null-client item would fall back to
-        // the IRB org as pure noise), and demo-account sessions never reach
-        // this code (guarded at the top of the pipeline). `reopen` reactivates
-        // a resolved/expired item on a re-flag at the same severity, so a
-        // recurrence after resolution notifies the care team again instead of
-        // dying on the idempotency key; while the item is open/acked a
-        // same-severity re-flag stays a silent no-op (no duplicate spam).
-        // enqueueWorkItem never throws and resolves client/org/sandbox from
-        // the session; detail carries category tags only, never transcript.
-        try {
-          const sessionInfo = await getSessionAccessInfo(turn.sessionId);
-          if (sessionInfo?.user_id != null) {
-            void enqueueWorkItem({
-              itemType: 'crisis_flag',
-              severity: 'urgent',
-              title: `Crisis flag: ${severity} risk (score ${risk.riskScore})`,
-              detail: { severity, risk_score: risk.riskScore, factors: risk.factors },
-              sourceTable: 'therapy_sessions',
-              sourceId: `${turn.sessionId}:${severity}`,
-              sessionId: turn.sessionId,
-              reopen: true,
-            });
-          }
-        } catch (err) {
-          console.error('[CrisisPipeline] work-item enqueue guard failed (non-fatal):', err);
-        }
+        await enqueueCrisisFlagWorkItem(turn.sessionId, severity, risk.riskScore, risk.factors);
 
         console.log(`Session ${turn.sessionId} flagged as ${severity} risk (score: ${risk.riskScore}, ${channel})`);
       } else if (severity === 'high' && alreadyHigh) {
         // A high turn that the re-flag rule above let pass. Correct when the
         // stored high flag came from the participant (the on-call was paged
-        // for it). Not when it is only the recovery-continuation stamp, which
-        // is written at the inherited score, or at 100: nothing said in a
-        // recovery session could then ever flag or page. crisisPaging.service
-        // tells the two apart and applies the usual folding. Fire-and-forget,
-        // like the page in executeHighRiskResponse; no flag, no second
-        // adverse-event draft, no steering change.
-        import('./crisisPaging.service.js')
-          .then((m) => m.pageHighTurnWithoutReflag(turn.sessionId, risk.riskScore))
-          .catch((err) => console.error('[CrisisPipeline] page for a high turn without re-flag failed:', err));
+        // for it and the flag is on record). Not when it is only the
+        // recovery-continuation stamp: see handleHighTurnWithoutReflag.
+        // Fire-and-forget, like the page in executeHighRiskResponse: the
+        // voice reply must not wait on it.
+        void handleHighTurnWithoutReflag(turn, { riskScore: risk.riskScore, factors: risk.factors }, channel).catch(
+          (err) => console.error('[CrisisPipeline] high turn without re-flag: handling failed:', err),
+        );
       }
     }
 
@@ -349,6 +326,199 @@ export async function runCrisisPipeline(
     console.error('[CrisisPipeline] pipeline failed (non-fatal):', err);
     return NONE_RESULT;
   }
+}
+
+/**
+ * Work-queue hook (caseworker portal): pool item for the client's care team.
+ * Only sessions with a logged-in participant enqueue — anonymous sessions
+ * have no care team (a null-client item would fall back to the IRB org as
+ * pure noise), and demo-account sessions never reach this code (guarded at
+ * the top of the pipeline). `reopen` reactivates a resolved/expired item on a
+ * re-flag at the same severity, so a recurrence after resolution notifies the
+ * care team again instead of dying on the idempotency key; while the item is
+ * open/acked a same-severity re-flag stays a silent no-op (no duplicate
+ * spam). enqueueWorkItem never throws and resolves client/org/sandbox from
+ * the session; detail carries category tags only, never transcript.
+ */
+async function enqueueCrisisFlagWorkItem(
+  sessionId: string,
+  severity: CrisisSeverity,
+  riskScore: number,
+  factors: string[],
+): Promise<void> {
+  try {
+    const sessionInfo = await getSessionAccessInfo(sessionId);
+    if (sessionInfo?.user_id != null) {
+      void enqueueWorkItem({
+        itemType: 'crisis_flag',
+        severity: 'urgent',
+        title: `Crisis flag: ${severity} risk (score ${riskScore})`,
+        detail: { severity, risk_score: riskScore, factors },
+        sourceTable: 'therapy_sessions',
+        sourceId: `${sessionId}:${severity}`,
+        sessionId,
+        reopen: true,
+      });
+    }
+  } catch (err) {
+    console.error('[CrisisPipeline] work-item enqueue guard failed (non-fatal):', err);
+  }
+}
+
+/** Longest the record of a recovery-session disclosure may hold its page
+ *  back. Past it the page goes out and the record is finished afterwards. */
+export const RECOVERY_DISCLOSURE_RECORD_TIMEOUT_MS = 2000;
+
+/**
+ * A turn scored HIGH in a session that is already flagged high, and the
+ * re-flag rule did not fire (same severity, score not more than 10 above the
+ * stored one).
+ *
+ * In an ordinary session that is right: the stored flag came from the
+ * participant, it is on record, and the on-call was paged for it. In a
+ * recovery session it is not. There the stored flag is the automatic
+ * continuation stamp, written at the inherited score or at 100, so nothing
+ * the participant says can ever exceed it by 10. PR #64 made such a turn
+ * PAGE; it still wrote no flag event and, when the session it continues was
+ * never flagged, no adverse-event draft: the incident was on the on-call's
+ * phone and nowhere in the record (ai-therapist-363).
+ *
+ * So the participant's first real high turn in a stamp-only session now:
+ *   1. is RECORDED: a crisis_events 'flagged' row with the score the assessor
+ *      gave it, its factors and its message, and the session row's score and
+ *      flag time corrected from the stamp's placeholder to what was assessed
+ *      (db recordRecoveryDisclosure, one transaction, once per session);
+ *   2. PAGES, under the usual folding (crisisPaging pageHighRisk);
+ *   3. gets what a first high flag gets in the record: the 'auto_flag'
+ *      intervention row, the admin dashboards' crisis events, the care-team
+ *      work item, and an adverse-event draft unless the incident (the
+ *      recovery chain) already has one, so one incident still has one report.
+ * It does NOT re-run the high-risk response (executeGraduatedResponse): the
+ * steer for this turn was decided above like any other high turn, and the
+ * crisis resources went out when the turn scored.
+ *
+ * A session with a real high flag is left exactly as before: nothing is
+ * written and nothing is paged from here, which is what keeps this from
+ * duplicating an ordinary flag.
+ *
+ * Fail toward paging, and never trade the page for the record: if the record
+ * throws, or has not answered in RECOVERY_DISCLOSURE_RECORD_TIMEOUT_MS, the
+ * page is requested without waiting for it.
+ */
+export async function handleHighTurnWithoutReflag(
+  turn: ParticipantTurn,
+  risk: { riskScore: number; factors: string[] },
+  channel: 'realtime' | 'chat',
+): Promise<void> {
+  const short = turn.sessionId.substring(0, 12);
+  type Recorded = Awaited<ReturnType<typeof recordRecoveryDisclosure>>;
+  const recording: Promise<Recorded | null> = (async () => {
+    try {
+      return await recordRecoveryDisclosure({
+        sessionId: turn.sessionId,
+        riskScore: risk.riskScore,
+        messageId: turn.messageId ?? null,
+        factors: risk.factors,
+      });
+    } catch (err) {
+      console.error(
+        `[CrisisPipeline] could not record the recovery-session disclosure for ${short}...; paging anyway:`,
+        err,
+      );
+      return null;
+    }
+  })();
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const first = await Promise.race([
+    recording,
+    new Promise<'slow'>((resolve) => {
+      timer = setTimeout(() => resolve('slow'), RECOVERY_DISCLOSURE_RECORD_TIMEOUT_MS);
+    }),
+  ]);
+  clearTimeout(timer);
+
+  // A real high flag exists: the on-call was paged for it, it is on record.
+  if (first !== 'slow' && first !== null && !first.recorded) return;
+
+  if (first === 'slow') {
+    console.error(`[CrisisPipeline] recording the recovery-session disclosure for ${short}... is slow; paging first`);
+  }
+  import('./crisisPaging.service.js')
+    .then((m) => m.pageHighRisk(turn.sessionId, risk.riskScore, { trigger: 'high_turn_in_recovery_session' }))
+    .catch((err) => console.error('[CrisisPipeline] page for a recovery-session disclosure failed:', err));
+
+  const recorded = first === 'slow' ? await recording : first;
+  if (!recorded?.recorded) return;
+
+  console.log(
+    `Session ${turn.sessionId}: participant disclosure recorded in a recovery session ` +
+      `(score: ${risk.riskScore}, replaces the continuation stamp's ${recorded.stampedScore ?? 'n/a'}, ${channel})`,
+  );
+
+  try {
+    await logInterventionAction(turn.sessionId, 'auto_flag', {
+      riskScore: risk.riskScore,
+      severity: 'high',
+      messageId: turn.messageId,
+      factors: risk.factors,
+      recoveryDisclosure: true,
+      crisisEventId: recorded.eventId,
+      replacesStampScore: recorded.stampedScore,
+    });
+  } catch (err) {
+    console.error('[CrisisPipeline] auto_flag log for a recovery-session disclosure failed:', err);
+  }
+
+  if (global.io) {
+    void broadcastAdminEventForSession(
+      global.io,
+      'session:crisis-detected',
+      {
+        sessionId: turn.sessionId,
+        severity: 'high',
+        riskScore: risk.riskScore,
+        factors: risk.factors,
+        messageId: turn.messageId,
+        detectedAt: new Date(),
+        message: `HIGH risk detected in a recovery session (score: ${risk.riskScore})`,
+        ...(channel === 'chat' ? { sessionType: 'chat' } : {}),
+      },
+      turn.sessionId,
+    );
+    void broadcastAdminEventForSession(
+      global.io,
+      'session:crisis-event-created',
+      {
+        sessionId: turn.sessionId,
+        severity: 'high',
+        riskScore: risk.riskScore,
+        factors: risk.factors,
+        detectedAt: new Date(),
+      },
+      turn.sessionId,
+      'summary',
+    );
+  }
+
+  // One incident, one adverse-event report. If the incident's chain already
+  // has one (the participant was flagged high before the cut), it stands. If
+  // that cannot be determined, draft: a second draft is a nuisance for the
+  // reviewer, a missing one is an unreported event. The assembler skips
+  // non-study sessions and is idempotent per crisis event.
+  let alreadyReported = false;
+  try {
+    alreadyReported = await incidentHasCrisisAdverseEvent(turn.sessionId);
+  } catch (err) {
+    console.error('[CrisisPipeline] could not tell whether the incident has an adverse-event report; drafting:', err);
+  }
+  if (!alreadyReported) {
+    import('./adverseEvent.service.js')
+      .then((m) => m.draftAdverseEventFromCrisis(turn.sessionId))
+      .catch((err) => console.error('AE auto-draft failed:', err));
+  }
+
+  await enqueueCrisisFlagWorkItem(turn.sessionId, 'high', risk.riskScore, risk.factors);
 }
 
 /** A participant turn that ended this recently before the next one began is

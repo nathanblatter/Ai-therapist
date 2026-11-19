@@ -640,7 +640,9 @@ export class ToolRegistry {
           // model-initiated escalation must trigger the same response the
           // auto pipeline would have.
           const { executeGraduatedResponse } = await import('./crisisIntervention.service.js');
-          await executeGraduatedResponse(ctx.sessionId, 'high', scoreByUrgency.high);
+          // 'model_escalation': the page must not say the score came "from
+          // what the participant said" (it is the fixed score above).
+          await executeGraduatedResponse(ctx.sessionId, 'high', scoreByUrgency.high, 'model_escalation');
         }
         await logInterventionAction(ctx.sessionId, 'ai_escalation', { urgency, reason });
 

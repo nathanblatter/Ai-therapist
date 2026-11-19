@@ -32,7 +32,16 @@ vi.mock('./crisisAlert.service.js', () => ({ sendCrisisAlert: sendCrisisAlertMoc
 const { broadcastAdminEventMock } = vi.hoisted(() => ({ broadcastAdminEventMock: vi.fn() }));
 vi.mock('../utils/adminBroadcast.js', () => ({ broadcastAdminEvent: broadcastAdminEventMock }));
 
-import { scanThreadMessage, sweepStaleScans, userRoom } from './messageSafety.service.js';
+const { sweepSilenceChecksMock } = vi.hoisted(() => ({ sweepSilenceChecksMock: vi.fn() }));
+vi.mock('./crisisPaging.service.js', () => ({ sweepSilenceChecks: sweepSilenceChecksMock }));
+
+import {
+  scanThreadMessage,
+  sweepStaleScans,
+  runSafetyBackstopPass,
+  startMessageScanSweeper,
+  userRoom,
+} from './messageSafety.service.js';
 import type { MessageThreadRow, ThreadMessageRow } from '../db/messaging.queries.js';
 
 function thread(overrides: Partial<MessageThreadRow> = {}): MessageThreadRow {
@@ -367,5 +376,44 @@ describe('sweepStaleScans', () => {
   it('never throws when the claim query fails', async () => {
     dbMocks.claimStaleScanMessages.mockRejectedValueOnce(new Error('db down'));
     await expect(sweepStaleScans()).resolves.toBe(0);
+  });
+});
+
+// ai-therapist-362: the same tick also brings the paging policy's silence
+// checks up to date, so a check owed by a stored row survives a restart.
+describe('the safety backstop tick', () => {
+  beforeEach(() => {
+    sweepSilenceChecksMock.mockReset().mockResolvedValue({ ran: 0, armed: 0, expired: 0 });
+    dbMocks.claimStaleScanMessages.mockReset().mockResolvedValue([]);
+  });
+
+  it('one pass runs the stale-scan sweep and the silence-check sweep', async () => {
+    await runSafetyBackstopPass();
+    expect(dbMocks.claimStaleScanMessages).toHaveBeenCalledTimes(1);
+    expect(sweepSilenceChecksMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failing scan sweep does not cost the silence checks their pass, and the reverse', async () => {
+    dbMocks.claimStaleScanMessages.mockRejectedValueOnce(new Error('db down'));
+    await runSafetyBackstopPass();
+    expect(sweepSilenceChecksMock).toHaveBeenCalledTimes(1);
+
+    sweepSilenceChecksMock.mockRejectedValueOnce(new Error('boom'));
+    await expect(runSafetyBackstopPass()).resolves.toBeUndefined();
+  });
+
+  it('runs shortly after startup and then on every tick', async () => {
+    vi.useFakeTimers();
+    try {
+      startMessageScanSweeper();
+      startMessageScanSweeper(); // idempotent
+      expect(sweepSilenceChecksMock).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(sweepSilenceChecksMock).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(3 * 60_000);
+      expect(sweepSilenceChecksMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

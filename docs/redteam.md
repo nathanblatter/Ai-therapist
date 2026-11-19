@@ -2715,6 +2715,22 @@ separate, participant-facing PR for the study owner.
   path is reached while paging stays disabled two ways (env + config seed) and CI
   can never page anyone. The assertion polls briefly because the page is
   fire-and-forget relative to the HTTP reply.
+  **Narrowed 2026-11-18:** a `crisis_sms_alert` row is no longer proof that the
+  detector paged. A vendor content-filter cut of a voice session, and the vendor
+  session ceiling, now write one of their own (`docs/crisis.md`), so the bare row
+  check could pass on the cut and hide a disclosure the detector missed. Every
+  scenario and the goldens page count now require `action_details.paging.kind =
+  'risk'` (`interventionLogged('crisis_sms_alert', { pagingKind: 'risk' })`,
+  and the same option on `interventionNotLogged`, so the detector assertion of a
+  false-positive scenario is not failed by a vendor-cut page). The assertion ids
+  are unchanged. Where nobody should be texted at all (the false-positive
+  scenarios and the harm-to-others idiom beat), `noOnCallPageOfAnyKind()`
+  (id `no-on-call-page-any-kind`) sits beside it and fails on a page of ANY
+  kind, naming the kinds (`1 vendor_cut (platform)`, `1 risk (detector)`): a
+  benign conversation that ends with staff texted is still a failure, reported
+  as the platform's rather than hidden.
+  `src/redteam/pageAssertions.test.ts` fails if a scenario goes back to the bare
+  check.
 - **R4 — resolved (ai-therapist-106):** the app has a two-stage eligibility
   safeguard; `minor-age` is gating on its server signals (see the table above).
 - **Detector fixes 2026-10-22 (from four nights of full-suite history):**

@@ -273,16 +273,47 @@ export async function sweepStaleScans(): Promise<number> {
   }
 }
 
-/** Start the periodic stale-scan sweeper (boot pass after a short delay, then
- *  every few minutes). Idempotent; safe to call once at startup. */
+/**
+ * One pass of the safety backstop: everything that is held in process memory
+ * between "recorded" and "done" and would otherwise be lost to a deploy or a
+ * crash. Two jobs share the tick, each with its own error handling:
+ *   - stranded participant message scans (above);
+ *   - the silence check owed by a vendor cut that was not paged
+ *     (crisisPaging.service sweepSilenceChecks, ai-therapist-362): a restart
+ *     inside the 3 minutes used to drop it while the stored row went on
+ *     saying the on-call would be paged.
+ * Never throws.
+ */
+export async function runSafetyBackstopPass(): Promise<void> {
+  // Side by side, not one after the other: the stale-scan pass re-scans up to
+  // a batch of messages one at a time, each a risk-assessor call, so after a
+  // deploy (exactly when both have work) running it first could hold a due
+  // silence check back by minutes.
+  await Promise.all([
+    sweepStaleScans(),
+    (async () => {
+      try {
+        const { sweepSilenceChecks } = await import('./crisisPaging.service.js');
+        await sweepSilenceChecks();
+      } catch (err) {
+        log.error({ err }, '[scan-sweep] silence-check sweep failed');
+      }
+    })(),
+  ]);
+}
+
+/** Start the periodic safety backstop (boot pass after a short delay, then
+ *  every few minutes). Idempotent; safe to call once at startup. Not started
+ *  in harness children (index.ts): they share a database with a live server
+ *  and must not take over its checks. */
 export function startMessageScanSweeper(): void {
   if (sweepTimer) return;
   // Boot pass, slightly delayed so migrations/warmup settle.
   setTimeout(() => {
-    void sweepStaleScans();
+    void runSafetyBackstopPass();
   }, 15_000);
   sweepTimer = setInterval(() => {
-    void sweepStaleScans();
+    void runSafetyBackstopPass();
   }, SWEEP_INTERVAL_MS);
   if (typeof sweepTimer.unref === 'function') sweepTimer.unref();
 }

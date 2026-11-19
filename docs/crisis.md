@@ -314,29 +314,69 @@ Responses are tiered by severity/score:
   - **A recovery session's high flag is a stamp, not a disclosure.** A recovery session is
     flagged high the moment it starts, at the score of the participant's last flagged session
     or at 100 when there is none, so the re-flag rule (severity rise, or more than 10 above
-    the stored score) cannot fire in it and a disclosure there writes no `flagged` event.
-    The pipeline therefore hands every high turn that was not re-flagged to
-    `pageHighTurnWithoutReflag`: it requests a page (same folding as any other) when the
-    session's only high flag is the `recovery_continuation` stamp, and does nothing when a
-    real high flag exists. No flag, adverse-event draft or steer is added by that path.
-  - **Vendor content-filter cut**, by the participant's peak risk in the incident (crisis
-    flags, and the scores the assessor gave their turns in `risk_score_history`, on this
-    session or on the participant's other sessions in the last two hours; the automatic
-    `recovery_continuation` stamp does not count): **high** pages once per incident;
-    **medium** pages once per incident, worded "vendor cut, NOT a high risk score" (the filter
-    typically cuts the screening question itself, so the answer is what was lost); **none**
+    the stored score) cannot fire in it. The pipeline therefore hands every high turn that was
+    not re-flagged to `handleHighTurnWithoutReflag` (`crisisPipeline.service.ts`,
+    ai-therapist-363). When the session's only high flag is the `recovery_continuation` stamp,
+    the participant's first real high turn there is **recorded and paged**:
+    - a `crisis_events` `flagged` row at high severity with the score the assessor gave the
+      turn, its factors and its `message_id` (`previous_risk_score` keeps the stamp's
+      placeholder), and the session row's `crisis_risk_score` / `crisis_flagged_at` corrected
+      from the placeholder to what was assessed, in one transaction, once per session
+      (`recordRecoveryDisclosure`); the re-flag rule then works normally for the rest of the
+      session;
+    - an on-call page, under the same folding as any other;
+    - the `auto_flag` intervention row (`recoveryDisclosure: true`), the dashboards' crisis
+      events and the care-team work item;
+    - an adverse-event draft, unless the incident (the recovery chain) already has one drafted
+      from a crisis flag: one incident, one report.
+    It does not re-run the high-risk response, so no second safety-protocol steer is added. A
+    session with a real high flag is left alone: nothing is written or paged from this path.
+    If the record cannot be written, or takes longer than 2 s, the page goes out without it.
+  - **Vendor content-filter cut**, by the participant's peak risk in the incident: crisis
+    flags (including a researcher raising a session's risk by hand, `risk_score_updated` /
+    `severity_changed`) and the scores the assessor gave their turns in `risk_score_history`.
+    The incident is this session and the **recovery chain** behind it (each recovery session
+    continues the participant's session whose vendor cut was recorded just before it started,
+    else the one started last: no column links them), however long the chain has run, with a 12 h
+    backstop; plus the participant's other sessions in the last two hours. The automatic
+    `recovery_continuation` stamp never counts. **high** pages once per incident;
+    **medium** pages once per incident, worded "vendor cut, NOT a high risk score", says the
+    participant's answer may be what was lost (the filter typically cuts the screening
+    question itself) and asks the on-call to consider reaching out; **none**
     does not page at the cut: it is recorded, shown on the dashboard, and checked again after
     3 minutes, when the on-call is paged if the participant has not spoken in any session
     since (the filter can end a session before the last words reach us). That later page
     states the participant's risk as it is when the check runs: if the turn the filter cut on
     was scored high after the cut, it is an URGENT page at the high level, not "nothing they
-    said was flagged". The check is an in-process timer: a restart or deploy inside the 3
-    minutes loses it, and only the dashboard record remains. Unreadable risk is treated as
-    medium, not as none.
+    said was flagged". Unreadable risk is treated as medium, not as none.
+  - **The 3-minute silence check is owed by the stored row, not by the server process**
+    (ai-therapist-362). The cut's `external_api_called` row carries
+    `paging.silenceCheck: { state: 'pending' }`. The process that recorded the cut runs the
+    check from a timer at 3 minutes; at startup, and every 3 minutes on the safety backstop
+    tick (`messageSafety.service` `runSafetyBackstopPass`), `sweepSilenceChecks` reads every
+    unfinished check: one that is due runs at once, one that is not gets a timer for the time
+    it has left. So a restart or deploy inside the 3 minutes changes nothing. Whoever runs a
+    check first claims it with one conditional `UPDATE` (`state: 'running'`), so two app
+    instances cannot both run it, and its result is written back (`state: 'done'`, with
+    `outcome` and the page's `action_id`) so it never runs twice. A claim whose process died
+    is retried after 60 s; if that produces a second run, its page folds into the first when
+    that was delivered. A check whose page no channel accepted is not done: it goes back to
+    `pending` with `attempts` counted and the next sweep sends it again. A check found more
+    than 15 minutes late (a long outage), or still undelivered then, is not paged: it is marked
+    `expired`, logged at error level and shown on the dashboards (an undelivered one as "page
+    NOT DELIVERED ... On-call has NOT been told"). The silence sweep runs beside the stale-scan
+    re-scan on the same tick, not behind it. Harness and
+    demo sessions are never swept (their check runs only in the process that recorded the cut).
   - Only a page known to be delivered absorbs another. Lookup failures, timeouts (2 s) and an
-    undelivered page all fail toward paging.
+    undelivered page all fail toward paging. The sandbox check and the history lookup run
+    together, and the admin-config read inside the send has its own 2 s timeout, so a database
+    that has stopped answering delays a first page by about 2 s (a vendor-cut page, which also
+    reads the participant's risk first, by about 4 s).
   - Every page text has a `Why:` line: `RISK SCORE n/100`, `VENDOR CUT`, or
-    `VENDOR SESSION LIMIT`.
+    `VENDOR SESSION LIMIT`. A risk page says "from what the participant said" only when the
+    risk pipeline scored a turn; when the flag was raised by the model's `escalate_to_human`
+    tool it says the score was set by the assistant asking for a human, and that it is the
+    fixed score for that request.
   Not covered (unchanged): system alerts (assessor outage, spend cap, lost monitoring
   connection, eval drift) and thread-message alerts, which have their own throttles or none.
 - **Risk score >= 25 (low and up)**: the system injects hidden de-escalation steering

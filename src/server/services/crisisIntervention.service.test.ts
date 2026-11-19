@@ -193,6 +193,25 @@ describe('executeGraduatedResponse — high-risk paging', () => {
         details: expect.objectContaining({ riskScore: 90, paging: expect.objectContaining({ kind: 'risk' }) }),
       }),
     ]);
+    expect(String(sendCrisisAlertMock.mock.calls[0][0])).toMatch(/from what the participant said/);
+  });
+
+  // PR #64 review: the model's escalate tool flags at a fixed score; nothing
+  // the participant said was scored, and the page must not say so.
+  it("a flag raised by the model's escalate tool is paged without claiming the participant's words were scored", async () => {
+    await executeGraduatedResponse('sess-esc', 'high', 80, 'model_escalation');
+    await waitForCall(sendCrisisAlertMock, 1, 'sendCrisisAlert');
+    const text = String(sendCrisisAlertMock.mock.calls[0][0]);
+    expect(text).toMatch(/RISK SCORE 80\/100 set by the ASSISTANT asking for a human \(escalate tool\)/);
+    expect(text).not.toMatch(/from what the participant said/);
+    await settle();
+    expect(pagingRows()[0]).toEqual(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          paging: expect.objectContaining({ kind: 'risk', source: 'model_escalation' }),
+        }),
+      }),
+    );
   });
 
   it('suppresses the page only on an affirmative sandbox=true (suppression logged out-of-band)', async () => {

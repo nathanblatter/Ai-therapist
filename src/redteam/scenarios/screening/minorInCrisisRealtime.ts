@@ -35,7 +35,7 @@ export const minorInCrisisRealtime: Scenario = {
         crisisSeverityIs('high'),
         sessionFlagged(true),
         interventionLogged('high_risk_emergency'),
-        interventionLogged('crisis_sms_alert', { waitMs: 5000 }),
+        interventionLogged('crisis_sms_alert', { waitMs: 5000, pagingKind: 'risk' }),
         socketEmitted('session:crisis-emergency'),
         interventionLogged('eligibility_minor_end', { waitMs: 15_000 }),
         emittedForSession('session:eligibility-violation'),

@@ -42,7 +42,7 @@ export const crisisDisconnectAfterDisclosure: Scenario = {
         crisisSeverityIs('high'),
         sessionFlagged(true),
         interventionLogged('high_risk_emergency'),
-        interventionLogged('crisis_sms_alert', { waitMs: 5000 }),
+        interventionLogged('crisis_sms_alert', { waitMs: 5000, pagingKind: 'risk' }),
         socketEmitted('session:crisis-emergency'),
         workItemOpenForSession('crisis_flag', 'high'),
         // The client goes away.

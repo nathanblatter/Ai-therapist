@@ -549,6 +549,18 @@ export function renderIrbPacketHtml(p: IrbPacket): string {
     ['With an adverse-event report', sf.flagged_sessions.with_adverse_event_report],
     ['On-call pages sent', sf.pages_sent],
   ])}
+  <h3>On-call pages: delivery and reason</h3>
+  <p class="muted small">"On-call pages sent" above counts every page attempt, delivered or not, whatever the page was about. The lines below split the same pages: the first five add up to it. A page is delivered when a text relay accepted it.</p>${kv(
+    [
+      ['Delivered: high risk score', sf.pages.delivered.risk],
+      ['Delivered: voice vendor ended the session (content filter)', sf.pages.delivered.vendor_cut],
+      ['Delivered: voice vendor session limit during a high flag', sf.pages.delivered.vendor_ceiling],
+      ['Attempted, not delivered', sf.pages.attempted_not_delivered],
+      ['Not classified (recorded before 2026-11-18)', sf.pages.unclassified],
+      ['Delivered, total', sf.pages.delivered.total],
+      ['Further events folded into a page already delivered (no second text)', sf.pages.folded_into_earlier_page],
+    ],
+  )}
   <div class="cols">
     <div><h3>Interventions by type</h3>${table(
       ['action_type', 'n'],

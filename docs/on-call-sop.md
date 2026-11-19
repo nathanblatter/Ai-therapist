@@ -30,17 +30,21 @@ participant — a trained human decides the response.
 Every page has a `Why:` line. Read it first (`docs/crisis.md`, "Whether a
 high-severity event becomes an SMS"; code: `crisisPaging.service`):
 
-- **`Why: RISK SCORE n/100`** ("URGENT: ... HIGH crisis flag"): the detector
-  scored something the participant said as high risk. "(ESCALATED)" means the
-  score has since reached 90 or more.
+- **`Why: RISK SCORE n/100`** ("URGENT: ... HIGH crisis flag"): "from what the
+  participant said" means the detector scored something the participant said
+  as high risk. "set by the ASSISTANT asking for a human (escalate tool)" means
+  the assistant itself asked for a person at high urgency; the 80 on that page
+  is the fixed score for such a request, not a score of the participant's
+  words, so read the transcript to see what prompted it. "(ESCALATED)" means
+  the score has since reached 90 or more.
 - **`Why: VENDOR CUT`**: the voice vendor's content filter ended the
   participant's voice session. The page says what their risk was:
   - "during a HIGH crisis flag" (URGENT): they were at high risk and lost the
     assistant mid-conversation.
   - "NOT a high risk score ... MEDIUM": they were at medium risk. The filter
     often cuts the assistant's own screening question, so the participant's
-    answer may be what was lost. Review the transcript; do not read "not high"
-    as "no concern".
+    answer may be what was lost (the page says so). Review the transcript and
+    consider reaching out; do not read "not high" as "no concern".
   - "could NOT be read": the system could not determine their risk. Treat it
     as possibly serious.
   - "the participant has NOT come back": a session was cut and the participant
@@ -62,8 +66,18 @@ phone does not mean nothing further happened.
 
 A vendor cut of a session with **no** risk flag is not texted at the cut. It
 is shown on the dashboard, and you are texted 3 minutes later only if the
-participant has not spoken again. That 3-minute check does not survive a
-server restart or deploy; the dashboard record of the cut does.
+participant has not spoken again. That check survives a server restart or
+deploy: it is stored with the record of the cut and picked up again when the
+server starts. Only if the server is down for more than 15 minutes after the
+cut is the check not run; the cut's dashboard record then says "Silence check
+NOT run", and nobody is texted for it. If the check's text could not be sent,
+it is tried again every few minutes until the same 15-minute limit; after that
+the dashboard says "Silence check page NOT DELIVERED".
+
+A participant's first high-risk statement in a **recovery session** (the
+session the app opens after a vendor cut) pages like any other and is on the
+record as a crisis flag of its own, with its score; if the incident had no
+adverse-event draft yet, one is drafted then.
 
 A text counts as delivered when the SMS relay accepts it. If your phone was
 off or out of coverage, texts for that participant may have been folded for
