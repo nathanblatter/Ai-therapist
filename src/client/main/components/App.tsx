@@ -13,6 +13,15 @@ import { sessionLimitNotice, type SessionLimitNotice } from '../lib/sessionLimit
 import { requeueLogBatch, shouldRequeueLogBatch } from '../lib/logBatch';
 import ExerciseOverlay, { type ActiveExercise } from './ExerciseOverlay';
 import ToolOverlays, { type ToolUI, type SafetyPlanData } from './ToolOverlays';
+import PendingToolNotice from './PendingToolNotice';
+import {
+  emptySlot,
+  presentOverlay,
+  replaceOverlay,
+  closeOverlay,
+  dropHeld,
+  type OverlaySlot,
+} from '../lib/overlaySlot';
 import PostSessionScreen, {
   type PostSessionData,
   type SessionRecapData,
@@ -31,6 +40,8 @@ import { startMixedTee, type AudioTeeHandle } from '../lib/audioTee';
 import { createAudioUploader, type AudioUploader } from '../lib/audioUploader';
 import { createParticipantSocket } from '../lib/participantSocket';
 import { GrokVoiceClient } from '../lib/grokVoiceClient';
+import { VoiceOverlayGate, type PendingOverlay } from '../lib/voiceOverlayGate';
+import type { ToolOverlayOutcome } from '../../../shared/toolOverlayPolicy';
 import type { GrokServerMessage } from '../../../shared/grokVoiceProtocol';
 import { getUserSocket, closeUserSocket } from '../lib/userSocket';
 import {
@@ -264,6 +275,42 @@ export default function App() {
   // Tool calls arrive on the data channel AND on the server's sideband. Ours is
   // UI-only, but a redelivered envelope must not re-open an overlay.
   const handledToolCallsRef = useRef<Set<string>>(new Set());
+  // Voice overlays open on the server's outcome, not on the model's call
+  // (lib/voiceOverlayGate.ts, shared/toolOverlayPolicy.ts); the crisis-
+  // resource card excepted, which opens at once. Created once; it reaches the
+  // per-tool fns and the session id through refs.
+  const overlayFnsRef = useRef<
+    Record<string, ((args: unknown, opts?: { unconfirmed?: boolean }) => Promise<unknown>) | undefined>
+  >({});
+  const [pendingOverlays, setPendingOverlays] = useState<PendingOverlay[]>([]);
+  const voiceOverlayGateRef = useRef<VoiceOverlayGate | null>(null);
+  if (voiceOverlayGateRef.current === null) {
+    voiceOverlayGateRef.current = new VoiceOverlayGate({
+      open: (name, args, opts) => {
+        const fn = overlayFnsRef.current[name];
+        if (!fn) return;
+        void fn(args, opts).then((result) =>
+          logConversation({
+            sessionId: liveSessionIdRef.current,
+            role: 'system',
+            type: 'function_call',
+            message: `Function ${name} called`,
+            extras: { args, result, ...(opts.unconfirmed ? { unconfirmed: true } : {}) },
+          }),
+        );
+      },
+      fetchOutcome: async (callId) => {
+        const id = liveSessionIdRef.current;
+        if (!id) return null;
+        const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/tool-outcome/${encodeURIComponent(callId)}`, {
+          credentials: 'include',
+        });
+        if (!res.ok) return null;
+        return ((await res.json()) as { outcome?: ToolOverlayOutcome | null }).outcome ?? null;
+      },
+      onPendingChange: setPendingOverlays,
+    });
+  }
   // The server flagged THIS voice session high (session:crisis-emergency).
   // Decides whether the vendor's 60-minute expiry is an ordinary end or a
   // conversation that must be recovered (ai-therapist-281). A recovery session
@@ -277,7 +324,21 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCheckInOpen, setIsCheckInOpen] = useState(false);
   const [activeExercise, setActiveExercise] = useState<ActiveExercise | null>(null);
-  const [toolUI, setToolUI] = useState<ToolUI | null>(null);
+  const [toolUI, setToolUIState] = useState<ToolUI | null>(null);
+  // One overlay slot (lib/overlaySlot.ts): while the crisis-resource card is on
+  // screen, an overlay a tool call asks for is held until the participant
+  // closes the card, unless it is the safety plan (which carries the crisis
+  // lines itself). Kept in a ref so handlers registered in an earlier render
+  // see the slot as it is now.
+  const toolSlotRef = useRef<OverlaySlot<ToolUI>>(emptySlot<ToolUI>());
+  const applyToolSlot = (next: OverlaySlot<ToolUI>) => {
+    toolSlotRef.current = next;
+    setToolUIState(next.shown);
+  };
+  /** What the app or the server puts up directly: the crisis card, a clear. */
+  const setToolUI = (next: ToolUI | null) => applyToolSlot(replaceOverlay(toolSlotRef.current, next));
+  /** An overlay a tool call asked for (voice gate or chat reply). */
+  const presentToolUI = (next: ToolUI) => applyToolSlot(presentOverlay(toolSlotRef.current, next));
   // Artifacts the participant chose to keep/share during the session, for
   // "Download my work" (ai-therapist-76) — never the raw transcript.
   const [sessionRecap, setSessionRecap] = useState<SessionRecapData | null>(null);
@@ -1583,6 +1644,8 @@ export default function App() {
     // event as arriving during a teardown.
     isTearingDownRef.current = false;
     handledToolCallsRef.current = new Set();
+    voiceOverlayGateRef.current?.reset();
+    applyToolSlot(dropHeld(toolSlotRef.current));
     // Always: caption rows are grouped by position on the SESSION timeline,
     // which restarts at zero here. Carrying rows across would let the first
     // words of the recovery session merge into the last row of the terminated
@@ -2221,10 +2284,16 @@ export default function App() {
     setMessages((prev) => [...prev, { id, role: msg.role, text: msg.text }]);
   }
 
-  /** UI-only: open the overlay for a tool the SERVER is executing. */
+  /**
+   * UI-only notice of a tool the SERVER is executing. An overlay tool goes
+   * through the gate: the crisis-resource card opens now, anything else on the
+   * `tool_outcome` that follows (same as GPT-Live). Other tools (end_session)
+   * are handled here as before.
+   */
   async function handleGrokToolCall(msg: Extract<GrokServerMessage, { type: 'tool_call' }>) {
     if (handledToolCallsRef.current.has(msg.callId)) return;
     handledToolCallsRef.current.add(msg.callId);
+    if (voiceOverlayGateRef.current?.onModelCall(msg.callId, msg.name, msg.args ?? {})) return;
     const fn = (fns as Record<string, ((args: unknown) => Promise<unknown>) | undefined>)[msg.name];
     if (fn === undefined) return;
     const result = await fn(msg.args);
@@ -2244,6 +2313,9 @@ export default function App() {
         return; // several a second; not worth an events-panel entry
       case 'tool_call':
         void handleGrokToolCall(msg);
+        break;
+      case 'tool_outcome':
+        voiceOverlayGateRef.current?.onOutcome(msg);
         break;
       case 'error':
         reportClientEvent(
@@ -2299,6 +2371,8 @@ export default function App() {
     liveClosedWaiterRef.current = null;
     isTearingDownRef.current = false;
     handledToolCallsRef.current = new Set();
+    voiceOverlayGateRef.current?.reset();
+    applyToolSlot(dropHeld(toolSlotRef.current));
     grokRowsRef.current = new Map();
     captionRowsRef.current = { user: [], assistant: [] };
     moderationHandledRef.current = false;
@@ -2621,6 +2695,12 @@ export default function App() {
       void moderationHandlerRef.current(data?.sessionId ?? null, data?.reason);
     });
 
+    // How a voice tool call ended (both backends; Grok also sends it on its own
+    // socket). Overlays other than the crisis card open only on this.
+    socket.on('session:tool-outcome', (data: ToolOverlayOutcome | undefined) => {
+      voiceOverlayGateRef.current?.onOutcome(data);
+    });
+
     // The server refused the model's end_session on a crisis-flagged session.
     // The end_session tool handler consults this before tearing down.
     socket.on('session:end-vetoed', (data: { reason?: string } | undefined) => {
@@ -2773,6 +2853,10 @@ export default function App() {
     } catch (err) {
       console.error(`[Live] Could not parse arguments for ${item.name}:`, err);
     }
+    // An overlay opens on the server's outcome, not here (the crisis-resource
+    // card excepted: the gate opens it at once).
+    const gateArgs = args && typeof args === 'object' ? (args as Record<string, unknown>) : {};
+    if (voiceOverlayGateRef.current?.onModelCall(item.call_id, item.name, gateArgs)) return;
     const result = await fn(args);
     logConversation({
       sessionId: liveSessionIdRef.current,
@@ -2785,6 +2869,9 @@ export default function App() {
 
   async function stopSession() {
     setActiveExercise(null);
+    // No overlay may open after the call ends; pending and held ones are dropped.
+    voiceOverlayGateRef.current?.reset();
+    toolSlotRef.current = dropHeld(toolSlotRef.current);
     // A vendor cut (ai-therapist-293) keeps the crisis resource card: this
     // teardown runs underneath the recovery screen, and clearing the card here
     // is how a card the server had just opened used to vanish with the call.
@@ -3155,7 +3242,7 @@ export default function App() {
         // same fns map the realtime data channel drives so overlays (resource
         // card, safety plan, thought record, ...) render identically. Unknown
         // or teardown-related names are skipped gracefully. The server sends
-        // only the overlays the call's outcome allows (chatToolOverlays.ts);
+        // only the overlays the call's outcome allows (shared/toolOverlayPolicy.ts);
         // `unconfirmed` marks a safety plan whose save did not confirm.
         const toolEvents = (data.toolEvents ?? []) as Array<{ name: string; args?: unknown; unconfirmed?: boolean }>;
         for (const ev of toolEvents) {
@@ -3437,11 +3524,11 @@ export default function App() {
       return { shown: true };
     },
     start_values_sort: async () => {
-      setToolUI({ kind: 'values_sort' });
+      presentToolUI({ kind: 'values_sort' });
       return { shown: true };
     },
     start_fear_ladder: async () => {
-      setToolUI({ kind: 'fear_ladder' });
+      presentToolUI({ kind: 'fear_ladder' });
       return { shown: true };
     },
     show_resource_card: async (args: unknown) => {
@@ -3450,12 +3537,12 @@ export default function App() {
       return { shown: true };
     },
     start_thought_record: async () => {
-      setToolUI({ kind: 'thought_record' });
+      presentToolUI({ kind: 'thought_record' });
       return { shown: true };
     },
     show_journaling_prompt: async (args: unknown) => {
       const a = (args ?? {}) as { prompt?: string };
-      setToolUI({ kind: 'journal', prompt: a.prompt || 'What would you like to put into words right now?' });
+      presentToolUI({ kind: 'journal', prompt: a.prompt || 'What would you like to put into words right now?' });
       return { shown: true };
     },
     create_custom_worksheet: async (args: unknown) => {
@@ -3471,7 +3558,7 @@ export default function App() {
       if (!a.title || !Array.isArray(a.sections) || a.sections.length === 0) {
         return { shown: false };
       }
-      setToolUI({
+      presentToolUI({
         kind: 'custom_worksheet',
         title: a.title,
         intro: a.intro ?? null,
@@ -3482,19 +3569,19 @@ export default function App() {
     display_session_recap: async (args: unknown) => {
       const a = (args ?? {}) as { focus?: string; techniques?: string[]; takeaway?: string };
       const recap = { focus: a.focus || 'Today’s conversation', techniques: a.techniques, takeaway: a.takeaway || '' };
-      setToolUI({ kind: 'recap', ...recap });
+      presentToolUI({ kind: 'recap', ...recap });
       setSessionRecap(recap); // kept for "Download my work" (ai-therapist-76)
       return { shown: true };
     },
     create_safety_plan: async (args: unknown, opts?: { unconfirmed?: boolean }) => {
       const plan = (args ?? {}) as SafetyPlanData;
-      setToolUI({ kind: 'safety_plan', plan, ...(opts?.unconfirmed ? { unconfirmed: true } : {}) });
+      presentToolUI({ kind: 'safety_plan', plan, ...(opts?.unconfirmed ? { unconfirmed: true } : {}) });
       setSessionSafetyPlan(plan); // kept for "Download my work" (ai-therapist-76)
       return { shown: true };
     },
     administer_scale: async (args: unknown) => {
       const a = (args ?? {}) as { scale?: string };
-      if (a.scale) setToolUI({ kind: 'scale', scale: a.scale });
+      if (a.scale) presentToolUI({ kind: 'scale', scale: a.scale });
       return { shown: Boolean(a.scale) };
     },
     end_session: async () => {
@@ -3512,6 +3599,10 @@ export default function App() {
       return { ending: true };
     },
   };
+  overlayFnsRef.current = fns as Record<
+    string,
+    ((args: unknown, opts?: { unconfirmed?: boolean }) => Promise<unknown>) | undefined
+  >;
 
   // NOTE: the whole session config (model, voice, instructions, delegated
   // backend, tools) is applied server-side when POST /api/live/session creates
@@ -3697,10 +3788,13 @@ export default function App() {
         }}
       />
 
+      {/* A voice screener, worksheet or safety plan the server has not confirmed yet */}
+      {isSessionActive && sessionType === 'realtime' && <PendingToolNotice pending={pendingOverlays.length > 0} />}
+
       {/* Wave-2 tool surfaces: resource card, thought record, journal, recap, safety plan, screeners */}
       <ToolOverlays
         ui={toolUI}
-        onClose={() => setToolUI(null)}
+        onClose={() => applyToolSlot(closeOverlay(toolSlotRef.current))}
         onShareText={(text) => {
           sendTextMessage(text);
           // Only journal uses onShareText; keep it for "Download my work" (ai-therapist-76).

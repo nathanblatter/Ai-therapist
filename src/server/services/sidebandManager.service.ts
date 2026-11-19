@@ -51,6 +51,7 @@ import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { emitCrisisResources, hasEmittedHighRiskResources } from './crisisResources.js';
 import type { CrisisStateSource } from './crisisPaging.service.js';
 import { isToolTimeoutError, toolTimeoutMs } from './toolTimeouts.js';
+import { clearVoiceToolOutcomes, reportVoiceToolOutcome, voiceOverlayEvent, withScreenNote } from './toolOverlays.js';
 import { buildRecoverySpeakFirstNudge, type RecoveryCrisisContact } from '../../shared/recoveryPrompt.js';
 
 /**
@@ -2288,11 +2289,26 @@ export class SidebandManager {
     state.pendingCalls.delete(callId);
 
     const output = failure ? { error: failure, success: false } : result;
+    // The participant's screen follows the call's outcome, not the model's
+    // request (shared/toolOverlayPolicy.ts): the browser opens the overlay
+    // only on this message (the crisis-resource card excepted, which it opens
+    // at once). Unparseable arguments never reached the handler: a refusal.
+    const overlayEvent = voiceOverlayEvent(
+      callId,
+      call.name,
+      args,
+      parseError ? { result: output, success: true } : { result: output, success: !failure, timedOut },
+    );
+    if (overlayEvent) reportVoiceToolOutcome(sessionId, overlayEvent);
     try {
       this.sendEvent(sessionId, {
         type: 'response.item.create',
         event_id: `tool_result_${callId}`,
-        item: { type: 'function_call_output', call_id: callId, output: JSON.stringify(output) },
+        item: {
+          type: 'function_call_output',
+          call_id: callId,
+          output: JSON.stringify(withScreenNote(output, overlayEvent)),
+        },
       });
       // Continue the backend only once every outstanding call for this session
       // has a submitted result. Continuing early would run the backend while it
@@ -3031,6 +3047,10 @@ export class SidebandManager {
    * can prevent the final event from ever arriving, leaving usage unconfirmed.
    */
   async disconnect(sessionId: string, opts: { graceMs?: number } = {}): Promise<void> {
+    // Every end path comes through here (both backends): the session's kept
+    // overlay outcomes are no longer asked for (the browser's gate resets on
+    // teardown) and hold participant content (toolOverlays.ts).
+    clearVoiceToolOutcomes(sessionId);
     const delegate = this.delegateFor(sessionId);
     if (delegate) return delegate.disconnect(sessionId, opts);
     this.endedSessions.add(sessionId);

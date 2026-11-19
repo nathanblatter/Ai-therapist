@@ -117,6 +117,9 @@ import {
   LIVE_DELEGATION_GAP_COMMENTARY_NEUTRAL,
 } from './sidebandManager.service.js';
 import { ToolTimeoutError, toolTimeoutMessage, toolTimeoutMs } from './toolTimeouts.js';
+import { EXPECTED_OVERLAY, OUTCOME_CASES, OVERLAY_ARGS, REGISTRY_RESULT } from './toolOverlays.testTable.js';
+import { OVERLAY_NOT_SHOWN_NOTE, OVERLAY_UNCONFIRMED_NOTE } from '../../shared/toolOverlayPolicy.js';
+import { getVoiceToolOutcome } from './toolOverlays.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Internal = any;
@@ -486,6 +489,113 @@ describe('delegated tool calls (nested response.event)', () => {
       type: 'function_call_output',
       call_id: 'call_a',
       output: JSON.stringify({ worksheet: 'thought-record' }),
+    });
+  });
+
+  // Voice overlays follow the call's outcome (shared/toolOverlayPolicy.ts):
+  // the browser opens one only on `session:tool-outcome`, sent once the call
+  // has run, and the model is told when nothing opened.
+  describe('overlay outcome to the browser, per tool and outcome', () => {
+    function captureRoom(): Array<{ room: string; event: string; data: Record<string, unknown> }> {
+      const seen: Array<{ room: string; event: string; data: Record<string, unknown> }> = [];
+      (global as Internal).io = {
+        to: (room: string) => ({
+          emit: (event: string, data: Record<string, unknown>) => seen.push({ room, event, data }),
+        }),
+      };
+      return seen;
+    }
+
+    for (const [tool, byOutcome] of Object.entries(EXPECTED_OVERLAY)) {
+      for (const outcome of OUTCOME_CASES) {
+        const want = byOutcome[outcome];
+        it(`${tool}, ${outcome}: ${want}`, async () => {
+          const sessionId = `s-ovl-${tool}-${outcome}`;
+          const ws = await attach(sessionId);
+          const seen = captureRoom();
+          if (outcome === 'success') executeToolMock.mockResolvedValue(REGISTRY_RESULT.success);
+          else if (outcome === 'refused') executeToolMock.mockResolvedValue(REGISTRY_RESULT.refused);
+          else if (outcome === 'error') executeToolMock.mockRejectedValue(new Error('db down'));
+          else executeToolMock.mockRejectedValue(new ToolTimeoutError(tool, toolTimeoutMs(tool)));
+
+          await fire(sessionId, outputItemDone(`call_${outcome}`, tool, JSON.stringify(OVERLAY_ARGS[tool])));
+          await flush();
+
+          const outcomes = seen.filter((e) => e.event === 'session:tool-outcome');
+          expect(outcomes).toEqual([
+            {
+              room: `session:${sessionId}`,
+              event: 'session:tool-outcome',
+              data: { sessionId, callId: `call_${outcome}`, name: tool, args: OVERLAY_ARGS[tool], overlay: want },
+            },
+          ]);
+          expect(getVoiceToolOutcome(sessionId, `call_${outcome}`)).toMatchObject({ overlay: want });
+
+          const output = JSON.parse(sentEvents(ws)[0].item.output);
+          if (want === 'shown') expect(output).not.toHaveProperty('screen');
+          else expect(output.screen).toBe(want === 'hidden' ? OVERLAY_NOT_SHOWN_NOTE : OVERLAY_UNCONFIRMED_NOTE);
+        });
+      }
+    }
+
+    it('a screener the 7-day cadence refused is reported hidden, and the model is told nothing is on screen', async () => {
+      const sessionId = 's-ovl-cadence';
+      const ws = await attach(sessionId);
+      const seen = captureRoom();
+      const refusal = {
+        error: 'scale_recently_administered',
+        scale: 'phq2',
+        guidance: 'Do not mention this check or any error to the participant.',
+      };
+      executeToolMock.mockResolvedValue(refusal);
+      await fire(sessionId, outputItemDone('call_scale', 'administer_scale', '{"scale":"phq2"}'));
+      await flush();
+      expect(seen.find((e) => e.event === 'session:tool-outcome')?.data.overlay).toBe('hidden');
+      expect(JSON.parse(sentEvents(ws)[0].item.output)).toEqual({ ...refusal, screen: OVERLAY_NOT_SHOWN_NOTE });
+    });
+
+    it('the crisis-resource card is reported shown even when its call throws and the socket server is gone', async () => {
+      const sessionId = 's-ovl-card';
+      await attach(sessionId);
+      (global as Internal).io = undefined;
+      executeToolMock.mockRejectedValue(new Error('registry exploded'));
+      await fire(sessionId, outputItemDone('call_card', 'show_resource_card', '{}'));
+      await flush();
+      expect(getVoiceToolOutcome(sessionId, 'call_card')).toMatchObject({ overlay: 'shown' });
+    });
+
+    it('unparseable arguments never reach the handler: a safety plan is hidden, not shown as unconfirmed', async () => {
+      const sessionId = 's-ovl-parse';
+      await attach(sessionId);
+      captureRoom();
+      await fire(sessionId, outputItemDone('call_bad', 'create_safety_plan', '{not json'));
+      await flush();
+      expect(executeToolMock).not.toHaveBeenCalled();
+      expect(getVoiceToolOutcome(sessionId, 'call_bad')).toMatchObject({ overlay: 'hidden' });
+    });
+
+    it('a tool with no overlay sends the browser nothing', async () => {
+      const sessionId = 's-ovl-none';
+      await attach(sessionId);
+      const seen = captureRoom();
+      await fire(sessionId, outputItemDone('call_fw', 'find_worksheet', '{}'));
+      await flush();
+      expect(seen.filter((e) => e.event === 'session:tool-outcome')).toEqual([]);
+    });
+
+    it('the same tool called twice gets one outcome per call id', async () => {
+      const sessionId = 's-ovl-twice';
+      await attach(sessionId);
+      const seen = captureRoom();
+      executeToolMock.mockResolvedValueOnce(REGISTRY_RESULT.success).mockResolvedValueOnce(REGISTRY_RESULT.refused);
+      await fire(sessionId, outputItemDone('call_1', 'administer_scale', '{"scale":"phq2"}'));
+      await fire(sessionId, outputItemDone('call_2', 'administer_scale', '{"scale":"phq2"}'));
+      await flush();
+      const outs = seen.filter((e) => e.event === 'session:tool-outcome').map((e) => [e.data.callId, e.data.overlay]);
+      expect(outs).toEqual([
+        ['call_1', 'shown'],
+        ['call_2', 'hidden'],
+      ]);
     });
   });
 

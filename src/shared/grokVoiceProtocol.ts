@@ -1,3 +1,5 @@
+import type { ToolOverlayOutcome } from './toolOverlayPolicy.js';
+
 // Wire protocol between the participant browser and OUR server for a Grok
 // Voice session (docs/grok-voice.md). One WebSocket carries both directions:
 //
@@ -56,10 +58,19 @@ export type GrokServerMessage =
   /** A model response finished (spoken or tool-only). */
   | { type: 'response_done' }
   /**
-   * The model called a tool. The SERVER executes it; this is UI-only so the
-   * browser can open the matching overlay (worksheet, scale, resources…).
+   * The model called a tool, sent before the SERVER executes it. UI-only: the
+   * browser opens the crisis-resource card on it at once, and shows a pending
+   * state for any other overlay until `tool_outcome` arrives.
    */
   | { type: 'tool_call'; callId: string; name: string; args: Record<string, unknown> }
+  /**
+   * How a tool call with an overlay ended, sent once the server has run it.
+   * The browser opens the overlay only on this (`overlay: 'shown'`, or
+   * 'unconfirmed' for a safety plan whose save did not confirm); the crisis-
+   * resource card excepted, which opens on `tool_call`. Same message as the
+   * GPT-Live `session:tool-outcome` socket event (shared/toolOverlayPolicy.ts).
+   */
+  | ({ type: 'tool_outcome' } & ToolOverlayOutcome)
   /** Upstream reported an error. Not necessarily terminal. */
   | { type: 'error'; message: string; code?: string | null }
   /** The session is over. The browser should run its normal end flow. */

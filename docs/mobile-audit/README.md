@@ -83,6 +83,27 @@ New scenes: `p35` the check-in after an earlier high flag in another session,
 `p36` the medium wording with its open question, `p37` the reply on its way
 with the keyboard open.
 
+### Voice tool overlays wait for the server (added 2026-11-19)
+
+On a voice call a tool overlay now opens when the server reports how the call
+ended, not when the model asks for it (`shared/toolOverlayPolicy.ts`,
+`lib/voiceOverlayGate.ts`), so a screener the 7-day limit refused, or a
+worksheet or safety plan that was not saved, no longer appears as if it had
+worked. Conventions for anything that opens over a voice session:
+
+- The crisis-resource card never waits: it opens the moment the model calls it,
+  whatever the socket or the tool does.
+- A screener, a worksheet or a safety plan is never shown without the server's
+  confirmation. While it waits, a small status pill ("Getting that ready for
+  you…", `PendingToolNotice.tsx`) fades in after 400 ms near the bottom of the
+  screen: no backdrop, no focus change, no pointer events, 16px side gutters.
+  The usual wait is well under half a second, so it is rarely seen.
+- Display-only overlays (breathing, grounding, body scan, thought record,
+  journaling, recap, values sort, fear ladder) are shown after 1.5 s anyway if
+  the server's message is lost.
+
+Not captured: the pill needs a live voice call with a slow tool.
+
 ### Could not capture
 
 - The GPT-Live (WebRTC) voice path itself: it needs a real vendor SDP answer. The

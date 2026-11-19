@@ -20,6 +20,7 @@ vi.mock('../db/index.js', () => ({
 vi.mock('../utils/adminBroadcast.js', () => ({ broadcastAdminEventForSession: vi.fn() }));
 
 import { sidebandManager, type VoiceSidebandDelegate } from './sidebandManager.service.js';
+import { reportVoiceToolOutcome, getVoiceToolOutcome } from './toolOverlays.js';
 
 function fakeDelegate(owned: string[]): VoiceSidebandDelegate & { calls: string[] } {
   const calls: string[] = [];
@@ -97,5 +98,25 @@ describe('SidebandManager delegate forwarding', () => {
     expect(sidebandManager.getActiveConnections()).toEqual(expect.arrayContaining(['grok_a', 'grok_b']));
     await sidebandManager.shutdown();
     expect(d.calls).toContain('shutdown');
+  });
+
+  // PR #85 review: a session's kept overlay outcomes (participant content in
+  // their args) leave memory when the session ends, on both backends.
+  it('ending a session clears its kept overlay outcomes, Grok and GPT-Live alike', async () => {
+    const d = fakeDelegate(['grok_a']);
+    sidebandManager.registerDelegate(d);
+    const outcome = (callId: string) => ({
+      callId,
+      name: 'create_safety_plan',
+      args: { warning_signs: ['x'] },
+      overlay: 'shown' as const,
+    });
+    for (const id of ['grok_a', 'live_b', 'live_other']) reportVoiceToolOutcome(id, outcome(`c_${id}`));
+    await sidebandManager.disconnect('grok_a');
+    await sidebandManager.disconnect('live_b', { graceMs: 0 });
+    expect(getVoiceToolOutcome('grok_a', 'c_grok_a')).toBeNull();
+    expect(getVoiceToolOutcome('live_b', 'c_live_b')).toBeNull();
+    // Another session's are untouched.
+    expect(getVoiceToolOutcome('live_other', 'c_live_other')).toEqual(outcome('c_live_other'));
   });
 });

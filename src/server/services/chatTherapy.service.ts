@@ -9,7 +9,7 @@ import { getOpenAIKey } from '../config/secrets.js';
 import { insertTurnLatency, getActiveSessionIdsAmong } from '../db/index.js';
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
-import { chatOverlayEvent, type ChatToolEvent } from './chatToolOverlays.js';
+import { chatOverlayEvent, type ChatToolEvent } from './toolOverlays.js';
 dotenv.config();
 
 interface ChatMessage {
@@ -33,7 +33,7 @@ export interface ChatTurnResult {
 
 // Overlay tools the participant chat client can render via its fns map
 // (App.tsx) ride back to the browser as toolEvents, and only when what the
-// call did allows it (chatToolOverlays.ts: the crisis-resource card always; a
+// call did allows it (toolOverlays.ts: the crisis-resource card always; a
 // safety plan whose write did not confirm is marked "may not have been
 // saved"; the others only on success). Data-only tools (memory, RAG, logging)
 // stay server-side.
