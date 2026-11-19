@@ -115,6 +115,16 @@ describe('POST /api/grok/session with a check-in', () => {
     expect(mocks.registerPending).toHaveBeenCalledWith(res.body.session_id, expect.any(Object));
   });
 
+  // ai-therapist-373: the start and the check-in's words are kept in memory
+  // for the crisis pipeline (its context when the database cannot answer).
+  it('keeps the start and the check-in text in memory for the crisis pipeline', async () => {
+    const { recentTurns, rememberedCheckin } = await import('../../utils/recentTurns.js');
+    mocks.checkin = { mood: 1, topic: "I don't really want to be alive" };
+    const res = await start().expect(201);
+    expect(rememberedCheckin(res.body.session_id)).toBe("I don't really want to be alive");
+    expect(recentTurns(res.body.session_id)?.complete).toBe(true);
+  });
+
   it('does not wait for the screen: a slow assessor never delays the start', async () => {
     mocks.checkin = { topic: 'anything' };
     mocks.runCheckinCrisisScreen.mockImplementation(() => new Promise(() => undefined));

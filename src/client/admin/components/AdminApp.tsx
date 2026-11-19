@@ -41,6 +41,7 @@ import {
   recordAdminUsage,
   setAdminUsageView,
 } from '../utils/adminUsageTelemetry';
+import { participantFromHash } from '../utils/deepLink';
 import ToastContainer from '../../shared/components/Toast';
 import { getJson } from '../../shared/http';
 import DemoSwitcher from '../../shared/components/DemoSwitcher';
@@ -265,6 +266,18 @@ export default function AdminApp() {
       role: 'participant',
     });
   }, []);
+
+  // Participant deep link: a crisis page about a session that was never
+  // stored (a chat start that failed; its check-in was still screened) links
+  // to /admin#participant=<id> instead of a session that does not exist
+  // (ai-therapist-373). Read once on mount and cleared, like #session=.
+  useEffect(() => {
+    const participant = participantFromHash(window.location.hash);
+    if (participant !== null) {
+      void openParticipantProfile(participant);
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }, [openParticipantProfile]);
 
   const handleViewSession = (sessionId: string, editMode = false) => {
     setSelectedSessionId(sessionId);

@@ -48,6 +48,7 @@ import {
 } from '../../utils/sessionHelpers.js';
 import { recordSessionOwnership } from '../../utils/sessionOwnership.js';
 import { rememberSessionAccount } from '../../utils/sessionAccounts.js';
+import { rememberSessionStart } from '../../utils/recentTurns.js';
 import {
   sanitizeCheckin,
   buildCheckinBlock,
@@ -430,6 +431,9 @@ export default function liveSessionRoutes(): Router {
         // The crisis pipeline's demo check, known from now on without a read
         // (ai-therapist-369).
         rememberSessionAccount(sessionId, userRole);
+        // The crisis pipeline's in-memory context starts here, with the
+        // check-in's words (ai-therapist-373).
+        rememberSessionStart(sessionId, checkin);
 
         try {
           await createActiveRealtimeSession(sessionId, userId, isDemoSession);

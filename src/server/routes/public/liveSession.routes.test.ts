@@ -338,6 +338,19 @@ describe('POST /api/live/session with a check-in', () => {
     expect(order).toEqual(['attached', 'screened']);
   });
 
+  // ai-therapist-373: the start and the check-in's words are kept in memory
+  // for the crisis pipeline (its context when the database cannot answer).
+  it('keeps the start and the check-in text in memory for the crisis pipeline', async () => {
+    const { recentTurns, rememberedCheckin, _resetRecentTurnsForTests } = await import('../../utils/recentTurns.js');
+    _resetRecentTurnsForTests();
+    mocks.checkin = { mood: 1, topic: "I don't really want to be alive" };
+    mocks.upstreamFetch.mockResolvedValue(healthy());
+    await start().expect(201);
+    await settle();
+    expect(rememberedCheckin('sess_live_ci')).toBe("I don't really want to be alive");
+    expect(recentTurns('sess_live_ci')?.complete).toBe(true);
+  });
+
   it('no check-in: the pipeline is not called', async () => {
     mocks.upstreamFetch.mockResolvedValue(healthy());
     await start().expect(201);

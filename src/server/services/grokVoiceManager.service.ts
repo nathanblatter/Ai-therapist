@@ -71,6 +71,7 @@ import {
 } from '../utils/grokRefusalGuard.js';
 import type { VoiceSidebandDelegate } from './sidebandManager.service.js';
 import type { GrokServerMessage } from '../../shared/grokVoiceProtocol.js';
+import { rememberTurn } from '../utils/recentTurns.js';
 
 /** What the session route hands over before the browser's socket arrives. */
 export interface PendingGrokSession {
@@ -874,6 +875,8 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
       state.userTurnIndex += 1;
     }
     this.emitTranscript(sessionId, { role: 'user', itemId, text, final: true });
+    // In memory for the crisis pipeline's context (ai-therapist-373).
+    const remembered = rememberTurn(sessionId, 'user', text);
 
     void (async () => {
       let messageId: string | number | null = null;
@@ -890,6 +893,7 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
           },
         ]);
         messageId = inserted?.[0]?.message_id ?? null;
+        if (remembered && messageId != null) remembered.messageId = messageId;
       } catch (err) {
         console.error(`[Grok] Failed to persist user turn for ${sessionId.substring(0, 12)}...:`, err);
       }
@@ -923,6 +927,7 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
 
     state.assistantTurnIndex += 1;
     this.emitTranscript(sessionId, { role: 'assistant', itemId, text, final: true });
+    rememberTurn(sessionId, 'assistant', text);
     void insertMessagesBatch([
       {
         session_id: sessionId,

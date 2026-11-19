@@ -278,6 +278,16 @@ async function loadSystemConfig(): Promise<SystemConfig> {
   }
 }
 
+/**
+ * The system config this process last read from the database, whatever its
+ * age, or null when it holds none. Never reads: for text that must be built
+ * while the database is not answering (ai-therapist-373). A stale copy of the
+ * configured crisis contact is better there than none.
+ */
+export function peekCachedSystemConfig(): SystemConfig | null {
+  return systemConfigCache;
+}
+
 export function invalidateConfigCache(): void {
   systemConfigCache = null;
   configCacheTime = null;

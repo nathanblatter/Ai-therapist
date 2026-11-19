@@ -389,6 +389,24 @@ describe('participant turns → crisis pipeline', () => {
     expect(insertMessagesBatchMock).not.toHaveBeenCalledWith([expect.objectContaining({ role: 'user' })]);
     expect(runCrisisPipelineMock).not.toHaveBeenCalled();
   });
+
+  // ai-therapist-373: both roles are kept in memory for the crisis pipeline;
+  // a duplicate the proxy drops is not kept twice.
+  it('keeps the turns in memory, the participant turn with its stored id, a dropped duplicate once', async () => {
+    const { recentTurns, _resetRecentTurnsForTests } = await import('../utils/recentTurns.js');
+    _resetRecentTurnsForTests();
+    const { upstream } = await bringUp();
+    fire(upstream, { type: 'response.output_audio_transcript.delta', item_id: 'a1', delta: 'Are you safe?' });
+    fire(upstream, { type: 'response.output_audio_transcript.done', item_id: 'a1', transcript: 'Are you safe?' });
+    fire(upstream, { type: 'response.done', response: { id: 'r1' }, usage: {} });
+    fire(upstream, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'u1', transcript: 'no' });
+    fire(upstream, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'u1', transcript: 'no' });
+    await flush();
+    expect(recentTurns(SESSION)?.turns.map((t) => [t.role, t.content, t.messageId])).toEqual([
+      ['assistant', 'Are you safe?', null],
+      ['user', 'no', 42],
+    ]);
+  });
 });
 
 describe('assistant turns', () => {

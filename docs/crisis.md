@@ -733,7 +733,10 @@ Responses are tiered by severity/score:
       follow the pipeline's own rules after its reads, exactly as before (a subject change or
       a recovery-session disclosure still pages from there). When nothing is known (the read
       failed), the page goes at once and the fold rule absorbs a repeat. A page that no
-      channel accepted does not hold back the next high turn.
+      channel accepted does not hold back the next high turn. This server's record of the
+      pages it requested this way lasts as long as the fold window (15 minutes,
+      ai-therapist-373): a critical turn an hour after a critical page is paged at once
+      again, not after the turn's database work.
     - The reads that only shape the score (the demo check when the session's account is not
       already known, history and check-in, read together; the trajectory and session risk
       context; the assessor's model setting and safety identifier, read alongside them on a
@@ -761,6 +764,25 @@ Responses are tiered by severity/score:
     error level and Live Monitoring shows a `session:page-decision` notice
     (`outcome: 'unrecorded'`): "NOT RECORDED: the page record for this session could not be
     saved ...". Medium flags are not retried (a late medium write could lower a newer high).
+    **One turn, one flag** (ai-therapist-373). A flag retry writes nothing when the same
+    turn's flag reached the record another way meanwhile (this server remembers each
+    flagged turn for 5 minutes: the same session and words, with the same message id or
+    none on one side; inside the transaction, a `flagged` crisis event for the same
+    message id), or when staff unflagged the session after the first attempt
+    (`crisis_unflagged_at` later than the attempt; app clock against database clock, so
+    only an unflag within a skew of seconds is in doubt). A turn scored a second time (a
+    re-sent voice batch) whose flag is already on record is not flagged again: one crisis
+    event, one adverse-event draft, and a staff unflag in between stands. Its page is the
+    paging layer's to fold. Known cost: the same words said twice within 5 minutes,
+    both times unsaved, are one turn.
+  - **A check-in screened after a failed chat start** (ai-therapist-373) is keyed by the
+    participant the request names, without a lookup, so the participant's retry folds into
+    its page instead of paging again. When the session row was never written, the page's
+    link opens the participant's profile (`/admin#participant=<user id>`; short form in an
+    SMS part 1: `Open the participant's profile: participant <id>`) instead of a session
+    that does not exist. Every chat start records its participant this way, so its pages
+    are keyed by participant even when the paging lookups fail. An anonymous browser has
+    no participant: its page stays keyed and linked by the session.
   - **Demo accounts** are known from the request that starts the session (chat start, the
     voice token routes, the lazy session creation in `/logs/batch`;
     `utils/sessionAccounts.ts`). A known demo session skips the pipeline without a database
@@ -898,7 +920,9 @@ crisis state could not be read ...; this server had handled a high-risk turn
 in it."). If it knows nothing, the recovery still runs (fail toward the
 hand-off) and the on-call is paged at the lowest level: "voice session hit the
 vendor session ceiling, and its crisis state could NOT be read ... treat it as
-possibly serious".
+possibly serious". Noted, not changed (ai-therapist-373): with session limits
+turned off, an ordinary 60-minute session that ends during a database outage
+gets that hand-off and that page.
 
 Turns that were accepted are screened whatever fails after (ai-therapist-369):
 a typed turn that was saved goes through the crisis pipeline even when a later
@@ -908,7 +932,91 @@ start fails before its screen (in the background, after the 503). A voice batch
 that `/logs/batch` could not store (a 5xx) is kept by the browser and sent
 again on the next flush (`client/main/lib/logBatch.ts`); its turns were
 screened on the server when the store failed, and are scored again when the
-re-sent batch is stored (a second risk row; a repeat page folds).
+re-sent batch is stored (a second risk row; a repeat page folds; no second flag,
+see "One turn, one flag").
+
+## Recent context without the database (2026-11-19, ai-therapist-373)
+
+Two readings depend on the turns before the one being scored: a sentence that
+reached us as two voice fragments ("... how I would kill" + " myself"), which
+the pipeline joins back together (`stitchSplitTurnParts`), and a bare "yes"
+that answers the assistant's "Are you thinking about suicide?"
+(`repliesToSafetyQuestion`). Since PR #86 the history read is bounded at 2 s;
+when it failed or passed the bound the assessor saw the turn alone, the halves
+scored 0 each, the "yes" scored as a "yes", and a page became no page. A risk
+check-in followed by "hi" depended on a second read the same way.
+
+**What is kept.** `utils/recentTurns.ts` keeps, in process memory, the last 12
+turns (both roles) of each session, written where the server already sees them:
+`/api/chat/message` (the participant's message before it is stored, the reply
+after the model call), the chat start's opening line and hand-off first
+message, the GPT-Live sideband's assembled turns, the Grok proxy's turns, and
+every conversational record `/logs/batch` receives (before it is stored; keyed
+by the browser's timestamp and words, so a re-sent batch is kept once). The
+session start (chat, GPT-Live, Grok, and a session `/logs/batch` creates)
+records the check-in's free text and marks the record as complete for this
+process. Bounds: 12 turns per session, the last 1,500 characters of each turn,
+500 sessions (least recently written dropped first), a session idle for 2 hours
+dropped, and an ended session dropped 2 minutes after it ends
+(`updateSessionStatus(..., 'ended')`; the grace covers a final voice turn still
+being scored). Worst case about 9 M characters (under 20 MB).
+
+**Database first, memory as the fallback.** The stored history is still read
+first and used whenever it answers within 2 s and the turn itself was stored:
+it is complete across processes and restarts, and normal scoring is unchanged.
+The kept copy is used when the read fails or passes its bound, and when the
+turn itself could not be stored (no message id: the database is evidently not
+keeping up, and its history is missing at least this turn). The two are not
+merged: the browser's batching and two clocks make a merged order a guess. From
+memory the turn is found by its stored id or, without one, by its words, so a
+split sentence is joined even when neither half was stored. The check-in comes
+from the stored row when it can be read and from the kept copy otherwise (also
+when its write at session start failed). The risk row records
+`history_source: 'memory' | 'memory_partial' | 'none'` whenever the history was
+not the stored one. A reply to a safety question, or a turn carrying a context
+signal, now reads the assessor's settings alongside the other reads, as a
+keyword turn does, so its page waits one read deadline, not two.
+
+**Neither source: the context-blind rule.** When the database gives no history
+and this process does not hold the whole session (`none`: nothing kept;
+`memory_partial`: it did not see the session start, so it may hold only part),
+a turn whose OWN words carry risk is raised to 65, the bottom of the high band,
+so it flags and pages (`context_blind_floor` on the risk row, factor "risk
+words scored without the conversation (history unreadable)"). The turn's own
+risk is a medium- or high-tier keyword, a strong context signal of intent,
+goodbye or means that is neither negated nor retracted, or a moderation
+self-harm score of 40 or more; and the assessor must not have settled it on its
+own words as `negated`, `reference`, `bystander` or `harm_to_others`. Ordinary
+messages carry none of these and are never raised, so an outage does not page
+on every turn. Applied before the help-step and conditional-joke caps, which
+judge the turn's own words and still hold. Knowingly not covered: a turn with no
+signal of its own ("yes", " myself") in a session this process did not see
+start, because nothing kept says what it answers or completes.
+
+**More than one app process.** Stage and prod run one. With more than one, each
+process holds the turns it handled: a voice session's turns all reach the
+process its sideband (or Grok socket) is attached to, but typed turns may be
+split across processes. A process that did not see a session start (another
+instance, a restart, the old and new containers during a deploy) marks its copy
+partial, and the context-blind rule applies there: it fails toward paging. A
+process that saw the start but not every later turn cannot tell; running more
+than one process needs sticky routing per session for this copy to be whole.
+
+`crisisPath.recentContext.test.ts` runs the split sentence, the "yes" and the
+check-in through the real pipeline with every database call refused, failing
+at the 3 s connection limit, or stalling for 10 s: each pages within 6 s on the
+fake clock, and each control without the kept turns does not.
+
+**Database-unavailable message.** The 503 that `/api/chat/start` and
+`/api/chat/message` send when the database does not answer now names the
+configured crisis contact when this process already holds it
+(`utils/databaseRetryMessage.ts`, the system config cache of any age, never a
+read): "We could not reach our system just now. Please wait a moment and try
+again. If you are in crisis, contact the {hotline} at {phone}, or {text}, or
+call 911." Without a usable cached contact it is the fixed text, unchanged.
+There is no localisation for server-sent participant strings in this codebase
+(the session-limit refusal and the minor goodbye are English too), so it stays
+English.
 
 ---
 

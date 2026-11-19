@@ -53,6 +53,7 @@ import type { CrisisStateSource } from './crisisPaging.service.js';
 import { isToolTimeoutError, toolTimeoutMs } from './toolTimeouts.js';
 import { clearVoiceToolOutcomes, reportVoiceToolOutcome, voiceOverlayEvent, withScreenNote } from './toolOverlays.js';
 import { buildRecoverySpeakFirstNudge, type RecoveryCrisisContact } from '../../shared/recoveryPrompt.js';
+import { rememberTurn } from '../utils/recentTurns.js';
 
 /**
  * When the server re-sends the speak-first instruction to a recovery session
@@ -2033,6 +2034,10 @@ export class SidebandManager {
    */
   private onUserTurn(sessionId: string, text: string, startMs: number, endMs: number): void {
     this.emitTranscript(sessionId, { role: 'user', text, final: true });
+    // Kept in memory as it arrives, so the crisis pipeline has the turns
+    // before this one (a split sentence, a safety question) whatever the
+    // database does (ai-therapist-373).
+    const remembered = rememberTurn(sessionId, 'user', text);
 
     const work = (async () => {
       let messageId: string | number | null = null;
@@ -2052,6 +2057,7 @@ export class SidebandManager {
           },
         ]);
         messageId = inserted?.[0]?.message_id ?? null;
+        if (remembered && messageId != null) remembered.messageId = messageId;
       } catch (err) {
         console.error(`[Live] Failed to persist user turn for ${sessionId.substring(0, 12)}...:`, err);
       }
@@ -2136,6 +2142,7 @@ export class SidebandManager {
   /** A complete assistant turn. Persisted and surfaced; also moderated. */
   private onAssistantTurn(sessionId: string, text: string, startMs: number, endMs: number): void {
     this.emitTranscript(sessionId, { role: 'assistant', text, final: true });
+    rememberTurn(sessionId, 'assistant', text);
 
     void (async () => {
       try {
