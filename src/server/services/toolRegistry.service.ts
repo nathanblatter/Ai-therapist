@@ -1089,9 +1089,10 @@ export class ToolRegistry {
     // "Forget that" (ai-therapist-341). The assistant cannot delete anything;
     // what it can do is stop carrying something into session memory. The
     // request is recorded (memory_suppressions) and the post-session job
-    // keeps the topic out of the summary's carried-forward text, the case
-    // profile and the stored facts. The transcript is research data and is
-    // not touched. The result tells the model exactly what it may say.
+    // keeps the topic out of what is read into memory (summaries and stored
+    // facts are marked, the case profile is left out of memory). Nothing staff
+    // read is edited: the transcript, summary, SOAP note and case profile are
+    // research data. The result tells the model exactly what it may say.
     this.registerTool(
       'forget_this',
       {

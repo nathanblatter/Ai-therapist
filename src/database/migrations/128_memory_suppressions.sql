@@ -20,10 +20,12 @@
 --                          did not call the tool. No names or identifiers.
 --   applied_at             set by the post-session job once it has checked
 --                          every stored memory item older than the request
---                          (remembered facts, earlier summaries, the case
---                          profile) against the topic. While NULL, memory
---                          reads hide everything older than the request
---                          (fail closed; utils/memoryScreen.ts).
+--                          (remembered facts, earlier summaries) against the
+--                          topic. While NULL, memory reads hide everything
+--                          older than the request (fail closed;
+--                          utils/memoryScreen.ts). The case profile is left
+--                          out of memory whenever any row exists, and is
+--                          never edited.
 --   suppressed_memory_ids  user_memories rows that job found to mention the
 --                          topic; they stay stored and are no longer read
 --                          into memory.

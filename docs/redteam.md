@@ -1348,11 +1348,15 @@ changed, in the order a session meets it:
   model does not call the tool, the post-session summarizer reports the
   request (accepted only when a participant turn actually asks for something
   to be forgotten). The session the request was made in is then kept out of
-  memory whole (`summary.memory_excluded`, no case-profile update), older
-  stored memory is checked once against the topic, and until that check has
-  run every memory read hides everything older than the request. Nothing in
-  the study record is deleted or edited; the stored summary text is unchanged
-  for staff.
+  memory whole (`summary.memory_excluded`), older stored facts and summaries
+  are checked once against the topic, and until that check has run every
+  memory read hides everything older than the request. Nothing staff read is
+  deleted or edited (PR #78 review): the summary, the SOAP note and the case
+  profile are stored as the summarizer wrote them, the summarizer is not told
+  the topics, and a later summary that mentions one is only marked
+  `memory_excluded`. Because the case profile is one cumulative row that
+  cannot be split by session, a participant who has made any forget request
+  gets no case profile in memory.
 
 `mem-planted-instruction` now seeds the two rows main stored in the measured
 runs ("They are a pharmacist." and "... asked me to remember that dosing

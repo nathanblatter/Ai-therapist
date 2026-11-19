@@ -1,28 +1,33 @@
 // "Forget that" in the post-session job (ai-therapist-341).
 //
 // A participant asked the assistant to forget, erase or not remember
-// something. Nothing is deleted: the transcript, the SOAP note and the stored
-// summary are research data. What this module controls is what is CARRIED
-// FORWARD into session memory:
+// something. Nothing is deleted or edited: the transcript, the SOAP note, the
+// stored summary and the case profile are research data and what staff read
+// (the admin participant page shows the case profile and every summary
+// headline). What this module controls is only what is CARRIED FORWARD into
+// session memory, through markers that staff views ignore:
 //
 //   1. The session the request was made in is kept out of memory whole: its
-//      summary is marked memory_excluded and the case profile is not updated
-//      from it. No model decides this. (Asking the summarizer to leave the
-//      topic out, and a second model to check, still let "guilt and anxiety
-//      tied to past actions" through, and the next session opened with it.)
+//      summary is marked memory_excluded. No model decides this. (Asking the
+//      summarizer to leave the topic out, and a second model to check, still
+//      let "guilt and anxiety tied to past actions" through, and the next
+//      session opened with it.)
 //   2. Every stored memory item OLDER than the request (remembered facts,
-//      earlier summaries, the existing case profile) is read once by
-//      checkAgainstTopics below, and the ones that mention the topic are kept
-//      out of memory: a summary is marked memory_excluded, a fact's id goes
-//      on the suppression row, a case profile entry is removed.
-//   3. In LATER sessions the summarizer is told the topics
-//      (sessionInsights.service) and the same check reads what it wrote
-//      before it is stored.
+//      earlier summaries) is read once by checkAgainstTopics below, and the
+//      ones that mention the topic are kept out of memory: a summary is marked
+//      memory_excluded, a fact's id goes on the suppression row.
+//   3. In LATER sessions the same check reads the new summary before it is
+//      stored and marks it memory_excluded if it mentions a topic. The
+//      summarizer is not told the topics, so what staff read stays a faithful
+//      account of the session.
+//   4. The case profile is one cumulative row that cannot be split by
+//      session, so a participant who has made any forget request gets no case
+//      profile in memory at all (utils/memoryScreen.ts
+//      applySuppressionReadRules). It is still updated and shown to staff.
 //
 // It fails closed. If the check cannot run, the new summary is marked
-// memory_excluded, the case profile is not updated, and the request stays
-// unapplied, which makes every memory read hide everything older than it
-// (utils/memoryScreen.ts applySuppressionReadRules) until a later run succeeds.
+// memory_excluded and the request stays unapplied, which makes every memory
+// read hide everything older than it until a later run succeeds.
 import OpenAI from 'openai';
 import { getOpenAIKey } from '../config/secrets.js';
 import {
@@ -32,8 +37,6 @@ import {
   excludeSummariesFromMemory,
   getUserMemoriesWithDates,
   getRecentUserSummaries,
-  getUserCaseProfile,
-  upsertUserCaseProfile,
   type CaseProfile,
   type MemorySuppression,
   type SessionSummary,
@@ -47,16 +50,6 @@ const CHECK_MODEL = 'gpt-4o-mini';
 const MAX_TOPICS = 20;
 const MAX_DETECTED_PER_SESSION = 5;
 const MAX_ITEM_CHARS = 600;
-
-/** The block handed to the summarizer. Empty when there is nothing to leave out. */
-export function buildDoNotCarryForwardBlock(topics: string[]): string {
-  if (topics.length === 0) return '';
-  return (
-    'DO NOT CARRY FORWARD (in an earlier session the participant asked the assistant not to bring these up again; ' +
-    'the "summary" fields and the "case_profile" must not mention or allude to them, the "soap" note is unaffected):\n' +
-    `${topics.map((t) => `- ${t}`).join('\n')}\n\n`
-  );
-}
 
 /** Distinct topics, newest first, bounded. */
 export function suppressionTopics(suppressions: Array<Pick<MemorySuppression, 'topic'>>): string[] {
@@ -78,14 +71,6 @@ export interface CheckItem {
   text: string;
 }
 
-const PROFILE_LIST_FACETS = [
-  'presenting_concerns',
-  'recurring_themes',
-  'stressors',
-  'support_system',
-  'values',
-] as const;
-
 /** The memory-facing text of a summary: exactly the fields promptContext and
  *  the recall tools read. */
 export function summaryMemoryText(summary: SessionSummary): string {
@@ -99,40 +84,6 @@ export function summaryMemoryText(summary: SessionSummary): string {
   ]
     .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
     .join(' | ');
-}
-
-/** One check item per case-profile entry, so a single entry can be removed. */
-export function profileItems(prefix: string, profile: CaseProfile): CheckItem[] {
-  const items: CheckItem[] = [];
-  const p = profile as Record<string, unknown>;
-  for (const facet of PROFILE_LIST_FACETS) {
-    const list = Array.isArray(p[facet]) ? (p[facet] as unknown[]) : [];
-    list.forEach((v, i) => {
-      if (typeof v === 'string' && v.trim()) items.push({ id: `${prefix}:${facet}:${i}`, text: v });
-    });
-  }
-  (profile.coping_repertoire ?? []).forEach((c, i) => {
-    if (c?.technique) items.push({ id: `${prefix}:coping_repertoire:${i}`, text: c.technique });
-  });
-  if (profile.screener_trend) items.push({ id: `${prefix}:screener_trend:0`, text: profile.screener_trend });
-  return items;
-}
-
-/** The profile without the entries the check named. */
-export function stripProfile(prefix: string, profile: CaseProfile, flagged: ReadonlySet<string>): CaseProfile {
-  const out: Record<string, unknown> = { ...(profile as Record<string, unknown>) };
-  for (const facet of PROFILE_LIST_FACETS) {
-    if (Array.isArray(out[facet])) {
-      out[facet] = (out[facet] as unknown[]).filter((_, i) => !flagged.has(`${prefix}:${facet}:${i}`));
-    }
-  }
-  if (Array.isArray(profile.coping_repertoire)) {
-    out.coping_repertoire = profile.coping_repertoire.filter(
-      (_, i) => !flagged.has(`${prefix}:coping_repertoire:${i}`),
-    );
-  }
-  if (flagged.has(`${prefix}:screener_trend:0`)) out.screener_trend = '';
-  return out as CaseProfile;
 }
 
 const CHECK_SYSTEM_PROMPT = `You check an assistant's notes about a research participant.
@@ -213,7 +164,8 @@ export async function checkAgainstTopics(
 export interface ForgetOutcome {
   /** The summary to store (memory_excluded set when it must not be read into memory). */
   summary: SessionSummary;
-  /** The case profile to store, or null to leave the stored one as it is. */
+  /** The case profile to store: what the summarizer wrote, never edited. Null
+   *  (leave the stored one as it is) only when a request could not be recorded. */
   caseProfile: CaseProfile | null;
   /** Call once the summary and case profile above are stored: marks the
    *  requests applied, which lifts the hide-everything-older read rule. */
@@ -245,6 +197,7 @@ export async function applyForgetRequests(
 ): Promise<ForgetOutcome> {
   const { userId, sessionId } = input;
   const summary: SessionSummary = { ...input.summary };
+  const caseProfile = input.caseProfile;
   const detected = looksLikeForgetRequest(input.participantText)
     ? (Array.isArray(summary.forget_requests) ? summary.forget_requests : [])
         .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
@@ -260,36 +213,33 @@ export async function applyForgetRequests(
     let stored = 0;
     for (const topic of detected) if (await insertMemorySuppression(userId, sessionId, topic, 'summary')) stored++;
     if (stored < detected.length) {
-      // The request cannot be recorded (migration 128 not applied): the one
-      // thing still possible is to keep this session's summary out of memory.
+      // The request cannot be recorded (migration 128 not applied), so the
+      // read rules cannot hide the case profile: keep this session's summary
+      // out of memory and leave the stored profile as it was.
       log.warn(`Forget request in ${sessionId} could not be recorded; excluding its summary from memory`);
       return { summary: { ...summary, memory_excluded: true }, caseProfile: null, finalize: nothingToFinalize };
     }
     suppressions = await getUserMemorySuppressions(userId);
   }
-  if (suppressions.length === 0) return { summary, caseProfile: input.caseProfile, finalize: nothingToFinalize };
+  if (suppressions.length === 0) return { summary, caseProfile, finalize: nothingToFinalize };
 
   const topics = suppressionTopics(suppressions);
   const pending = suppressions.filter((s) => !s.applied_at);
-  // The session the request was made in never reaches memory: no summary, no
-  // case profile update. Deterministic; nothing below can undo it.
+  // The session the request was made in never reaches memory. Deterministic;
+  // nothing below can undo it.
   const requestedHere = suppressions.some((s) => s.session_id === sessionId);
   if (requestedHere) summary.memory_excluded = true;
-  const newProfile = requestedHere ? null : input.caseProfile;
   const items: CheckItem[] = [];
   const newText = requestedHere ? '' : summaryMemoryText(summary);
   if (newText) items.push({ id: NEW_SUMMARY, text: newText });
-  if (newProfile) items.push(...profileItems('np', newProfile));
 
   // Older stored memory is checked once per request, the first time the job
   // runs after it.
-  let oldProfile: CaseProfile | null = null;
   if (pending.length > 0) {
     const alreadySuppressed = new Set(suppressions.flatMap((s) => s.suppressed_memory_ids ?? []));
-    const [facts, summaries, profileRow] = await Promise.all([
+    const [facts, summaries] = await Promise.all([
       getUserMemoriesWithDates(userId, 50),
       getRecentUserSummaries(userId, 10),
-      newProfile ? Promise.resolve(null) : getUserCaseProfile(userId),
     ]);
     for (const f of facts) {
       if (f.memory_id !== undefined && !alreadySuppressed.has(f.memory_id))
@@ -300,30 +250,24 @@ export async function applyForgetRequests(
       const text = summaryMemoryText(s.summary);
       if (text) items.push({ id: `summary:${s.session_id}`, text });
     }
-    oldProfile = profileRow?.profile ?? null;
-    if (oldProfile) items.push(...profileItems('op', oldProfile));
   }
 
   const flagged = await check(sessionId, topics, items);
   if (flagged === null) {
     log.error(
       { sessionId, pending: pending.length },
-      `[insights] forget check unavailable for ${sessionId}; summary excluded from memory, case profile not updated`,
+      `[insights] forget check unavailable for ${sessionId}; summary excluded from memory`,
     );
-    return { summary: { ...summary, memory_excluded: true }, caseProfile: null, finalize: nothingToFinalize };
+    return { summary: { ...summary, memory_excluded: true }, caseProfile, finalize: nothingToFinalize };
   }
 
   if (flagged.has(NEW_SUMMARY)) summary.memory_excluded = true;
-  const caseProfile = newProfile ? stripProfile('np', newProfile, flagged) : null;
 
   if (pending.length === 0) return { summary, caseProfile, finalize: nothingToFinalize };
 
   const ids = (prefix: string): string[] =>
     [...flagged].filter((id) => id.startsWith(prefix)).map((id) => id.slice(prefix.length));
   await excludeSummariesFromMemory(userId, ids('summary:'));
-  if (oldProfile && [...flagged].some((id) => id.startsWith('op:'))) {
-    await upsertUserCaseProfile(userId, stripProfile('op', oldProfile, flagged));
-  }
   const excluded = summary.memory_excluded === true;
   return {
     summary,

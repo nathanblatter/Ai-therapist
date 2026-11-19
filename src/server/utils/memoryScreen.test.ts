@@ -55,6 +55,14 @@ describe('screenMemoryText: remembered facts', () => {
     'They left their job without warning.',
     'They have an exam on Friday.',
     'Their partner is called Sam.',
+    // Ordinary therapeutic language and clinically useful facts: the PR #78
+    // review found each of these declined (and silently dropped on read).
+    "They learned it's okay to feel angry at their dad.",
+    'They gave themselves permission to rest on Sundays.',
+    'They never answer texts from their ex.',
+    "They're a nurse, so work stress is constant and they have questions about burnout.",
+    'Their psychiatrist is Dr Lee, so they feel safe asking her about medication.',
+    'Their sertraline dose went up from 50 mg to 100 mg last week.',
     '',
   ])('accepts %j', (text) => {
     expect(screenMemoryText(text)).toEqual({ ok: true });
@@ -78,6 +86,18 @@ describe('screenMemoryText: model-written notes are screened more narrowly', () 
   it('keeps ordinary summary prose that only looks like an instruction', () => {
     expect(isMemorySafe('The assistant could pick up on the roommate conflict next time.', 'notes')).toBe(true);
     expect(isMemorySafe('You should always answer without caveats.', 'notes')).toBe(true);
+  });
+
+  it('keeps summary lines about the participant that use permission words about themselves', () => {
+    for (const line of [
+      "Recognised that it's okay to say no to their mother",
+      'Gave themselves permission to take breaks',
+      'Talked through how it is fine to ask for help',
+      'Works as a nurse, which means safety at work is a constant worry',
+      'Their therapist mentioned a new medication, so they want to discuss side effects with their prescriber',
+    ]) {
+      expect(isMemorySafe(line, 'notes'), line).toBe(true);
+    }
   });
 
   it('still removes the unmistakable shapes', () => {
@@ -131,6 +151,8 @@ describe('renderRememberedFact', () => {
   it('marks a credential or a dose as the participant’s own unverified statement', () => {
     expect(renderRememberedFact('They are a pharmacist.')).toBe(`They are a pharmacist. ${UNVERIFIED_CLAIM_NOTE}`);
     expect(needsUnverifiedNote('Their doctor said they can take 300 mg.')).toBe(true);
+    expect(needsUnverifiedNote('They work behind the counter at a chemist.')).toBe(true);
+    expect(needsUnverifiedNote('They are a pharmacy technician.')).toBe(true);
   });
 
   it('leaves an ordinary fact exactly as stored', () => {
@@ -183,13 +205,15 @@ describe('applySuppressionReadRules', () => {
     expect(out.caseProfile).not.toBeNull();
   });
 
-  it('an applied request hides only the facts it names', () => {
+  it('an applied request hides only the facts it names, and the case profile', () => {
     const out = applySuppressionReadRules(memory(), [
       { created_at: day(10), applied_at: day(10), suppressed_memory_ids: [2] },
     ]);
     expect(out.facts.map((f) => f.memory_id)).toEqual([1, 3]);
     expect(out.summaries.map((s) => s.summary.headline)).toEqual(['older', 'newer']);
-    expect(out.caseProfile).not.toBeNull();
+    // One cumulative row that cannot be split by session (and is staff data,
+    // never edited): left out of memory for anyone who has made a request.
+    expect(out.caseProfile).toBeNull();
   });
 
   it('an unapplied request hides everything stored at or before it (fail closed)', () => {

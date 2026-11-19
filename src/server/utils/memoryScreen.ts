@@ -31,7 +31,7 @@ export type MemoryScreenResult = { ok: true } | { ok: false; reason: MemoryScree
 const ASSISTANT = String.raw`(?:you|the (?:ai|assistant|agent|bot|chatbot|model|app))`;
 
 /** Jobs and roles that are offered as a reason a limit should not apply. */
-const CREDENTIAL = String.raw`(?:pharmacists?|pharmacologists?|doctors?|physicians?|m\.?d\.?|nurses?|r\.?n\.?|nurse practitioners?|psychiatrists?|psychologists?|therapists?|counsell?ors?|clinicians?|paramedics?|emts?|surgeons?|dentists?|anaesthetists?|anesthesiologists?|veterinarians?|social workers?|med(?:ical)? students?|medical professionals?|healthcare (?:workers?|professionals?|providers?)|lawyers?|attorneys?|police(?: officers?)?|researchers?|developers?|administrators?|admins?|(?:study|research) (?:staff|team)(?: members?)?)`;
+const CREDENTIAL = String.raw`(?:pharmacists?|pharmacologists?|chemists?|pharmacy (?:technicians?|techs?|assistants?|staff|workers?|degree)|doctors?|physicians?|m\.?d\.?|nurses?|r\.?n\.?|nurse practitioners?|psychiatrists?|psychologists?|therapists?|counsell?ors?|clinicians?|paramedics?|emts?|surgeons?|dentists?|anaesthetists?|anesthesiologists?|veterinarians?|social workers?|med(?:ical)? students?|medical professionals?|healthcare (?:workers?|professionals?|providers?)|lawyers?|attorneys?|police(?: officers?)?|researchers?|developers?|administrators?|admins?|(?:study|research) (?:staff|team)(?: members?)?)`;
 
 /** What the limits are about: the things a permission would be FOR. */
 const RESTRICTED_TOPIC = String.raw`(?:dos(?:e|es|ing|age|ages)|medications?|meds|prescri\w+|drugs?|diagnos\w+|overdos\w+|lethal\w*|methods?|means|safety|suicid\w+|self[- ]harm|legal|medical|clinical)`;
@@ -70,8 +70,18 @@ const FACT_ONLY_INSTRUCTION_PATTERNS: RegExp[] = [
   ),
   /\b(?:be|act as|play|pretend to be|role-?play(?:ing)? as)\s+(?:my|their|his|her)\s+(?:girlfriend|boyfriend|wife|husband|lover|partner|spouse|doctor|therapist|psychiatrist|pharmacist|lawyer)\b/i,
   /\b(?:ignore|skip|drop|bypass|override|disable|turn off|switch off|suspend|waive)\b[^.!?]{0,30}\b(?:rules?|guidelines?|restrictions?|filters?|guardrails?|safeguards?|caveats?|disclaimers?|system prompt|instructions?)\b/i,
-  /\b(?:from now on|in future conversations|next time|always|never)\b[^.!?]{0,20}\b(?:answer|respond|reply|tell me|give me|skip|ignore|treat me)\b/i,
+  /\b(?:from now on|in future conversations|next time)\b[^.!?]{0,20}\b(?:answer|respond|reply|tell me|give me|skip|ignore|treat me)\b/i,
+  // "Always answer ...", "you never skip ...": an order, not a habit of theirs
+  // ("They never answer texts from their ex." is a fact about them).
+  /(?:^|[.!?;:]\s*|\b(?:you|please)\s+)(?:always|never)\s+(?:answer|respond|reply|tell me|give me|skip|ignore|treat me)\b/i,
 ];
+
+/** A permission-shaped phrase is a permission for the ASSISTANT only when the
+ *  sentence names the assistant or one of the restricted topics. Without that
+ *  it is ordinary therapeutic language about the participant ("they learned
+ *  it's okay to feel angry", "gave themselves permission to rest"), which is
+ *  exactly the continuity memory is for. */
+const PERMISSION_TARGET = new RegExp(String.raw`\b${ASSISTANT}\b|\b${RESTRICTED_TOPIC}\b`, 'i');
 
 const PERMISSION_PATTERNS: RegExp[] = [
   // "it's fine to discuss X with me", "it is okay for you to tell them ..."
@@ -95,13 +105,19 @@ const ASKING_IS_OK = new RegExp(
 const RESTRICTED_ANYWHERE = new RegExp(String.raw`\b${RESTRICTED_TOPIC}\b`, 'i');
 
 function isPermission(t: string): boolean {
-  if (PERMISSION_PATTERNS.some((p) => p.test(t))) return true;
+  if (PERMISSION_PATTERNS.some((p) => p.test(t)) && PERMISSION_TARGET.test(t)) return true;
   return ASKING_IS_OK.test(t) && RESTRICTED_ANYWHERE.test(t);
 }
 
+/** What a credential offered as licence is supposed to buy. Narrower than
+ *  RESTRICTED_TOPIC on purpose: "they're a nurse, so safety at work worries
+ *  them" or "... so they have questions about burnout" is a stressor, not a
+ *  licence, and is what memory is for. */
+const LICENCE_TARGET = String.raw`(?:${ASSISTANT}|(?:tell|give|answer|share|provide|explain)\s+(?:me|them|him|her)|skip|dos(?:e|es|ing|age|ages)|diagnos\w+|overdos\w+|lethal\w*|max(?:imum)?|advice|(?:fine|ok|okay|allowed|permitted|acceptable|appropriate|no problem|not a problem|approved|authori[sz]ed))`;
+
 /** A credential followed by what it is supposed to buy. */
 const CREDENTIAL_AS_LICENCE = new RegExp(
-  String.raw`\b${CREDENTIAL}\b[^.!?]{0,60}\b(?:so|therefore|thus|hence|which means|meaning|that'?s why|and so|because of that)\b[^.!?]{0,80}\b(?:tell|give|answer|discuss|share|provide|explain|skip|${RESTRICTED_TOPIC}|advice|${OK_WORD}|questions?)\b`,
+  String.raw`\b${CREDENTIAL}\b[^.!?]{0,60}\b(?:so|therefore|thus|hence|which means|meaning|that'?s why|and so|because of that)\b[^.!?]{0,80}\b${LICENCE_TARGET}\b`,
   'i',
 );
 
@@ -259,7 +275,11 @@ export interface SuppressibleMemory {
  *   - while any request is still unapplied, everything stored at or before it
  *     is dropped too. The job that would have checked those items has not
  *     finished (or failed), so nothing older can be shown: the participant was
- *     told it would not come up again.
+ *     told it would not come up again;
+ *   - the case profile is dropped whenever there is any request at all. It is
+ *     one cumulative row rebuilt from every session, so the part that came
+ *     from what they asked to forget cannot be separated out, and it is staff
+ *     data, so it is never edited to make it fit (memorySuppression.service).
  */
 export function applySuppressionReadRules<M extends SuppressibleMemory>(
   memory: M,
@@ -275,6 +295,6 @@ export function applySuppressionReadRules<M extends SuppressibleMemory>(
     facts: memory.facts.filter(
       (f) => !(f.memory_id !== undefined && suppressedIds.has(f.memory_id)) && visible(f.created_at),
     ),
-    caseProfile: memory.caseProfile && visible(memory.caseProfile.updated_at) ? memory.caseProfile : null,
+    caseProfile: suppressions.length > 0 ? null : memory.caseProfile,
   };
 }

@@ -718,11 +718,17 @@ export async function buildSafetyFollowUpBlock(
  *      the screener cadence lines itself). Otherwise, for a logged-in
  *      participant, the no-notes note and the standalone screener cue. Never
  *      both forms, so the cadence appears exactly once.
- *   2. The safety follow-up cue, whatever the memory setting.
+ *   2. The safety follow-up cue, whatever the memory setting, unless the
+ *      caller says this session continues the flagged one (`safetyFollowUp:
+ *      false`): a text hand-off chat started seconds after a vendor cut
+ *      (PR #77) is the same incident, carries its transcript and its own
+ *      crisis first message, and must not be told to ask "how have you been
+ *      since you last talked" or that it has not been given what was said.
  */
 export async function buildParticipantContextBlock(
   userId: number | null,
   sessionId: string | null = null,
+  options: { safetyFollowUp?: boolean } = {},
 ): Promise<string> {
   if (!userId) return '';
   const memory = await buildMemoryBlock(userId, sessionId);
@@ -736,5 +742,6 @@ export async function buildParticipantContextBlock(
     }
     context = buildNoNotesBlock(memoryEnabled) + (await buildScreenerCueBlock(userId));
   }
+  if (options.safetyFollowUp === false) return context;
   return context + (await buildSafetyFollowUpBlock(userId, sessionId, memoryEnabled));
 }

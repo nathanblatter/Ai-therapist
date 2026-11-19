@@ -748,6 +748,9 @@ describe('memory block framing (ai-therapist-343, 340)', () => {
     expect(applied).toContain('Older summary');
     expect(applied).toContain('- Old fact one.');
     expect(applied).not.toContain('Old fact two.');
+    // The case profile cannot be split by session: never in memory once a
+    // request exists (it is still shown to staff, unedited).
+    expect(applied).not.toContain('honesty');
   });
 });
 
@@ -866,6 +869,15 @@ describe('safety follow-up cue (ai-therapist-344)', () => {
     expect(await buildSafetyFollowUpBlock(null)).toBe('');
     getLastSessionSafetySignalMock.mockRejectedValue(new Error('db down'));
     await expect(buildSafetyFollowUpBlock(42)).resolves.toBe('');
+  });
+
+  it('no cue for a session that continues the flagged one (text hand-off, PR #77)', async () => {
+    getUserMemoryEnabledMock.mockResolvedValue(false);
+    getLastSessionSafetySignalMock.mockResolvedValue(signal);
+    const block = await buildParticipantContextBlock(42, null, { safetyFollowUp: false });
+    expect(block).not.toContain(SAFETY_FOLLOW_UP_HEADING);
+    expect(block).toContain('## Earlier conversations');
+    expect(getLastSessionSafetySignalMock).not.toHaveBeenCalled();
   });
 
   it('uses a thirty-day window', () => {

@@ -16,14 +16,7 @@ const db = vi.hoisted(() => ({
 vi.mock('../db/index.js', () => db);
 vi.mock('../config/secrets.js', () => ({ getOpenAIKey: vi.fn().mockResolvedValue('test-key') }));
 
-const {
-  applyForgetRequests,
-  buildDoNotCarryForwardBlock,
-  profileItems,
-  stripProfile,
-  summaryMemoryText,
-  suppressionTopics,
-} = await import('./memorySuppression.service.js');
+const { applyForgetRequests, summaryMemoryText, suppressionTopics } = await import('./memorySuppression.service.js');
 
 const at = new Date('2026-11-19T10:00:00Z');
 const suppression = (over: Record<string, unknown> = {}) => ({
@@ -49,11 +42,6 @@ beforeEach(() => {
 });
 
 describe('pure helpers', () => {
-  it('builds no block when there is nothing to leave out', () => {
-    expect(buildDoNotCarryForwardBlock([])).toBe('');
-    expect(buildDoNotCarryForwardBlock(['a thing'])).toContain('- a thing');
-  });
-
   it('dedupes topics case-insensitively', () => {
     expect(suppressionTopics([{ topic: 'A test' }, { topic: 'a test ' }, { topic: 'other' }])).toEqual([
       'A test',
@@ -73,25 +61,6 @@ describe('pure helpers', () => {
     });
     expect(text).toBe('H | t1 | m | walk | f');
   });
-
-  it('addresses and strips single case-profile entries', () => {
-    const profile = {
-      presenting_concerns: ['low mood', 'the test'],
-      coping_repertoire: [{ technique: 'walking', helpfulness: 'helped' as const }],
-      screener_trend: 'steady',
-    };
-    expect(profileItems('np', profile).map((i) => i.id)).toEqual([
-      'np:presenting_concerns:0',
-      'np:presenting_concerns:1',
-      'np:coping_repertoire:0',
-      'np:screener_trend:0',
-    ]);
-    expect(stripProfile('np', profile, new Set(['np:presenting_concerns:1', 'np:screener_trend:0']))).toEqual({
-      presenting_concerns: ['low mood'],
-      coping_repertoire: [{ technique: 'walking', helpfulness: 'helped' }],
-      screener_trend: '',
-    });
-  });
 });
 
 describe('applyForgetRequests', () => {
@@ -108,7 +77,7 @@ describe('applyForgetRequests', () => {
     expect(check).not.toHaveBeenCalled();
   });
 
-  it('checks older facts, summaries and the stored profile once, and hides what mentions the topic', async () => {
+  it('checks older facts and summaries once and hides what mentions the topic, editing no staff-visible data', async () => {
     db.getUserMemorySuppressions.mockResolvedValue([suppression({ session_id: 's1' })]);
     db.getUserMemoriesWithDates.mockResolvedValue([
       { memory_id: 11, fact: 'They cheated on a test.', session_id: null, created_at: at },
@@ -124,21 +93,26 @@ describe('applyForgetRequests', () => {
       profile: { stressors: ['the test', 'rent'] },
       updated_at: at,
     });
-    const check = vi.fn().mockResolvedValue(new Set(['fact:11', 'summary:s0', 'op:stressors:0']));
+    const check = vi.fn().mockResolvedValue(new Set(['fact:11', 'summary:s0']));
 
     const out = await applyForgetRequests(
       { ...base, participantText: FORGET_TURN, summary: { headline: 'x' }, caseProfile: { values: ['honesty'] } },
       check,
     );
 
-    // This session: excluded whole, and its profile update dropped.
+    // This session: excluded from memory whole; its profile update is stored
+    // for staff as the summarizer wrote it (memory reads leave the profile out).
     expect(out.summary.memory_excluded).toBe(true);
-    expect(out.caseProfile).toBeNull();
-    // The check saw only older items, never this session's summary or the fallback row.
+    expect(out.summary.headline).toBe('x');
+    expect(out.caseProfile).toEqual({ values: ['honesty'] });
+    // The check saw only older facts and summaries, never this session's
+    // summary, the fallback row or the case profile.
     const ids = (check.mock.calls[0][2] as Array<{ id: string }>).map((i) => i.id);
-    expect(ids).toEqual(['fact:11', 'fact:12', 'summary:s0', 'op:stressors:0', 'op:stressors:1']);
+    expect(ids).toEqual(['fact:11', 'fact:12', 'summary:s0']);
     expect(db.excludeSummariesFromMemory).toHaveBeenCalledWith(42, ['s0']);
-    expect(db.upsertUserCaseProfile).toHaveBeenCalledWith(42, { stressors: ['rent'] });
+    // The staff-visible case profile is never rewritten.
+    expect(db.upsertUserCaseProfile).not.toHaveBeenCalled();
+    expect(db.getUserCaseProfile).not.toHaveBeenCalled();
     // Not applied until the caller has stored its rows.
     expect(db.markMemorySuppressionsApplied).not.toHaveBeenCalled();
     await out.finalize();
@@ -152,7 +126,7 @@ describe('applyForgetRequests', () => {
       vi.fn().mockResolvedValue(null),
     );
     expect(out.summary.memory_excluded).toBe(true);
-    expect(out.caseProfile).toBeNull();
+    expect(out.caseProfile).toEqual({ values: ['family'] });
     await out.finalize();
     expect(db.markMemorySuppressionsApplied).not.toHaveBeenCalled();
   });
@@ -181,7 +155,7 @@ describe('applyForgetRequests', () => {
       { ...base, summary: { headline: 'Work' }, caseProfile: { values: ['family'] } },
       check,
     );
-    expect((check.mock.calls[0][2] as Array<{ id: string }>).map((i) => i.id)).toEqual(['new_summary', 'np:values:0']);
+    expect((check.mock.calls[0][2] as Array<{ id: string }>).map((i) => i.id)).toEqual(['new_summary']);
     expect(out.summary.memory_excluded).toBeUndefined();
     expect(out.caseProfile).toEqual({ values: ['family'] });
     expect(db.getUserMemoriesWithDates).not.toHaveBeenCalled();

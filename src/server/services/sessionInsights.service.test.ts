@@ -480,7 +480,7 @@ describe('generateSessionInsights', () => {
       getUserMemoryEnabledMock.mockResolvedValue(true);
     });
 
-    it('a request made in this session keeps its summary and case profile out of memory, whatever the model wrote', async () => {
+    it('a request made in this session keeps its summary out of memory, and staff still get everything the model wrote', async () => {
       getUserMemorySuppressionsMock.mockResolvedValue([suppression()]);
       createMock.mockResolvedValue(
         llmResponse({
@@ -499,7 +499,9 @@ describe('generateSessionInsights', () => {
       // The staff-facing text is what the model wrote: nothing is deleted.
       expect(stored.headline).toBe('Guilt about a test');
       expect(upsertSessionInsightsMock.mock.calls[0][3]).toEqual(BASIC_SOAP);
-      expect(upsertUserCaseProfileMock).not.toHaveBeenCalled();
+      // The case profile staff see is updated as written; memory reads leave
+      // it out for a participant who has made a forget request.
+      expect(upsertUserCaseProfileMock).toHaveBeenCalledWith(42, { presenting_concerns: ['guilt about a test'] });
       // Applied only after the summary is stored.
       expect(markMemorySuppressionsAppliedMock).toHaveBeenCalledWith(42, [7], []);
       // The same-session request is not put in the summarizer's do-not-carry block.
@@ -513,7 +515,6 @@ describe('generateSessionInsights', () => {
         { role: 'user', content: 'Actually, forget that. Can you erase it?' },
       ]);
       getUserMemorySuppressionsMock
-        .mockResolvedValueOnce([]) // prompt block
         .mockResolvedValueOnce([]) // before recording
         .mockResolvedValue([suppression({ source: 'summary' })]);
       createMock.mockResolvedValue(
@@ -555,7 +556,7 @@ describe('generateSessionInsights', () => {
       expect(stored.forget_requests).toBeUndefined();
     });
 
-    it('a later session is told the topic, and a summary that still mentions it is kept out of memory', async () => {
+    it('a later session: the summarizer is not told the topic, and a summary that mentions it is kept out of memory', async () => {
       getSessionMock.mockResolvedValue({ session_id: 's2', user_id: 42, checkin: null });
       getUserMemorySuppressionsMock.mockResolvedValue([suppression({ applied_at: new Date() })]);
       createMock
@@ -566,19 +567,23 @@ describe('generateSessionInsights', () => {
             case_profile: { presenting_concerns: ['work stress', 'the test at school'] },
           }),
         )
-        // The independent check names the summary and one profile entry.
-        .mockResolvedValueOnce(llmResponse({ flagged: ['new_summary', 'np:presenting_concerns:1'] }));
+        // The independent check names the new summary.
+        .mockResolvedValueOnce(llmResponse({ flagged: ['new_summary'] }));
 
       await generateSessionInsights('s2');
 
+      // What staff read is written without regard to the request.
       const prompt = createMock.mock.calls[0][0].messages.at(-1).content as string;
-      expect(prompt).toContain('DO NOT CARRY FORWARD');
-      expect(prompt).toContain('- what they said about a test at school');
-      expect(upsertSessionInsightsMock.mock.calls[0][2].memory_excluded).toBe(true);
-      expect(upsertUserCaseProfileMock).toHaveBeenCalledWith(42, { presenting_concerns: ['work stress'] });
+      expect(prompt).not.toContain('what they said about a test at school');
+      const stored = upsertSessionInsightsMock.mock.calls[0][2];
+      expect(stored.headline).toBe('Still worried about the test');
+      expect(stored.memory_excluded).toBe(true);
+      expect(upsertUserCaseProfileMock).toHaveBeenCalledWith(42, {
+        presenting_concerns: ['work stress', 'the test at school'],
+      });
     });
 
-    it('fails closed when the check cannot run: summary out of memory, profile untouched, request left unapplied', async () => {
+    it('fails closed when the check cannot run: summary out of memory, request left unapplied, staff data stored', async () => {
       getSessionMock.mockResolvedValue({ session_id: 's2', user_id: 42, checkin: null });
       getUserMemorySuppressionsMock.mockResolvedValue([suppression()]);
       createMock
@@ -590,7 +595,7 @@ describe('generateSessionInsights', () => {
       await generateSessionInsights('s2');
 
       expect(upsertSessionInsightsMock.mock.calls[0][2].memory_excluded).toBe(true);
-      expect(upsertUserCaseProfileMock).not.toHaveBeenCalled();
+      expect(upsertUserCaseProfileMock).toHaveBeenCalledWith(42, { presenting_concerns: ['x'] });
       expect(markMemorySuppressionsAppliedMock).not.toHaveBeenCalled();
     });
 
