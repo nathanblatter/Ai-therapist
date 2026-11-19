@@ -563,7 +563,9 @@ describe('buildLeadConversationBlock (features.lead_conversation_enabled)', () =
 // participant, and memory is off by default, so the cadence cue cannot live
 // only inside the memory block.
 describe('screener cue independent of memory (ai-therapist-345)', () => {
-  const now = new Date('2026-11-18T18:00:00Z');
+  // Relative to the real clock: the block counts days from Date.now(), so a
+  // fixed date here made this test fail exactly one day after it was written.
+  const now = new Date();
   const daysAgo = (d: number) => new Date(now.getTime() - d * 24 * 60 * 60 * 1000);
 
   it('memory OFF: the prompt context is the no-notes note and the screener cue, with no memory content', async () => {
