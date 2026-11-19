@@ -5,16 +5,19 @@
 // summary are research data. What this module controls is what is CARRIED
 // FORWARD into session memory:
 //
-//   1. the summarizer is told the topics and asked to leave them out of the
-//      summary's memory fields and the case profile (sessionInsights.service);
-//   2. a second, independent check (checkAgainstTopics below) reads what the
-//      summarizer wrote, and, the first time after a request, every stored
-//      memory item older than the request (remembered facts, earlier
-//      summaries, the existing case profile), and names the ones that still
-//      mention a topic;
-//   3. what it names is kept out of memory: a summary is marked
-//      memory_excluded, a fact's id goes on the suppression row, a case
-//      profile entry is removed from the profile.
+//   1. The session the request was made in is kept out of memory whole: its
+//      summary is marked memory_excluded and the case profile is not updated
+//      from it. No model decides this. (Asking the summarizer to leave the
+//      topic out, and a second model to check, still let "guilt and anxiety
+//      tied to past actions" through, and the next session opened with it.)
+//   2. Every stored memory item OLDER than the request (remembered facts,
+//      earlier summaries, the existing case profile) is read once by
+//      checkAgainstTopics below, and the ones that mention the topic are kept
+//      out of memory: a summary is marked memory_excluded, a fact's id goes
+//      on the suppression row, a case profile entry is removed.
+//   3. In LATER sessions the summarizer is told the topics
+//      (sessionInsights.service) and the same check reads what it wrote
+//      before it is stored.
 //
 // It fails closed. If the check cannot run, the new summary is marked
 // memory_excluded, the case profile is not updated, and the request stays
@@ -36,6 +39,7 @@ import {
   type SessionSummary,
 } from '../db/index.js';
 import { createLogger } from '../utils/logger.js';
+import { looksLikeForgetRequest } from '../utils/memoryScreen.js';
 
 const log = createLogger('memorySuppression');
 
@@ -48,8 +52,8 @@ const MAX_ITEM_CHARS = 600;
 export function buildDoNotCarryForwardBlock(topics: string[]): string {
   if (topics.length === 0) return '';
   return (
-    'DO NOT CARRY FORWARD (the participant asked the assistant not to bring these up again; the "summary" fields ' +
-    'and the "case_profile" must not mention or allude to them, the "soap" note is unaffected):\n' +
+    'DO NOT CARRY FORWARD (in an earlier session the participant asked the assistant not to bring these up again; ' +
+    'the "summary" fields and the "case_profile" must not mention or allude to them, the "soap" note is unaffected):\n' +
     `${topics.map((t) => `- ${t}`).join('\n')}\n\n`
   );
 }
@@ -220,14 +224,24 @@ const NEW_SUMMARY = 'new_summary';
  * `check` is injectable for tests.
  */
 export async function applyForgetRequests(
-  input: { userId: number; sessionId: string; summary: SessionSummary; caseProfile: CaseProfile | null },
+  input: {
+    userId: number;
+    sessionId: string;
+    summary: SessionSummary;
+    caseProfile: CaseProfile | null;
+    /** The participant's own turns, joined. The summarizer's forget_requests
+     *  are believed only when one of them asks for something to be forgotten. */
+    participantText: string;
+  },
   check: typeof checkAgainstTopics = checkAgainstTopics,
 ): Promise<ForgetOutcome> {
   const { userId, sessionId } = input;
   const summary: SessionSummary = { ...input.summary };
-  const detected = (Array.isArray(summary.forget_requests) ? summary.forget_requests : [])
-    .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
-    .slice(0, MAX_DETECTED_PER_SESSION);
+  const detected = looksLikeForgetRequest(input.participantText)
+    ? (Array.isArray(summary.forget_requests) ? summary.forget_requests : [])
+        .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+        .slice(0, MAX_DETECTED_PER_SESSION)
+    : [];
   if (detected.length > 0) summary.forget_requests = detected;
   else delete summary.forget_requests;
 
@@ -249,10 +263,15 @@ export async function applyForgetRequests(
 
   const topics = suppressionTopics(suppressions);
   const pending = suppressions.filter((s) => !s.applied_at);
+  // The session the request was made in never reaches memory: no summary, no
+  // case profile update. Deterministic; nothing below can undo it.
+  const requestedHere = suppressions.some((s) => s.session_id === sessionId);
+  if (requestedHere) summary.memory_excluded = true;
+  const newProfile = requestedHere ? null : input.caseProfile;
   const items: CheckItem[] = [];
-  const newText = summaryMemoryText(summary);
+  const newText = requestedHere ? '' : summaryMemoryText(summary);
   if (newText) items.push({ id: NEW_SUMMARY, text: newText });
-  if (input.caseProfile) items.push(...profileItems('np', input.caseProfile));
+  if (newProfile) items.push(...profileItems('np', newProfile));
 
   // Older stored memory is checked once per request, the first time the job
   // runs after it.
@@ -262,7 +281,7 @@ export async function applyForgetRequests(
     const [facts, summaries, profileRow] = await Promise.all([
       getUserMemoriesWithDates(userId, 50),
       getRecentUserSummaries(userId, 10),
-      input.caseProfile ? Promise.resolve(null) : getUserCaseProfile(userId),
+      newProfile ? Promise.resolve(null) : getUserCaseProfile(userId),
     ]);
     for (const f of facts) {
       if (f.memory_id !== undefined && !alreadySuppressed.has(f.memory_id))
@@ -287,7 +306,7 @@ export async function applyForgetRequests(
   }
 
   if (flagged.has(NEW_SUMMARY)) summary.memory_excluded = true;
-  const caseProfile = input.caseProfile ? stripProfile('np', input.caseProfile, flagged) : null;
+  const caseProfile = newProfile ? stripProfile('np', newProfile, flagged) : null;
 
   if (pending.length === 0) return { summary, caseProfile, finalize: nothingToFinalize };
 

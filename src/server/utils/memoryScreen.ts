@@ -233,6 +233,17 @@ export function screenCaseProfileForMemory<T extends MemoryCaseProfile>(profile:
 // "Forget that": what a suppression hides at read time
 // ---------------------------------------------------------------------------
 
+/** A participant turn that asks for something to be forgotten or erased. The
+ *  post-session summarizer may only report a forget request when one of the
+ *  participant's own turns looks like this (it once reported three "remember
+ *  that ..." requests as forget requests). */
+const FORGET_REQUEST_SHAPE =
+  /\b(?:forget|erase|delete|wipe|unsay|scrub)\b|\b(?:do not|don'?t|please don'?t|never) (?:remember|keep|save|store|record|bring (?:that|it|this) up|mention (?:that|it|this))\b|\b(?:take (?:that|it) back|strike that|pretend i (?:did not|didn'?t|never) sa(?:id|y))\b|\bshould(?: not|n'?t) have (?:said|told you|mentioned)\b/i;
+
+export function looksLikeForgetRequest(participantText: string): boolean {
+  return FORGET_REQUEST_SHAPE.test(participantText.replace(/[\u2018\u2019]/g, "'"));
+}
+
 export interface SuppressionForRead {
   created_at: Date;
   /** Null until the post-session job has checked every stored memory item
