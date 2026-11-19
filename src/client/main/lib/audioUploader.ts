@@ -23,7 +23,9 @@
 //   are dropped and counted, never silently.
 // - Retry, then count. A failed batch (network error, 408/429/5xx) is resent
 //   in place, in order, up to MAX_ATTEMPTS times with a growing delay, and
-//   only then counted lost.
+//   only then counted lost. A request left unanswered past requestTimeoutMs
+//   is aborted and counts as a network error, so one dead connection cannot
+//   hold the track for the rest of the session.
 // - Every batch carries `seq`, the per-track index of its first chunk, so the
 //   server can see gaps and stale (duplicate or out-of-order) batches.
 // - The end of a session drains: drain() sends what is left and resolves when
@@ -43,6 +45,18 @@ export const MAX_ATTEMPTS = 3;
 export const RETRY_BASE_MS = 500;
 /** Longest drain() waits at the end of a session. */
 export const DRAIN_TIMEOUT_MS = 3000;
+/**
+ * An unanswered request is aborted and treated as a network error (then
+ * retried) after this long plus one millisecond per REQUEST_TIMEOUT_BYTES_PER_MS
+ * bytes of body, so a slow but moving upload of a large coalesced batch is not
+ * cut. With one request in flight per track, a request that never answers (a
+ * dead connection after a cellular hand-over) would otherwise hold the track
+ * for the rest of the session while the waiting buffer drops the oldest audio.
+ */
+export const REQUEST_TIMEOUT_BASE_MS = 20_000;
+export const REQUEST_TIMEOUT_BYTES_PER_MS = 32; // about 256 kbit/s
+export const requestTimeoutMs = (bodyBytes: number) =>
+  REQUEST_TIMEOUT_BASE_MS + Math.ceil(bodyBytes / REQUEST_TIMEOUT_BYTES_PER_MS);
 /** Mic toggles kept for the mic_timeline report (client event detail is capped at 2 KB). */
 export const MAX_MIC_TOGGLES = 60;
 
@@ -94,6 +108,8 @@ export interface AudioUploaderOptions {
   maxPendingBytes?: number;
   maxAttempts?: number;
   retryBaseMs?: number;
+  /** Abort an unanswered request after this many ms for a body of `bodyBytes`. */
+  requestTimeoutMs?: (bodyBytes: number) => number;
 }
 
 interface Pending {
@@ -122,6 +138,7 @@ export function createAudioUploader(
   const maxPendingBytes = options.maxPendingBytes ?? MAX_PENDING_BYTES;
   const maxAttempts = options.maxAttempts ?? MAX_ATTEMPTS;
   const retryBaseMs = options.retryBaseMs ?? RETRY_BASE_MS;
+  const requestTimeout = options.requestTimeoutMs ?? requestTimeoutMs;
   const url = `/api/sessions/${sessionId}/audio`;
 
   const stats: UploaderStats = {
@@ -208,11 +225,18 @@ export function createAudioUploader(
     if (batch.attempts > 1) stats.retries += 1;
     inFlight = true;
     let status: number | null = null;
+    const body = bodyFor(batch.items);
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const abortTimer = controller ? setTimeout(() => controller.abort(), requestTimeout(body.length)) : null;
     fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: bodyFor(batch.items),
+      body,
+      ...(controller ? { signal: controller.signal } : {}),
     })
+      .finally(() => {
+        if (abortTimer) clearTimeout(abortTimer);
+      })
       .then(
         (res) => {
           status = res.status;
@@ -411,6 +435,30 @@ export async function drainAndReport(
     uploaders.participant ? uploaders.participant.drain(timeoutMs) : Promise.resolve(null),
   ]);
   reportTracks(mixed, participant, uploaders.participant, report);
+}
+
+/**
+ * The order of a normal voice-session end (ai-therapist-372): the log flush
+ * and the recording drain first, then `end` (POST /end, which finalises the
+ * recording). `end` runs even when a step before it fails: a session that is
+ * never ended on the server keeps its timers and any crisis state open.
+ */
+export async function endAfterRecordingDrained(steps: {
+  flushLogs: () => Promise<void>;
+  drained: Promise<void>;
+  end: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await steps.flushLogs();
+  } catch {
+    /* the end must still happen */
+  }
+  try {
+    await steps.drained;
+  } catch {
+    /* the end must still happen */
+  }
+  await steps.end();
 }
 
 function reportTracks(

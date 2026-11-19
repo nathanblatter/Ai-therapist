@@ -41,6 +41,7 @@ import {
   beaconRecordingTail,
   createAudioUploader,
   drainAndReport,
+  endAfterRecordingDrained,
   isMicMuted,
   type AudioUploader,
 } from '../lib/audioUploader';
@@ -2587,20 +2588,21 @@ export default function App() {
     logConversation({ sessionId: endingSessionId, role: 'system', type: 'session_end', message: 'Session ended' });
     stopPeriodicFlush();
     // The recording's last batches must land before POST /end finalises it.
-    const drained = stopRecordingCapture(endingSessionId);
-    await flushLogs();
-    await drained;
-
-    if (endingSessionId) {
-      try {
-        await fetch(`/api/sessions/${endingSessionId}/end`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        });
-      } catch (error) {
-        console.error('Failed to end session:', error);
-      }
-    }
+    await endAfterRecordingDrained({
+      flushLogs,
+      drained: stopRecordingCapture(endingSessionId),
+      end: async () => {
+        if (!endingSessionId) return;
+        try {
+          await fetch(`/api/sessions/${endingSessionId}/end`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } catch (error) {
+          console.error('Failed to end session:', error);
+        }
+      },
+    });
 
     if (socketRef.current) {
       if (endingSessionId) socketRef.current.emit('session:leave', { sessionId: endingSessionId });
@@ -3037,19 +3039,22 @@ export default function App() {
     // DRAIN_TIMEOUT_MS); on the takeover below the whole of it runs in the
     // background, so the drain never delays the recovery screen.
     const recordingDrained = stopRecordingCapture(endedSessionId);
-    const finishOnServer = async (): Promise<void> => {
-      await flushLogs();
-      await recordingDrained;
-      if (!endedSessionId) return;
-      try {
-        await fetch(`/api/sessions/${endedSessionId}/end`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        });
-      } catch (error) {
-        console.error('Failed to end session:', error);
-      }
-    };
+    const finishOnServer = (): Promise<void> =>
+      endAfterRecordingDrained({
+        flushLogs,
+        drained: recordingDrained,
+        end: async () => {
+          if (!endedSessionId) return;
+          try {
+            await fetch(`/api/sessions/${endedSessionId}/end`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+            });
+          } catch (error) {
+            console.error('Failed to end session:', error);
+          }
+        },
+      });
     if (moderationTakeoverRef.current) {
       // The vendor cut this call and the participant is waiting in silence for
       // the assistant to come back (ai-therapist-293). These two round trips

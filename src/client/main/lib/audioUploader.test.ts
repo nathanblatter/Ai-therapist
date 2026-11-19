@@ -4,8 +4,10 @@ import {
   createAudioUploader,
   drainAndReport,
   DRAIN_TIMEOUT_MS,
+  endAfterRecordingDrained,
   MAX_ATTEMPTS,
   RETRY_BASE_MS,
+  requestTimeoutMs,
   type AudioUploader,
 } from './audioUploader';
 
@@ -247,6 +249,43 @@ describe('session audio upload (ai-therapist-372)', () => {
     expect(server.bodies.map((b) => b.seq)).toEqual([0, 0]);
   });
 
+  it('aborts a request that never answers and retries it, so one dead connection cannot hold the track', async () => {
+    // The first request hangs forever (a dead connection after a cellular
+    // hand-over) but honours its abort signal, as fetch does.
+    const appended: number[] = [];
+    let calls = 0;
+    const fetchMock = vi.fn((_url: string, init: { body: string; signal?: AbortSignal }) => {
+      const k = calls++;
+      const body = JSON.parse(init.body) as Body;
+      return new Promise<{ status: number }>((resolve, reject) => {
+        if (k === 0) {
+          init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+          return;
+        }
+        setTimeout(() => {
+          appended.push(...body.chunks.map(indexOf));
+          resolve({ status: 204 });
+        }, 50);
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('navigator', { sendBeacon: vi.fn(() => false) });
+
+    const up = createAudioUploader('s', 'participant', { requestTimeoutMs: () => 5_000 });
+    await feed([up], 0, 120); // about 10 s of audio
+    const stats = await run(up.drain(10_000));
+
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(2);
+    expect(stats.retries).toBe(1);
+    expect(stats.chunksUndelivered).toBe(0);
+    expect(appended).toEqual(range(0, 120));
+  });
+
+  it('scales the request timeout with the body, so a slow but moving large batch is not cut', () => {
+    expect(requestTimeoutMs(55_000)).toBeGreaterThanOrEqual(20_000);
+    expect(requestTimeoutMs(6 * 1024 * 1024)).toBeGreaterThan(requestTimeoutMs(55_000) + 150_000);
+  });
+
   it('stops for good once the server reports the recording closed (410), counted', async () => {
     const server = installServer({ outcome: () => 410 });
     const up = createAudioUploader('s', 'mixed');
@@ -358,5 +397,39 @@ describe('session audio upload (ai-therapist-372)', () => {
       for (const v of Object.values(track)) expect(typeof v).toBe('number');
     }
     expect(summary.participant.sent).toBe(10);
+  });
+});
+
+describe('the order of a voice-session end (ai-therapist-372)', () => {
+  it('ends the session only after the logs are flushed and the recording has drained', async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const drained = new Promise<void>((r) => (release = r)).then(() => {
+      order.push('drained');
+    });
+    const ending = endAfterRecordingDrained({
+      flushLogs: async () => {
+        order.push('logs');
+      },
+      drained,
+      end: async () => {
+        order.push('end');
+      },
+    });
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(order).toEqual(['logs']); // POST /end waits for the drain
+    release();
+    await ending;
+    expect(order).toEqual(['logs', 'drained', 'end']);
+  });
+
+  it('still ends the session when the log flush or the drain fails', async () => {
+    const end = vi.fn(async () => {});
+    await endAfterRecordingDrained({
+      flushLogs: () => Promise.reject(new Error('offline')),
+      drained: Promise.reject(new Error('drain failed')),
+      end,
+    });
+    expect(end).toHaveBeenCalledOnce();
   });
 });
