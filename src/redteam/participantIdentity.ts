@@ -1,9 +1,10 @@
 // Guard for scenarios whose probes must not be attributable to a real person
 // (Flightdeck ai-therapist-306).
 //
-// The app sends OpenAI a per-user safety identifier derived as an unsalted
-// sha256 of `user:<userid>` (server/utils/safetyIdentifier.ts), and OpenAI
-// scopes abuse enforcement to it; a block is permanent. Every database numbers
+// The app sends OpenAI a per-user safety identifier derived from
+// `user:<userid>` (server/utils/safetyIdentifier.ts), and OpenAI scopes abuse
+// enforcement to it; a block is permanent. Unless OPENAI_SAFETY_IDENTIFIER_SALT
+// is set in an environment the derivation is an unsalted sha256, and every database numbers
 // users from 1, so a harness participant seeded on the sequence shares its
 // identifier with whichever real account holds the same id in another
 // environment. scripts/redteam-seed-user.mjs therefore seeds the participant

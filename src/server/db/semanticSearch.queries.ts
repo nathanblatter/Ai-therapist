@@ -19,6 +19,7 @@
 import { pool } from '../config/db.js';
 import { ownerOrgScopeSql } from './organizations.queries.js';
 import { toVectorLiteral } from './knowledge.queries.js';
+import { leakCheckNeedsReviewSql } from './leakCheckSql.js';
 
 /**
  * The per-message "redaction is complete" predicate for search results.
@@ -29,9 +30,10 @@ import { toVectorLiteral } from './knowledge.queries.js';
  *     a researcher hand-redacted it);
  *   - no redaction_error is recorded against the row (a failed or partial
  *     run; the same exclusion the content-wipe sweep uses);
- *   - the leak check (redactionVerifier, ai-therapist-262) has not flagged it
- *     as still containing an identifier, unless a researcher has since
- *     reviewed it in the /redact tool.
+ *   - the leak check (redactionVerifier, ai-therapist-262) has neither
+ *     flagged it as still containing an identifier nor errored on it
+ *     (ai-therapist-288: an unverified row is not a clean row), unless a
+ *     researcher has since reviewed it in the /redact tool.
  *
  * Message-level only. The session-level guard (status <> 'active') lives in
  * the search query, because a researcher reading an ACTIVE session's
@@ -44,8 +46,7 @@ export function redactionCompleteSql(alias = 'm'): string {
     AND ${q}content_redacted IS NOT NULL
     AND btrim(${q}content_redacted) <> ''
     AND (${q}metadata->>'redaction_error') IS NULL
-    AND NOT (COALESCE(${q}metadata->'redaction_check'->>'flagged', 'false') = 'true'
-             AND COALESCE(${q}metadata->'redaction_check'->>'reviewed', 'false') <> 'true'))`;
+    AND NOT ${leakCheckNeedsReviewSql(alias)})`;
 }
 
 /** Largest offset + limit a search may page to (bounds hnsw.ef_search). */

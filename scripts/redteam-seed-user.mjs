@@ -10,7 +10,8 @@ const USERNAME = process.env.REDTEAM_PARTICIPANT_USER || 'redteam_participant';
 const PASSWORD = process.env.REDTEAM_PARTICIPANT_PASS || 'redteam-Passw0rd!';
 // Reserved userid, far above anything the users sequence will reach. OpenAI
 // scopes abuse enforcement to a per-user safety identifier, which the app
-// derives as an UNSALTED sha256 of `user:<userid>` (utils/safetyIdentifier.ts).
+// derives from `user:<userid>` (utils/safetyIdentifier.ts): an UNSALTED sha256
+// unless that environment sets OPENAI_SAFETY_IDENTIFIER_SALT (ai-therapist-306).
 // A harness participant seeded on the sequence gets a low id (2, 3, ...) and so
 // shares its identifier with whichever REAL participant holds that id on stage
 // or prod. Red-team probes are adversarial by design (the minors hard-refusal
