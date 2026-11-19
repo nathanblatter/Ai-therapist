@@ -1757,6 +1757,11 @@ export class SidebandManager {
     } catch (err) {
       console.error(`[Live] Failed to return tool result for ${call.name}:`, err);
     }
+    // The quiet period for the backend's continuation starts now, when it got
+    // the result, not when the tool started: otherwise a tool that took 11 s
+    // would leave the continuation 1 s before the participant is told the
+    // answer is not coming. No-op for a settled or unwatched delegation.
+    if (call.delegationId) this.armDelegationWatch(sessionId, call.delegationId);
 
     await insertMessagesBatch([
       {

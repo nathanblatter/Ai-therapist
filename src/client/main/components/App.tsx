@@ -1801,12 +1801,24 @@ export default function App() {
           { stage: 'assistant_audio_play_refused', name, recovery },
           newSessionId,
         );
-        const retry = () => {
-          if (audioElement.current !== audioEl) return;
-          void audioEl.play().catch(() => {});
-        };
-        window.addEventListener('pointerdown', retry, { once: true });
-        window.addEventListener('keydown', retry, { once: true });
+        // Retried on the events that actually unlock sound. On a touch screen
+        // that is the END of a touch (pointerup, touchend, click), not
+        // pointerdown, which grants no activation there: a single
+        // pointerdown-only retry would be refused again on exactly the phone
+        // this is for. The listeners stay until one play() succeeds, the call
+        // has ended or this element is no longer the session's, then all of
+        // them are removed.
+        const gestures = ['pointerup', 'touchend', 'click', 'keydown'] as const;
+        const remoteTrack = e.track;
+        const stopRetrying = () => gestures.forEach((g) => window.removeEventListener(g, retry, true));
+        function retry() {
+          if (audioElement.current !== audioEl || remoteTrack.readyState === 'ended') {
+            stopRetrying();
+            return;
+          }
+          void audioEl.play().then(stopRetrying, () => {});
+        }
+        gestures.forEach((g) => window.addEventListener(g, retry, true));
       });
       // Capture the whole conversation: mix mic + assistant audio into one PCM
       // stream and upload it over HTTP for the entire session, so the server can

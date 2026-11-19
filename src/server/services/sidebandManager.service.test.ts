@@ -1593,6 +1593,38 @@ describe('unanswered delegations (ai-therapist-348)', () => {
       expect(commentary(ws)).toHaveLength(1);
     });
 
+    it('gives the continuation a full quiet period from when our tool result goes back', async () => {
+      const sessionId = 's-deleg-tool-late';
+      const ws = await attach(sessionId);
+      let finishTool!: (value: unknown) => void;
+      executeToolMock.mockReturnValue(
+        new Promise((resolve) => {
+          finishTool = resolve;
+        }),
+      );
+      await fire(sessionId, created());
+      await fire(sessionId, nested('response.created'));
+      void fire(sessionId, toolCall('call_late'));
+      await settle();
+      await fire(sessionId, nested('response.completed', { response: { id: 'resp_late_1', usage: {} } }));
+
+      // The tool takes almost the whole period, then its result goes back.
+      await vi.advanceTimersByTimeAsync(DELEGATION_STALL_MS - 1_000);
+      finishTool({ ok: true });
+      await settle();
+      expect(sentEvents(ws).map((e) => e.type)).toContain('response.create');
+
+      // The backend has had 2 s with the result: that is not a stall.
+      await vi.advanceTimersByTimeAsync(2_000);
+      await settle();
+      expect(commentary(ws)).toHaveLength(0);
+
+      // ...and a continuation that never starts is still caught, 12 s after the result.
+      await vi.advanceTimersByTimeAsync(DELEGATION_STALL_MS - 2_000);
+      await settle();
+      expect(commentary(ws)).toHaveLength(1);
+    });
+
     it('never fires after the session closed', async () => {
       const sessionId = 's-deleg-closed';
       const ws = await attach(sessionId);
