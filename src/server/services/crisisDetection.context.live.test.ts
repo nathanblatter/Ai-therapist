@@ -268,8 +268,10 @@ describe.skipIf(!LIVE)(
         ],
         'ok thanks',
       );
-      expect(r.method).toBe('llm_context');
-      expect(r.riskScore, JSON.stringify(r)).toBeLessThan(50);
+      // Since ai-therapist-349 a filler-only fragment in a session that never
+      // reached medium is not sent to the assessor at all (isLowContentFragment).
+      expect(r.method).toBe('keyword_only');
+      expect(r.riskScore, JSON.stringify(r)).toBe(0);
     });
   },
 );

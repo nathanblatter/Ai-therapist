@@ -45,6 +45,7 @@ const {
   RISK_ASSESSMENT_PROMPT,
   THIRD_PARTY_FACTOR,
   HARM_TO_OTHERS_FACTOR,
+  isLowContentFragment,
 } = await import('./crisisDetection.service.js');
 const { _resetAssessorHealthForTests } = await import('./riskAssessorHealth.service.js');
 
@@ -526,5 +527,123 @@ describe('the rubric agrees with the cutoff (owner decision 2026-11-18: 65 and u
       ],
     });
     expect((await analyzeMessageRisk(turn('I wish I was dead.'), [])).severity).toBe('medium');
+  });
+});
+
+// ai-therapist-349: in a real voice session "wait, stop" (said during a
+// breathing exercise) was transcribed as "would stop" and assessed 50,
+// "passive ideation, hopelessness": flagged, then paged.
+describe('ai-therapist-349: a low-content fragment is not over-read', () => {
+  /** One earlier low-band screen turn (work stress): every turn is context-assessed. */
+  const lowSession = () => calmSession([{ risk_score: 25, score_factors: { method: 'llm_assessed' } }]);
+  const mediumSession = () =>
+    queryMock.mockImplementation(async (sql: unknown) =>
+      String(sql).includes('session-risk-context')
+        ? {
+            rows: [
+              {
+                crisis_flagged: true,
+                crisis_severity: 'medium',
+                recent: [{ risk_score: 55, score_factors: { method: 'llm_assessed' } }],
+              },
+            ],
+          }
+        : { rows: [] },
+    );
+  const EXERCISE = [
+    { role: 'user', content: 'Work has been crushing me lately.' },
+    { role: 'assistant', content: 'Breathe in for four, hold, and out for six. Keep going at your own pace.' },
+  ];
+
+  it.each(['would stop', 'wait stop', 'stop', 'ok stop', 'wait, stop.', 'ok', 'um hold on one sec', 'yeah', ''])(
+    'is a fragment: "%s"',
+    (text) => {
+      expect(isLowContentFragment(text)).toBe(true);
+    },
+  );
+
+  it.each([
+    'tonight',
+    'pills',
+    'bought a gun',
+    'do it',
+    'i will do it',
+    'i can not',
+    'make it stop',
+    'i want it to stop',
+    'everything would stop',
+    'not anymore',
+    'ok so i wait and then i stop and then i go back again', // filler words, but a whole sentence
+  ])('is not a fragment (it has content, or is a sentence): "%s"', (text) => {
+    expect(isLowContentFragment(text)).toBe(false);
+  });
+
+  it('REPRODUCTION: "would stop" in a low-band session is not sent to the assessor and scores 0', async () => {
+    lowSession();
+    createMock.mockResolvedValue(assess(50, 'genuine', ['passive ideation', 'hopelessness']));
+
+    const result = await analyzeMessageRisk(turn('would stop'), [...EXERCISE, { role: 'user', content: 'would stop' }]);
+
+    expect(createMock).not.toHaveBeenCalled();
+    expect(result.riskScore).toBe(0);
+    expect(result.severity).toBe('none');
+    expect(riskRow()).toMatchObject({ method: 'keyword_only', low_content_fragment: true });
+  });
+
+  it('a turn with content in the same session is still context-assessed', async () => {
+    lowSession();
+    createMock.mockResolvedValue(assess(20, 'genuine'));
+    await analyzeMessageRisk(turn('tonight'), []);
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(riskRow().low_content_fragment).toBeUndefined();
+  });
+
+  it('the answer to a safety question is assessed however short: "yeah" is meaningful there', async () => {
+    lowSession();
+    createMock.mockResolvedValue(assess(55, 'genuine', ['passive ideation']));
+    const question = { role: 'assistant', content: 'Do you ever have thoughts of not wanting to be alive?' };
+
+    const result = await analyzeMessageRisk(turn('yeah'), [question, { role: 'user', content: 'yeah' }]);
+
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(result.severity).toBe('medium');
+  });
+
+  it('in a session already at medium the fragment is still assessed ("ok" may answer something out of view)', async () => {
+    mediumSession();
+    createMock.mockResolvedValue(assess(50, 'genuine'));
+    await analyzeMessageRisk(turn('would stop'), []);
+    expect(createMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('a fragment that is also a signal ("this is goodbye") is assessed', async () => {
+    lowSession();
+    createMock.mockResolvedValue(assess(30, 'unclear'));
+    await analyzeMessageRisk(turn('this is goodbye'), []);
+    expect(createMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('when the session state cannot be read the fragment is assessed rather than assumed calm', async () => {
+    queryMock.mockImplementation(async (sql: unknown) => {
+      if (String(sql).includes('session-risk-context')) throw new Error('db down');
+      return { rows: [] };
+    });
+    createMock.mockResolvedValue(assess(0, 'unclear'));
+    await analyzeMessageRisk(turn('would stop'), []);
+    expect(createMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('chat: the reply is not held for a fragment in a low session, and is for a safety answer', async () => {
+    lowSession();
+    recentMessagesMock.mockResolvedValue(EXERCISE);
+    expect(await needsContextAssessment('sess-frag-1', 'ok stop')).toBe(false);
+    expect(await needsContextAssessment('sess-frag-2', 'i feel worse')).toBe(true);
+    recentMessagesMock.mockResolvedValue([{ role: 'assistant', content: 'Are you having thoughts of suicide?' }]);
+    expect(await needsContextAssessment('sess-frag-3', 'yeah')).toBe(true);
+  });
+
+  it('the rubric tells the assessor to score only what was said', () => {
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/Fragments\. Voice transcripts arrive in pieces/);
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/do not complete it into a sentence about dying, escape or giving up/);
   });
 });

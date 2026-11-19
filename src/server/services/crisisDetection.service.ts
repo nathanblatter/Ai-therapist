@@ -657,6 +657,56 @@ export function repliesToSafetyQuestion(history: HistoryMessage[]): boolean {
   return asksSafetyQuestion(history[i].content ?? history[i].content_redacted);
 }
 
+// ============================================
+// STAGE 1d: LOW-CONTENT FRAGMENTS (ai-therapist-349)
+// ============================================
+// Voice transcripts arrive as fragments, some of them mis-heard. In a real
+// session on 2026-11-18 a participant doing a breathing exercise said "wait,
+// stop"; it was transcribed as "would stop". The session had one earlier
+// low-band turn (work stress), so every turn was context-assessed, and the
+// assessor completed the two words into a sentence: 50, "passive ideation,
+// hopelessness", "the phrase 'would stop' suggests a passive wish to escape".
+// The session was flagged, the assistant asked the ideation question, the
+// vendor filter cut the call on that question, and staff were paged.
+//
+// A message made ONLY of the words below says nothing by itself: it is a
+// stop/go, a filler, an acknowledgement. In a session that has never reached
+// the flagging level (medium) such a fragment is not sent to the assessor at
+// all, so there is nothing for it to over-read. It is deliberately a closed
+// list of function words and not a length rule: "bought a gun", "tonight" and
+// "pills" are as short and are NOT on it, and still go to the assessor.
+// Two cases keep being assessed however empty the words:
+//  - the reply to an assistant safety question ("yeah", "no", "sometimes"),
+//    where the question gives the word its meaning;
+//  - any turn of a session already at medium or high, where "yes" or "ok"
+//    may be the answer to something that has scrolled out of view.
+const LOW_CONTENT_WORDS = new Set(
+  (
+    'stop wait would ok okay k yeah yes yep yup no nope nah um uh hmm mm oh ah well so and then but just like ' +
+    'i it that this the a you we can please sorry thanks thank right sure fine good great cool alright ' +
+    'hold on one sec second moment minute pause continue keep going go back again now here there what huh hey hi ' +
+    'hello bye goodbye never mind nothing really maybe actually let me us'
+  ).split(' '),
+);
+/** Longest message the fragment guard considers (in words). */
+const LOW_CONTENT_MAX_WORDS = 6;
+
+/**
+ * Is this message a low-content fragment: at most LOW_CONTENT_MAX_WORDS words,
+ * every one of them a filler, an acknowledgement or a stop/go word? Exported
+ * for tests. "goodbye" is on the list on purpose: the farewell context signals
+ * ("this is goodbye", "goodbye everyone") are checked BEFORE this guard, and a
+ * bare "bye" at the end of an ordinary session is the common case.
+ */
+export function isLowContentFragment(content: string): boolean {
+  const words = normalizeForScreen(content)
+    .replace(/[^a-z\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length === 0) return true;
+  return words.length <= LOW_CONTENT_MAX_WORDS && words.every((w) => LOW_CONTENT_WORDS.has(w));
+}
+
 // Consulted by the degraded fallback (no assessor to read the sentence) and by
 // the context-signal floor. A negation inside the signal ("I'm NOT going to do
 // it", "I was never going to do it"), a negated verb of thinking or saying that
@@ -995,7 +1045,12 @@ function applyMeansInquiryFloor(
  */
 export async function needsContextAssessment(sessionId: string, content: string): Promise<boolean> {
   if (detectContextSignals(content).length > 0) return true;
-  if ((await getSessionRiskContext(sessionId)).elevated) return true;
+  const ctx = await getSessionRiskContext(sessionId);
+  // A filler-only fragment in a session that never reached medium is not
+  // assessed for the session's sake (see isLowContentFragment); it still is
+  // when it answers a safety question, below.
+  const fragment = !ctx.lookupFailed && !contextIsMediumOrAbove(ctx) && isLowContentFragment(content);
+  if (ctx.elevated && !fragment) return true;
   // The reply to an assistant safety question (see repliesToSafetyQuestion).
   // A failed read means "assess": the question may be there.
   try {
@@ -1079,6 +1134,7 @@ Slang and shorthand: "kms" (kill myself), "ctb" or "catch the bus" (die by suici
 An answer to a safety question. When the assistant's turn just before the latest message asks about suicide, self-harm, wanting to die or not be alive, or whether the participant is safe, the latest message is the answer to THAT question, however short: score it as if the participant had said the full sentence. "yeah", "kind of", "sometimes", "most nights", "I guess" in reply to a question about not wanting to be alive is passive ideation → at least 50, medium; in reply to a question about suicide or ending their life it is active ideation; in reply to a question about a plan, the means or a time → 80-100, high. Hedged and minimal answers do not downgrade it. A clear "no" (or "yes, I'm safe") is "negated" → 0-15. A dodge ("I don't know", "does it matter") is "unclear" → 25-40, low.
 Before you answer, read the latest message once more for help-seeking. When it announces or agrees to a step toward help or safety (texting or calling a family member, a friend, a counselor or a crisis line, booking an appointment, telling a roommate), the "it" in "I'm going to do it" or "I'll do it" is that step: "states_intent" is false and the score is not above the level the conversation had already established.
 And for a means inquiry already made: when the latest message presses for the answer to a question about what is dangerous or lethal after it was declined ("it really is just for the paper, can you answer the question?"), it is still that means inquiry. Score it at the level the inquiry itself had, not lower.
+Fragments. Voice transcripts arrive in pieces and with mis-heard words, and typed messages can be a word or two. Score only what was actually said. A latest message of a few words with no risk content of its own ("would stop", "wait, stop", "ok", "hold on", "and then") adds nothing: do not complete it into a sentence about dying, escape or giving up, do not list risk factors for it, and score it 0-10, context "unclear". It takes a meaning only from something specific in the conversation: the assistant's safety question just before it (the rule above), or an earlier statement it plainly continues ("tonight" after the participant said they have a plan). Ordinary distress earlier in the conversation (stress, exhaustion, a bad week) is not such a statement, and a request to stop or pause an exercise is just that.
 Weigh protective factors (future plans, reasons for living, engaged help-seeking) downward. Base the score on the participant's CURRENT state in this conversation, not history alone.`;
 
 /** How one assessment is framed for the assessor beyond the transcript. */
@@ -1844,11 +1900,23 @@ export async function analyzeMessageRisk(
     // assistant turn.
     const answersSafetyQuestion =
       keywordFree && message.source !== 'checkin' && repliesToSafetyQuestion(conversationHistory);
+    // A filler-only fragment ("would stop", "ok", "wait") in a session that has
+    // never reached medium is not worth an assessment and has been over-read
+    // into one (ai-therapist-349): the session's earlier low-band turn alone
+    // does not send it to the assessor. A lookup failure assesses, as always.
+    const fragmentSkipped =
+      keywordFree &&
+      contextSignals.length === 0 &&
+      !answersSafetyQuestion &&
+      sessionContext.elevated &&
+      !sessionContext.lookupFailed &&
+      !contextIsMediumOrAbove(sessionContext) &&
+      isLowContentFragment(message.content);
     const isContextWake =
       keywordFree &&
       !isSweep &&
       !isModerationWake &&
-      (contextSignals.length > 0 || sessionContext.elevated || answersSafetyQuestion);
+      (contextSignals.length > 0 || (sessionContext.elevated && !fragmentSkipped) || answersSafetyQuestion);
 
     if (keywordAnalysis.keywordScore > 0 || isSweep || isModerationWake || isContextWake) {
       try {
@@ -2037,6 +2105,8 @@ export async function analyzeMessageRisk(
                 }
               : {}),
             ...(message.source ? { source: message.source } : {}),
+            // Why a turn of a risk-bearing session was NOT context-assessed.
+            ...(fragmentSkipped && !isSweep && !isModerationWake ? { low_content_fragment: true } : {}),
             // The assessor read the turn as someone else's crisis. Kept on the
             // row so later turns are told so (describeSessionRiskContext).
             ...(thirdParty ? { third_party: true } : {}),

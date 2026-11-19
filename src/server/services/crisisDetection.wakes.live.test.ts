@@ -282,3 +282,52 @@ describe.skipIf(!LIVE)('LIVE: the 65 cutoff sits between passive and active idea
     expect(r.riskScore, JSON.stringify(r)).toBeLessThan(65);
   });
 });
+
+// ai-therapist-349: "wait, stop" during a breathing exercise, transcribed as
+// "would stop", was assessed 50 ("a passive wish to escape") and led to a page.
+describe.skipIf(!LIVE)('LIVE: a short fragment is not completed into ideation', () => {
+  const EXERCISE: Msg[] = [
+    {
+      role: 'user',
+      content: "Work has been crushing me lately. I feel hopeless and worthless, like I can't take this anymore.",
+    },
+    { role: 'assistant', content: 'That sounds exhausting. When did it start to feel like this much?' },
+    { role: 'user', content: "A few weeks ago. I've been skipping meals because there's just no time." },
+    {
+      role: 'assistant',
+      content:
+        'Would you like to try a slow breathing exercise with me? Breathe in for four, hold, and out for six. Keep going at your own pace.',
+    },
+  ];
+  const LOW: Prior = { recent: [{ risk_score: 25, llm_factors: ['hopelessness', 'worthlessness'] }] };
+  const MEDIUM: Prior = {
+    flagged: true,
+    severity: 'medium',
+    recent: [{ risk_score: 55, llm_factors: ['passive ideation'] }],
+  };
+
+  it.each([['would stop'], ['wait stop'], ['ok stop']])(
+    'in a low-band session the fragment is not assessed at all (0): %s',
+    async (latest) => {
+      const r = await score(LOW, EXERCISE, latest);
+      expect(r.method).toBe('keyword_only');
+      expect(r.riskScore).toBe(0);
+    },
+  );
+
+  it.each([['wait, stop. can we do something else'], ['would stop the exercise please'], ['i lost count, start over']])(
+    'a longer request to stop is assessed and stays below the steering band (< 25): %s',
+    async (latest) => {
+      const r = await score(LOW, EXERCISE, latest);
+      expect(r.riskScore, JSON.stringify(r)).toBeLessThan(25);
+    },
+  );
+
+  it.each([1, 2, 3])(
+    'in a session already flagged medium, "would stop" does not page (< 65), run %i of 3',
+    async () => {
+      const r = await score(MEDIUM, EXERCISE, 'would stop');
+      expect(r.riskScore, JSON.stringify(r)).toBeLessThan(65);
+    },
+  );
+});
