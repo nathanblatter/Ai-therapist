@@ -843,6 +843,46 @@ regex pre-filters and tool-log checks) and `arms.ts`.
   every in-process scenario shares one; `harnessClient.startChat` now waits
   out the limiter window once (it never retries a session-limit 429).
 
+### Gates and data-access controls: the `http` pipeline (catalogue GATE/STAFF-10, 2026-11-18)
+
+`src/redteam/scenarios/gates/` holds the catalogue scenarios whose check is
+deterministic and needs no model reply: GATE-01 quiet hours, GATE-03
+withdrawn or paused, GATE-04 consent version change, GATE-05 cooldown after a
+flagged session, GATE-06 non-US IP, and STAFF-10 clinical-pilot staff against
+study data plus the `data_access_log` audit. They run on the `http`
+pipeline: no persona, no model, no judge. Each scenario's `httpProbe` seeds
+its own accounts (participants on reserved userids), drives the real routes
+in-process and records every response; its `assertFinal` checks read that
+record (`AssertionContext.http`). They behave the same with and without
+`--dry-run` and cost nothing. Every scenario carries `catalogueIds`.
+
+Rules the family keeps so it stays model-free on a run with a real key:
+
+- No probe ends a session through a route: every end path starts redaction,
+  naming and insights (model calls). A session a probe or a regression opened
+  is closed directly in the disposable database (`closeSessionsQuietly`).
+- The "gates let this caller through" control is `POST /api/live/session`
+  with no SDP offer: every gate runs first, and a caller who passes them all
+  gets 400 "An SDP offer is required" before anything is created.
+- Each scenario sends its requests from its own US address in
+  `X-Forwarded-For` (`trust proxy` is 1), so it has its own rate-limit bucket.
+- Quiet hours move the process clock (`withClockAt`, backwards only, fresh
+  login per move) to 22:05, 05:55, 06:00, 21:59 and both 2026 DST days;
+  `QUIET_HOURS_ENABLED` is set in-process for the scenario only. Whether the
+  production launch config sets the flag is not something the harness can see.
+- GATE-05 turns session limits on at the migration-007 values for its own run
+  and puts the row back. GATE-04 publishes a consent version through the
+  researcher route and deletes it in teardown, since every later scenario
+  accepts `CURRENT_CONSENT_VERSION` by constant.
+
+Known gaps (listed assertions only): ai-therapist-322 (client-events telemetry
+stored after withdrawal), 323 (`/api/sessions/create` opens a session without
+current consent), 324 (cooldown refusal has no return time on chat and no
+crisis resources anywhere), 325 (caseworkers abroad are refused on
+`/api/auth/status` and `/api/admin/messaging/inbox`). Not covered: GATE-02
+(needs the crisis detector, a model call), recording-playback audit (needs an
+object store), the client's rendering of the refusal screens.
+
 ### Admin assistant surface (ai-therapist-207, 2026-10-22)
 
 The three `assistant-*` scenarios red-team the **admin data assistant**
@@ -1206,6 +1246,75 @@ npm run redteam:full -- --baseline latest --gate-diff                  # exit 1 
 Pure diff logic lives in `src/redteam/diff.ts` (unit-tested offline in
 `diff.test.ts`).
 
+- **Rolling baseline (since 2026-11-18).** Every run also writes
+  `<out>/rolling-baseline.json`: each scenario's most recent result and the
+  night it ran, merged from the baseline run's own rolling file plus this
+  run's results (same suite and variant only; scenarios that left the suite are
+  pruned). A file `--baseline <dir>/summary.json` reads the rolling file next to
+  it when there is one, else the summary.json as before, so each scenario is
+  compared with its **own most recent prior result** even when last night ran
+  a different sample. On a sampled run, a baseline scenario that is still in
+  the suite but was not scheduled tonight is counted as "not sampled", never
+  as missing or regressed. `--baseline latest` (DB) still compares with the
+  newest persisted run only. Tests: `rollingBaseline.test.ts`.
+
+### Sampled nightly (`--sample`, owner decision 2026-11-18)
+
+The nightly runs a capped weekly sample instead of every scenario:
+
+```bash
+npm run redteam:full -- --sample --dry-run                          # tonight's sample (UTC date)
+npm run redteam:full -- --sample --sample-date 2026-11-22 --dry-run # a given night
+npm run redteam:full -- --sample --baseline prev/summary.json --sample-history prev/summary.json
+```
+
+- **Caps.** At most 25 scenarios Monday to Saturday and 20 on Sunday (UTC
+  weekday of the run): 170 scenario runs a week. They live in `DAILY_CAPS` in
+  `src/redteam/sampling.ts`, the one place to change them.
+- **Guarantee.** Every scenario in the `full` suite runs at least once in
+  every **calendar week, Monday to Sunday UTC**. Each ISO week is planned
+  deterministically: every scenario first gets one primary night (its own
+  seeded preference order over the days, seeded by the ISO week, skipping
+  nights that are full), so coverage holds by construction for a suite that
+  does not change during the week, provided the nights run. The leftover slots
+  are then filled with repeats, weighted 3 to 1 toward the safety-critical
+  scenarios (`SAMPLING_PRIORITY_SCENARIOS` in `scenarios/index.ts`: the smoke
+  four and the crisis family), never twice in one night. With today's 55
+  scenarios that is 55 primary runs plus 115 repeats: the 16 safety-critical
+  scenarios run 5 or 6 times a week, the other 39 twice (one three times).
+- **Not "every 7 consecutive nights".** Days reshuffle week to week, so a
+  scenario on Monday one week and Sunday the next waits 13 nights. A strict
+  every-7-nights promise with one run a week needs a fixed weekday per
+  scenario, which the reshuffle gives up.
+- **Catch-up.** The sampler reads the previous night's `rolling-baseline.json`
+  (`--sample-history`, default the `--baseline` file). A scenario whose primary
+  night has passed this week with no recorded run (a night did not run, the
+  schedule started late, or a scenario was added or moved mid-week) takes a
+  repeat slot tonight; a primary that already ran this week yields its slot the
+  same way. If no slot is left it is deferred to the next night, and failing
+  that it runs the following week. A scenario added mid-week therefore runs
+  before Sunday when a slot remains, otherwise the following week; the tests
+  check the same-week case for today's suite and for 130 scenarios on every
+  insertion day across 30 weeks. Near capacity (150 or more scenarios) a
+  mid-week addition can push an existing scenario into the next week. Without
+  history (first run, artifact missing) the plan alone runs and the job
+  summary says catch-up was off.
+- **Over capacity.** A unit test (`sampling.test.ts`) fails when `full`
+  exceeds 170 scenarios; the CLI then also refuses to sample and runs the whole
+  suite with a loud warning, rather than dropping scenarios.
+- **Report.** `summary.json` carries a `sampling` block and the job summary a
+  "Sampled run" section: N of M scenarios, which night and ISO week, catch-up
+  and deferred scenarios, and the next due date of every scenario not run.
+- **Workflow.** `redteam-nightly.yml` has `REDTEAM_NIGHTLY_SAMPLED: 'true'`
+  (set it to `'false'` to run the whole suite every night). A manual
+  dispatch offers `full_suite` to run everything unsampled (before launch and
+  after a prompt or model change). On Sunday and on manual runs the
+  lead-conversation leg runs the same sample as the default leg: both read the
+  default leg's artifact as history. `redteam-config.yml` and the deploy smoke
+  gate never sample.
+- **Variations.** The caps count scenarios; `--variations k` runs each sampled
+  scenario k times.
+
 ### Variants (`--variant`)
 
 Feature flags in `system_config.features` default off and the eval database
@@ -1436,7 +1545,8 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ai_therapist_redteam 
   `postgres:16` service) after `verify`; `deploy` now `needs: [verify,
   redteam-smoke]`, so a smoke regression blocks the deploy.
 - `.github/workflows/redteam-nightly.yml` runs the full suite on cron (08:00 UTC
-  ≈ 02:00 America/Denver) and `workflow_dispatch`, as a matrix over
+  ≈ 02:00 America/Denver), as a weekly-capped sample since 2026-11-18 (see
+  "Sampled nightly"), and `workflow_dispatch`, as a matrix over
   `--variant default` and `--variant lead-conversation` (artifacts
   `redteam-full-results` and `redteam-full-results-lead-conversation`). It never
   blocks a deploy (the smoke suite is the deploy gate), but since 2026-11-18 a

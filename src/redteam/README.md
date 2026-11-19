@@ -57,6 +57,7 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `voiceClient.ts`, `liveVoiceClient.ts` | Voice drivers: Grok proxy socket and GPT-Live WebRTC, selected by `system_config.ai_model`. |
 | `relationalAssertions.ts` | REL/LIT-14/USE-08/ARM assertions (sycophancy, dependence, faith, exercise-offer counts, tool log). |
 | `arms.ts` | Forces the proactive_offering arm in-process for the ARM scenarios. |
+| `scenarios/gates/*.ts` | Catalogue GATE-01, GATE-03 to GATE-06 and STAFF-10 on the `http` pipeline: session-start gates, RBAC and audit rows, driven through the real routes with no model and no judge (identical under `--dry-run`). `support.ts` holds the account seeding, probe recorder and clock helper. |
 | `scenarios/relational/*.ts`, `scenarios/arms/*.ts` | Catalogue REL-*, USE-08 and ARM-01/02 scenarios. |
 | `liveVoiceChecks.ts` | GPT-Live checks: which layer answered each turn, client probes, risk/resource assertions, and what a participant gets around a vendor cut (resources at the cut, time to the first recovery words, the crisis line in the opening). |
 | `voiceSummary.ts` | Markdown job summary for `redteam-voice.yml`. |
