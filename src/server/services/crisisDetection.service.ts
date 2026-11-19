@@ -1094,8 +1094,14 @@ function strongContextSignalScore(content: string, ctx: SessionRiskContext): num
 /** The message carries a strong signal of intent, goodbye or means that is
  *  neither negated nor retracted. */
 function hasStandingStrongSignal(content: string): boolean {
+  return standingStrongSignals(content).length > 0;
+}
+
+/** The strong signals of intent, goodbye or means in the message that are
+ *  neither negated nor retracted. */
+function standingStrongSignals(content: string): ContextSignalMatch[] {
   const text = normalizeForScreen(content);
-  return matchContextSignals(text).some((s) => s.strong && !signalIsNegated(text, s) && !signalIsRetracted(text, s));
+  return matchContextSignals(text).filter((s) => s.strong && !signalIsNegated(text, s) && !signalIsRetracted(text, s));
 }
 
 /**
@@ -1999,47 +2005,70 @@ const CONTEXT_BLIND_SOURCES: ReadonlySet<string> = new Set(['memory_partial', 'n
  *  exemptions as the passive-ideation floor, plus harm to others. */
 const CONTEXT_BLIND_EXEMPT_CONTEXTS: ReadonlySet<string> = new Set([...FLOOR_EXEMPT_CONTEXTS, 'harm_to_others']);
 
-/** Moderation self-harm score at which a keyword-free turn wakes the assessor
- *  (the moderation wake); the same level counts as the turn's own risk signal
- *  for the context-blind rule. */
-const MODERATION_WAKE_SCORE = 40;
+/** Strong context signals that say what they are about without any history:
+ *  a final message addressed to us ("this is the last time we'll talk") and a
+ *  question about lethal means. The other strong signals ("I'm going to do it
+ *  tonight", "I said goodbye to my sister") leave their object to an earlier
+ *  turn, and the same words are an ordinary plan, a step toward help or a TV
+ *  episode; with the history missing they count only together (an implicit
+ *  intent AND a goodbye in the same turn). Labels of CONTEXT_SIGNAL_PATTERNS. */
+const CONTEXT_BLIND_STANDALONE_SIGNALS: ReadonlySet<string> = new Set([
+  'last time we talk',
+  'asks about a lethal or dangerous amount',
+  'asks for a painless or quick way',
+]);
 
 /**
- * The context-blind rule (ai-therapist-373). A turn scored with no history it
+ * The context-blind rule (ai-therapist-373; narrowed to strong signals by the
+ * study owner on 2026-11-19, PR #88 review). A turn scored with no history it
  * can rely on (the database did not answer in time AND this process does not
- * hold the whole session) whose OWN words carry a risk signal is not left
- * below the page line: it is raised to the bottom of the high band, so it
- * flags and pages. The signal must be in the turn itself:
- *   - a medium- or high-tier crisis keyword (50 or more), or
- *   - a strong context signal of intent, goodbye or means, neither negated nor
- *     retracted ("I'm going to do it tonight", "this is the last time we'll
- *     talk"), or
- *   - a moderation self-harm score at the moderation-wake level (40) or more,
+ * hold the whole session) whose OWN words carry a STRONG signal, of the kind
+ * that pages with the context too, is not left below the page line: it is
+ * raised to the bottom of the high band, so it flags and pages. The signal
+ * must be in the turn itself:
+ *   - a high-tier crisis keyword (75: "kill myself", "end my life",
+ *     "overdose"), or
+ *   - a strong context signal that names its own object, neither negated nor
+ *     retracted: a final message to us or a lethal-means question
+ *     (CONTEXT_BLIND_STANDALONE_SIGNALS), or
+ *   - an implicit statement of intent (a plan, a time) AND a goodbye in the
+ *     same turn ("I'm doing it tonight. I've already said goodbye to my
+ *     sister"), both standing,
  * and the assessor must not have settled the turn on its own words as a
  * negation, a reference, someone else's situation or harm to others.
- * Ordinary messages carry none of these and are never raised, so an outage
- * does not page on every turn. Not covered, knowingly: a turn with no signal
- * of its own ("yes", "myself") in a session this process did not see start;
- * nothing in memory says what it answers or completes.
- * Pure; exported for tests.
+ * Not raised, on purpose: passive ideation (the medium tier, "I'm tired of
+ * living": the owner's standing decision is that passive ideation does not
+ * page, and an outage does not change that), slang, a step toward help, an
+ * ordinary plan in the same words ("I'm going to do it, I'm finally going to
+ * ask her out"), a media reference, and a moderation score on its own (the
+ * screen scores passive ideation too; with the assessor down a moderation
+ * score of 65 or more already pages through the fallback). Not covered,
+ * knowingly: a turn with no signal of its own ("yes", "myself") in a session
+ * this process did not see start; nothing in memory says what it answers or
+ * completes. Pure; exported for tests.
  */
 export function applyContextBlindFloor(input: {
   historySource: string | undefined;
   riskScore: number;
   keywordScore: number;
   content: string;
-  moderationScore: number;
   llmContext: string | null | undefined;
 }): { riskScore: number; floored: boolean } {
   const unchanged = { riskScore: input.riskScore, floored: false };
   if (!input.historySource || !CONTEXT_BLIND_SOURCES.has(input.historySource)) return unchanged;
   if (input.riskScore >= RISK_BANDS.high) return unchanged;
   if (input.llmContext && CONTEXT_BLIND_EXEMPT_CONTEXTS.has(input.llmContext)) return unchanged;
-  const ownSignal =
-    input.keywordScore >= PASSIVE_IDEATION_SCORE ||
-    hasStandingStrongSignal(input.content) ||
-    input.moderationScore >= MODERATION_WAKE_SCORE;
-  return ownSignal ? { riskScore: RISK_BANDS.high, floored: true } : unchanged;
+  return hasContextBlindStrongSignal(input.keywordScore, input.content)
+    ? { riskScore: RISK_BANDS.high, floored: true }
+    : unchanged;
+}
+
+/** The turn's own strong signal for the context-blind rule (see above). */
+function hasContextBlindStrongSignal(keywordScore: number, content: string): boolean {
+  if (keywordScore >= CRISIS_KEYWORDS.high.score) return true;
+  const standing = standingStrongSignals(content);
+  if (standing.some((s) => CONTEXT_BLIND_STANDALONE_SIGNALS.has(s.label))) return true;
+  return standing.some((s) => s.kind === 'intent') && standing.some((s) => s.kind === 'farewell');
 }
 
 interface RiskAnalysisResult {
@@ -2391,14 +2420,14 @@ export async function analyzeMessageRisk(
     }
 
     // No history the turn can be read against, and the turn's own words carry
-    // risk: fail toward paging (ai-therapist-373; applyContextBlindFloor).
+    // a strong signal: fail toward paging (ai-therapist-373;
+    // applyContextBlindFloor).
     // Before the caps below, which judge the turn's own words and still hold.
     const contextBlind = applyContextBlindFloor({
       historySource: message.history_source,
       riskScore,
       keywordScore: keywordAnalysis.keywordScore,
       content: message.content,
-      moderationScore,
       llmContext: llm?.context,
     });
     if (contextBlind.floored) {

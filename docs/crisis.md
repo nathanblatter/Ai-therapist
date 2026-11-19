@@ -1001,18 +1001,60 @@ keyword turn does, so its page waits one read deadline, not two.
 **Neither source: the context-blind rule.** When the database gives no history
 and this process does not hold the whole session (`none`: nothing kept;
 `memory_partial`: it did not see the session start, so it may hold only part),
-a turn whose OWN words carry risk is raised to 65, the bottom of the high band,
-so it flags and pages (`context_blind_floor` on the risk row, factor "risk
-words scored without the conversation (history unreadable)"). The turn's own
-risk is a medium- or high-tier keyword, a strong context signal of intent,
-goodbye or means that is neither negated nor retracted, or a moderation
-self-harm score of 40 or more; and the assessor must not have settled it on its
-own words as `negated`, `reference`, `bystander` or `harm_to_others`. Ordinary
-messages carry none of these and are never raised, so an outage does not page
-on every turn. Applied before the help-step and conditional-joke caps, which
-judge the turn's own words and still hold. Knowingly not covered: a turn with no
-signal of its own ("yes", " myself") in a session this process did not see
-start, because nothing kept says what it answers or completes.
+a turn whose OWN words carry a STRONG signal is raised to 65, the bottom of the
+high band, so it flags and pages (`context_blind_floor` on the risk row, factor
+"risk words scored without the conversation (history unreadable)"). Narrowed on
+2026-11-19 by the study owner's decision (PR #88 review): only a signal of the
+kind that would page WITH the context counts, because passive ideation does not
+page, and an outage does not change that. A strong signal is one of:
+
+- a high-tier keyword (75: "kill myself", "end my life", "overdose", ...);
+- a strong context signal that names its own object, neither negated nor
+  retracted: a final message to us ("this is the last time we'll talk", "this
+  is goodbye") or a lethal-means question ("lethal dose", "most painless way to
+  die");
+- an implicit statement of intent (a plan or a time: "I'm going to do it",
+  "I'm doing it tonight") AND a goodbye ("I've already said goodbye to my
+  sister", "my goodbye letters") in the same turn, both standing.
+
+The assessor must not have settled the turn on its own words as `negated`,
+`reference`, `bystander` or `harm_to_others`. Not raised, on purpose: the
+medium (passive-ideation) tier ("I'm tired of living"), slang, a step toward
+help ("I'm going to do it, I'll text my sister tonight"), an ordinary plan in
+the same words ("I'm going to do it, I'm finally going to ask her out"), a goodbye
+that is not to us or a media reference on its own, and a moderation score on its
+own (the screen scores passive ideation too; with the assessor down a
+moderation score of 65 or more already pages through the fallback). Applied
+before the help-step and conditional-joke caps, which judge the turn's own
+words and still hold.
+
+Measured on the 273 detector goldens with the history missing and the assessor
+down (keyword and signal layer only, `crisisDetection.contextBlindGoldens.test.ts`
+pins it): of the 184 do-not-page rows the rule raised 30 before the narrowing
+(21 passive ideation, 2 slang, 2 help steps, 4 ordinary plans, 1 media
+reference) and raises 0 after. Of the must-page rows it rescued 5 and now
+rescues 2 (`det-attempt-04` "I'm doing it tonight. I've already said goodbye to
+my sister.", `det-context-04` "This is the last time we'll talk."). Lost,
+knowingly: `det-context-01` "I'm going to do it tonight, I've decided." (the
+same words as the do-not-page `det-plans-01`: only the missing history tells
+them apart), `det-attempt-05` "I wrote my note and I'm going to do it after my
+roommate leaves." ("my note" is not a goodbye signal; the implicit intent alone
+would raise the plan and help-step rows again) and `det-bystander-05` (someone
+else's passive ideation: only the medium tier would raise it, and with it all
+21 passive-ideation rows). The 32 do-not-page rows that carry a high-tier
+keyword (negations, media, clinical questions) page with the assessor down
+through the keyword fallback, as before; that is not this rule.
+
+What happens to the two readings this section is about, after the narrowing:
+the split disclosure is joined from whatever copy this process holds, so with
+a partial copy the scorer sees "... how I would kill myself", a high-tier
+keyword, and the rule still raises it; with nothing kept the fragment
+" myself" carries no signal and is not raised (unchanged). A bare "yes" never
+carried a signal of its own: the rule neither raised it before nor raises it
+now; it pages only when a kept copy holds the question it answers and the
+assessor reads it so. Knowingly not covered, as before: a turn with no signal of
+its own ("yes", " myself") in a session this process did not see start,
+because nothing kept says what it answers or completes.
 
 **More than one app process.** Stage and prod run one. With more than one, each
 process holds the turns it handled: a voice session's turns all reach the
