@@ -958,8 +958,27 @@ records the check-in's free text and marks the record as complete for this
 process. Bounds: 12 turns per session, the last 1,500 characters of each turn,
 500 sessions (least recently written dropped first), a session idle for 2 hours
 dropped, and an ended session dropped 2 minutes after it ends
-(`updateSessionStatus(..., 'ended')`; the grace covers a final voice turn still
-being scored). Worst case about 9 M characters (under 20 MB).
+(`updateSessionStatus(..., 'ended')`, which every end path goes through; the
+grace covers a final voice turn still being scored). Worst case about 9 M
+characters (under 20 MB).
+
+**Dropped at once (ai-therapist-374).** With no grace: every session of a
+participant who withdraws (`setStudyStatus(..., 'withdrawn')`) or whose account
+is deleted (`deleteUser`), found by the participant recorded at session start
+and by the participant's session ids read just before (the delete sets
+`therapy_sessions.user_id` to NULL); a session an admin deletes
+(`deleteSession`); and, after each content wipe, every kept turn from before the
+wipe's cutoff (the check-in, which the wipe does not touch, stays). If such a
+session goes on (a voice call still open), its later turns start a new partial
+record, as after a restart. The demo-account answer
+(`utils/sessionAccounts.ts`) is forgotten 2 minutes after the session ends. Kept
+on purpose: the session's participant (`knownSessionParticipant`: two ids, no
+content), because a page inside the 15-minute fold window must be keyed by the
+same participant, and after an account deletion nothing else knows it; this
+process's early pages (`earlyPages`, 15 minutes) and flagged turns
+(`flaggedTurns`, 5 minutes, the turn's words), which stop a retried flag write
+from creating a second crisis event or adverse-event draft. All three expire on
+their own.
 
 **Database first, memory as the fallback.** The stored history is still read
 first and used whenever it answers within 2 s and the turn itself was stored:

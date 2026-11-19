@@ -258,7 +258,7 @@ export default function chatRoutes(): Router {
         // and the start (with the check-in's words) for the crisis pipeline's
         // in-memory context (ai-therapist-373).
         rememberSessionParticipant(sessionId, numericUserId);
-        rememberSessionStart(sessionId, sanitizeCheckin(req.body?.checkin));
+        rememberSessionStart(sessionId, sanitizeCheckin(req.body?.checkin), numericUserId);
 
         // Base prompt + returning-participant memory (opt-in) + today's check-in.
         // The proactive-offering A/B condition (ai-therapist-74) is resolved ONCE

@@ -106,7 +106,9 @@ vi.mock('../../utils/harness.js', () => ({ isNonStudyUser: () => false }));
 
 import chatRoutes from './chat.routes.js';
 const { knownSessionParticipant, _forgetSessionAccountsForTests } = await import('../../utils/sessionAccounts.js');
-const { recentTurns, rememberedCheckin, _resetRecentTurnsForTests } = await import('../../utils/recentTurns.js');
+const { recentTurns, rememberedCheckin, forgetParticipantTurns, _resetRecentTurnsForTests } = await import(
+  '../../utils/recentTurns.js'
+);
 const { DATABASE_RETRY_MESSAGE } = await import('../../utils/dbErrors.js');
 
 const SESSION = 'chat_recent';
@@ -203,6 +205,9 @@ describe('/api/chat/start remembers the start, the check-in and the participant'
     expect(rememberedCheckin(sessionId)).toBe("I don't really want to be alive\ntalk");
     expect(recentTurns(sessionId)?.complete).toBe(true);
     expect(knownSessionParticipant(sessionId)).toEqual({ userId: 7, stored: true });
+    // Kept with its participant: a withdrawal finds it without a read (ai-therapist-374).
+    forgetParticipantTurns(7);
+    expect(recentTurns(sessionId)).toBeNull();
   });
 
   it('the session row insert fails: the screened check-in is filed under the participant, as not stored', async () => {

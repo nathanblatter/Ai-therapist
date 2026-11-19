@@ -8,7 +8,9 @@ import {
   RECENT_TURNS_PER_SESSION,
   RECENT_TURN_MAX_CHARS,
   _resetRecentTurnsForTests,
+  forgetParticipantTurns,
   forgetSessionTurns,
+  forgetTurnsBefore,
   recentTurns,
   recentTurnsSessionCount,
   rememberSessionStart,
@@ -158,5 +160,69 @@ describe('bounds', () => {
   it('forgetting a session this process does not hold is harmless', () => {
     expect(() => forgetSessionTurns('nobody')).not.toThrow();
     expect(recentTurnsSessionCount()).toBe(0);
+  });
+});
+
+// ai-therapist-374: withdrawal, account deletion and the content wipe drop the
+// copy at once (no end grace).
+describe('dropped at once', () => {
+  it('a participant: every session started for them, and the listed ids; nobody else', () => {
+    rememberSessionStart('a1', { topic: 'work' }, 7);
+    rememberTurn('a1', 'user', 'first');
+    rememberSessionStart('a2', null, '7'); // the session store's id may be a string
+    rememberTurn('a2', 'user', 'second');
+    rememberTurn('frag', 'user', 'seen without its start'); // no participant known
+    rememberSessionStart('b1', null, 8);
+    rememberTurn('b1', 'user', 'someone else');
+    rememberSessionStart('anon', null, null);
+    rememberTurn('anon', 'user', 'anonymous');
+
+    expect(forgetParticipantTurns(7, ['frag', 'not-held'])).toBe(3);
+
+    expect(recentTurns('a1')).toBeNull();
+    expect(rememberedCheckin('a1')).toBeNull();
+    expect(recentTurns('a2')).toBeNull();
+    expect(recentTurns('frag')).toBeNull();
+    expect(contents('b1')).toEqual(['user:someone else']);
+    expect(contents('anon')).toEqual(['user:anonymous']);
+  });
+
+  it('a participant: by the listed ids alone when no participant is given', () => {
+    rememberSessionStart('a1', null, 7);
+    rememberTurn('a1', 'user', 'first');
+    rememberTurn('a2', 'user', 'second');
+    expect(forgetParticipantTurns(null, ['a2'])).toBe(1);
+    expect(contents('a1')).toEqual(['user:first']);
+    expect(recentTurns('a2')).toBeNull();
+  });
+
+  it('a participant: an ended session still inside its grace goes too', () => {
+    rememberSessionStart('a1', null, 7);
+    rememberTurn('a1', 'user', 'first');
+    forgetSessionTurns('a1');
+    forgetParticipantTurns(7);
+    expect(recentTurns('a1')).toBeNull();
+  });
+
+  it('a content wipe: the turns before its cutoff; the check-in and completeness stay', () => {
+    const t0 = Date.now();
+    rememberSessionStart('s1', { topic: 'sleep' });
+    rememberTurn('s1', 'user', 'old', { at: t0 - 3 * 3_600_000 });
+    rememberTurn('s1', 'assistant', 'at the cutoff', { at: t0 - 3_600_000 });
+    rememberTurn('s1', 'user', 'new', { at: t0 - 60_000 });
+    rememberTurn('s2', 'user', 'old too', { at: t0 - 2 * 3_600_000 });
+
+    expect(forgetTurnsBefore(t0 - 3_600_000)).toBe(2);
+
+    expect(contents('s1')).toEqual(['assistant:at the cutoff', 'user:new']);
+    expect(recentTurns('s1')?.complete).toBe(true);
+    expect(rememberedCheckin('s1')).toBe('sleep');
+    expect(contents('s2')).toEqual([]);
+  });
+
+  it('a content wipe with no usable cutoff drops nothing', () => {
+    rememberTurn('s1', 'user', 'kept');
+    expect(forgetTurnsBefore(Number.NaN)).toBe(0);
+    expect(contents('s1')).toEqual(['user:kept']);
   });
 });

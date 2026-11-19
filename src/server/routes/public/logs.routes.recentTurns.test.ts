@@ -25,7 +25,7 @@ vi.mock('../../utils/quietHours.js', () => ({ isQuietHoursActive: () => false })
 vi.mock('../../utils/harness.js', () => ({ isNonStudyUser: () => false }));
 
 import logsRoutes from './logs.routes.js';
-const { recentTurns, _resetRecentTurnsForTests } = await import('../../utils/recentTurns.js');
+const { recentTurns, forgetParticipantTurns, _resetRecentTurnsForTests } = await import('../../utils/recentTurns.js');
 
 function makeApp() {
   const app = express();
@@ -103,6 +103,11 @@ describe('POST /logs/batch keeps the turns in memory', () => {
       .post('/logs/batch')
       .send({ records: [record('user', 'hello', 0)] });
     expect(recentTurns('rt_1')?.complete).toBe(true);
+    // Kept with its participant: a withdrawal finds it without a read (ai-therapist-374).
+    forgetParticipantTurns(8);
+    expect(recentTurns('rt_1')).not.toBeNull();
+    forgetParticipantTurns(7);
+    expect(recentTurns('rt_1')).toBeNull();
   });
 
   it('a batch refused for a foreign session keeps nothing', async () => {

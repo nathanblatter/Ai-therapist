@@ -79,17 +79,17 @@ vi.mock('../../services/crisisPipeline.service.js', () => ({ runCheckinCrisisScr
 
 const { default: grokSessionRoutes } = await import('./grokSession.routes.js');
 
-function makeApp() {
+function makeApp(session: Record<string, unknown> = {}) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    (req as unknown as { session: Record<string, unknown> }).session = { consentVersion: 'v1' };
+    (req as unknown as { session: Record<string, unknown> }).session = { consentVersion: 'v1', ...session };
     next();
   });
   app.use(grokSessionRoutes());
   return app;
 }
-const start = () => request(makeApp()).post('/api/grok/session').send({});
+const start = (session?: Record<string, unknown>) => request(makeApp(session)).post('/api/grok/session').send({});
 const settle = () => new Promise((r) => setTimeout(r, 20));
 
 beforeEach(() => {
@@ -123,6 +123,18 @@ describe('POST /api/grok/session with a check-in', () => {
     const res = await start().expect(201);
     expect(rememberedCheckin(res.body.session_id)).toBe("I don't really want to be alive");
     expect(recentTurns(res.body.session_id)?.complete).toBe(true);
+  });
+
+  // ai-therapist-374: kept with its participant, so a withdrawal or account
+  // deletion finds it without a read.
+  it("keeps the start with the signed-in participant's id", async () => {
+    const { recentTurns, forgetParticipantTurns } = await import('../../utils/recentTurns.js');
+    const res = await start({ userId: 7, userRole: 'participant' }).expect(201);
+    expect(recentTurns(res.body.session_id)?.complete).toBe(true);
+    forgetParticipantTurns(8);
+    expect(recentTurns(res.body.session_id)).not.toBeNull();
+    forgetParticipantTurns(7);
+    expect(recentTurns(res.body.session_id)).toBeNull();
   });
 
   it('does not wait for the screen: a slow assessor never delays the start', async () => {

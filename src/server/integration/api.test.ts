@@ -126,6 +126,19 @@ describe('auth / role gating', () => {
     const res = await request(app).get('/admin/api/config');
     expect(res.status).toBe(401);
   });
+
+  // ai-therapist-374: what a #participant= page link opens loads from these;
+  // an anonymous visitor gets nothing about the participant.
+  it.each(['profile', 'sessions?limit=50', 'brief', 'study-status'])(
+    'returns 401 and no participant data for the profile loader %s without a session',
+    async (path) => {
+      queryMock.mockClear();
+      const res = await request(app).get(`/admin/api/users/7/${path}`);
+      expect(res.status).toBe(401);
+      expect(res.body).toEqual({ error: 'Authentication required' });
+      expect(queryMock.mock.calls.some((c) => /FROM users|therapy_sessions/.test(String(c[0])))).toBe(false);
+    },
+  );
 });
 
 describe('auth routes', () => {

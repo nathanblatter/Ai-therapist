@@ -223,7 +223,7 @@ export default function grokSessionRoutes(): Router {
         rememberSessionAccount(sessionId, userRole);
         // The crisis pipeline's in-memory context starts here, with the
         // check-in's words (ai-therapist-373).
-        rememberSessionStart(sessionId, checkin);
+        rememberSessionStart(sessionId, checkin, userId);
 
         try {
           await createActiveRealtimeSession(sessionId, userId, isDemoSession);

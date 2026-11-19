@@ -1,7 +1,8 @@
 // Data-access for therapy sessions and their configuration: lifecycle CRUD,
 // ownership/status read checks, and the session_configurations upsert/read.
 import { pool } from '../config/db.js';
-import { forgetSessionTurns } from '../utils/recentTurns.js';
+import { forgetParticipantTurns, forgetSessionTurns } from '../utils/recentTurns.js';
+import { sessionAccountEnded } from '../utils/sessionAccounts.js';
 
 export interface SessionRow {
   session_id: string;
@@ -168,8 +169,14 @@ export async function updateSessionStatus(
   endedBy: string | null = null,
 ): Promise<SessionRow> {
   // The crisis pipeline's in-memory copy of the session's turns goes with it
-  // (after a short grace for a last turn still being scored; ai-therapist-373).
-  if (status === 'ended') forgetSessionTurns(sessionId);
+  // (after a short grace for a last turn still being scored; ai-therapist-373),
+  // and so does its remembered demo answer (ai-therapist-374). Every end path
+  // (participant, admin, auto-terminate, abandoned sweep, minor safeguard,
+  // voice close) ends the session through here.
+  if (status === 'ended') {
+    forgetSessionTurns(sessionId);
+    sessionAccountEnded(sessionId);
+  }
   const currentSession = await getSession(sessionId);
   if (!currentSession) {
     throw new Error('Session not found');
@@ -226,12 +233,34 @@ export async function deleteSession(sessionId: string): Promise<SessionRow> {
     await client.query('DELETE FROM therapy_sessions WHERE session_id = $1', [sessionId]);
 
     await client.query('COMMIT');
+    // Its messages are gone: so is the in-memory copy, at once (ai-therapist-374).
+    forgetParticipantTurns(null, [sessionId]);
     return session;
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
   } finally {
     client.release();
+  }
+}
+
+/**
+ * The participant's session ids, for dropping in-process copies of their
+ * turns (utils/recentTurns forgetParticipantTurns), read BEFORE a withdrawal
+ * or an account deletion (the delete sets therapy_sessions.user_id to NULL).
+ * A failed read returns [] and is logged: the sessions this process saw start
+ * are still found by participant, and the rest expire within 2 hours idle.
+ */
+export async function participantSessionIds(userId: number | string): Promise<string[]> {
+  try {
+    const { rows } = await pool.query<{ session_id: string }>(
+      'SELECT session_id FROM therapy_sessions WHERE user_id = $1',
+      [userId],
+    );
+    return rows.map((r) => r.session_id);
+  } catch (err) {
+    console.error('[Sessions] reading the participant sessions to forget failed:', err);
+    return [];
   }
 }
 

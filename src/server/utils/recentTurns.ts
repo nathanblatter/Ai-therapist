@@ -22,7 +22,10 @@
 // RECENT_TURNS_PER_SESSION turns x RECENT_TURN_MAX_CHARS characters, about
 // 9 M characters (under 20 MB as JS strings); a session is dropped when it is
 // evicted (least recently written first), idle for RECENT_TURNS_IDLE_MS, or
-// RECENT_TURNS_END_GRACE_MS after it ended.
+// RECENT_TURNS_END_GRACE_MS after it ended. Dropped at once (ai-therapist-374):
+// every session of a participant who withdraws or whose account is deleted
+// (forgetParticipantTurns), and every turn older than a content wipe's cutoff
+// (forgetTurnsBefore), so this copy never outlives the stored content.
 //
 // One process only. Stage and prod run one app process. With more than one,
 // each process holds the turns it handled: a voice session's turns all reach
@@ -65,6 +68,9 @@ interface SessionTurns {
   checkin: string | null;
   /** This process saw the session start (its record is not a fragment). */
   startedHere: boolean;
+  /** The signed-in participant, when known at start (for withdrawal and
+   *  account deletion); null for an anonymous browser or a fragment. */
+  userId: number | null;
   touchedAt: number;
   endedAt: number | null;
 }
@@ -101,7 +107,7 @@ function touch(sessionId: string, now: number): SessionTurns {
   let record = sessions.get(sessionId);
   if (record && expired(record, now)) record = undefined;
   sessions.delete(sessionId);
-  if (!record) record = { turns: [], checkin: null, startedHere: false, touchedAt: now, endedAt: null };
+  if (!record) record = { turns: [], checkin: null, startedHere: false, userId: null, touchedAt: now, endedAt: null };
   record.touchedAt = now;
   sessions.set(sessionId, record);
   // Oldest first: drop the idle ones, then whatever is over the cap.
@@ -118,13 +124,20 @@ function touch(sessionId: string, now: number): SessionTurns {
  * process. `checkin` is the session's check-in (its free text, topic and
  * goal, is kept the way the pipeline quotes it: crisisPipeline
  * checkinFreeText), so the pipeline has it when the stored check-in cannot be
- * read. Never throws.
+ * read. `userId`: the signed-in participant, so a withdrawal or account
+ * deletion can drop the session (forgetParticipantTurns). Never throws.
  */
-export function rememberSessionStart(sessionId: string, checkin?: { topic?: unknown; goal?: unknown } | null): void {
+export function rememberSessionStart(
+  sessionId: string,
+  checkin?: { topic?: unknown; goal?: unknown } | null,
+  userId?: number | string | null,
+): void {
   if (!sessionId) return;
   const record = touch(sessionId, Date.now());
   record.startedHere = true;
   record.endedAt = null;
+  const participant = participantId(userId);
+  if (participant !== null) record.userId = participant;
   const text = [checkin?.topic, checkin?.goal]
     .map((part) => (typeof part === 'string' ? part.trim() : ''))
     .filter(Boolean)
@@ -198,6 +211,57 @@ export function rememberedCheckin(sessionId: string): string | null {
 export function forgetSessionTurns(sessionId: string): void {
   const record = sessions.get(sessionId);
   if (record && record.endedAt === null) record.endedAt = Date.now();
+}
+
+function participantId(userId: number | string | null | undefined): number | null {
+  const n = typeof userId === 'string' && userId.trim() !== '' ? Number(userId) : userId;
+  return typeof n === 'number' && Number.isInteger(n) ? n : null;
+}
+
+/**
+ * A participant withdrew or their account was deleted: drop at once every
+ * session held for them, by the participant remembered at start and by
+ * `sessionIds` (the participant's sessions as the database lists them, which
+ * also covers a session this process did not see start). No grace: nothing of
+ * theirs is kept for a later turn. Returns how many sessions were dropped.
+ * Never throws.
+ */
+export function forgetParticipantTurns(
+  userId: number | string | null | undefined,
+  sessionIds: Iterable<string> = [],
+): number {
+  const participant = participantId(userId);
+  let dropped = 0;
+  for (const id of sessionIds) {
+    if (sessions.delete(id)) dropped++;
+  }
+  if (participant !== null) {
+    for (const [id, record] of sessions) {
+      if (record.userId === participant) {
+        sessions.delete(id);
+        dropped++;
+      }
+    }
+  }
+  return dropped;
+}
+
+/**
+ * A content wipe nulled every stored message created before `cutoffMs`: drop
+ * the remembered turns from before it too, so no copy outlives the stored
+ * text. The check-in is kept (the wipe does not touch it), and so is whether
+ * the session started here: the database lost the same turns, so the copy is
+ * as complete as the record. Returns how many turns were dropped. Never throws.
+ */
+export function forgetTurnsBefore(cutoffMs: number): number {
+  if (!Number.isFinite(cutoffMs)) return 0;
+  let dropped = 0;
+  for (const record of sessions.values()) {
+    const kept = record.turns.filter((t) => t.at >= cutoffMs);
+    dropped += record.turns.length - kept.length;
+    record.turns = kept;
+  }
+  return dropped;
 }
 
 /** How many sessions are held (tests and the health report). */
