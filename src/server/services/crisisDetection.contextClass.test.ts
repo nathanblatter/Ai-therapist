@@ -18,6 +18,7 @@
 //    truncated output, refusal, failed session lookup) scores a turn below what
 //    the keyword screen alone would have scored it.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { warmCrisisPathImports } from '../testing/warmCrisisImports.js';
 
 const { queryMock, createMock, moderationCreateMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
@@ -162,6 +163,10 @@ const STATEMENTS: Array<{ cls: string; text: string; screened: boolean }> = [
   { cls: 'giving away', text: 'I gave my guitar to my brother and my cat to the neighbor.', screened: false },
   { cls: 'giving away', text: "I've been handing my stuff out to people. I won't need it.", screened: false },
 ];
+
+// Load the crisis path's lazy imports now, so the first test to reach the
+// assessor does not wait on real module loading under fake timers.
+await warmCrisisPathImports();
 
 beforeEach(() => {
   _resetAssessorHealthForTests();

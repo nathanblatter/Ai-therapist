@@ -388,6 +388,50 @@ describe('user turn -> crisis pipeline', () => {
       'realtime',
     );
   });
+
+  // ai-therapist-373: every turn is kept in memory as it closes, so the
+  // crisis pipeline has the turns before a "yes" or a split sentence's first
+  // half whatever the database does.
+  describe('turns kept in memory for the crisis pipeline', () => {
+    it('both roles, in order, with the stored id once the row is written', async () => {
+      const { recentTurns, _resetRecentTurnsForTests } = await import('../utils/recentTurns.js');
+      _resetRecentTurnsForTests();
+      const sessionId = 's-memory';
+      await attach(sessionId);
+      await fire(sessionId, {
+        type: 'session.output_transcript.delta',
+        delta: 'Are you thinking about suicide?',
+        start_ms: 0,
+        end_ms: 900,
+      });
+      await vi.advanceTimersByTimeAsync(TURN_GAP_MS);
+      await fire(sessionId, userDelta('yes', 2000, 2300));
+      await vi.advanceTimersByTimeAsync(TURN_GAP_MS);
+      await flush();
+      expect(recentTurns(sessionId)?.turns.map((t) => [t.role, t.content, t.messageId])).toEqual([
+        ['assistant', 'Are you thinking about suicide?', null],
+        ['user', 'yes', 42],
+      ]);
+    });
+
+    it('a turn the database could not store is kept, and is there before the pipeline runs', async () => {
+      const { recentTurns, _resetRecentTurnsForTests } = await import('../utils/recentTurns.js');
+      _resetRecentTurnsForTests();
+      const sessionId = 's-memory-down';
+      await attach(sessionId);
+      insertMessagesBatchMock.mockRejectedValue(new Error('connection terminated'));
+      let heldWhenScored: string[] = [];
+      runCrisisPipelineMock.mockImplementation(async () => {
+        heldWhenScored = recentTurns(sessionId)?.turns.map((t) => t.content) ?? [];
+        return { severity: 'none' };
+      });
+      await fire(sessionId, userDelta('I have been thinking about how I would kill', 0, 1500));
+      await vi.advanceTimersByTimeAsync(TURN_GAP_MS);
+      await flush();
+      expect(heldWhenScored).toEqual(['I have been thinking about how I would kill']);
+      expect(recentTurns(sessionId)?.turns[0].messageId).toBeNull();
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

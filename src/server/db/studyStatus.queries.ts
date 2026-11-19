@@ -2,6 +2,8 @@
 // Status is stamped by the Qualtrics withdrawal-survey ingest or by an admin;
 // withdrawn/paused participants are blocked from starting new sessions.
 import { pool } from '../config/db.js';
+import { forgetParticipantTurns } from '../utils/recentTurns.js';
+import { participantSessionIds } from './sessions.queries.js';
 
 export type StudyStatus = 'active' | 'paused' | 'withdrawn';
 
@@ -33,8 +35,13 @@ export async function getStudyStatusDetail(userId: number): Promise<StudyStatusD
  * Set a participant's study status. Returns true when the row changed —
  * setting the same status twice is a no-op, which keeps the withdrawal-survey
  * ingest idempotent across webhook + bulk-sync overlap.
+ *
+ * A withdrawal also drops the crisis pipeline's in-memory copy of the
+ * participant's turns at once (ai-therapist-374), even when the status was
+ * already 'withdrawn'.
  */
 export async function setStudyStatus(userId: number, status: StudyStatus, source: string): Promise<boolean> {
+  const sessionIds = status === 'withdrawn' ? await participantSessionIds(userId) : [];
   const result = await pool.query(
     `UPDATE users
         SET study_status = $2,
@@ -43,5 +50,6 @@ export async function setStudyStatus(userId: number, status: StudyStatus, source
       WHERE userid = $1 AND study_status IS DISTINCT FROM $2`,
     [userId, status, source],
   );
+  if (status === 'withdrawn') forgetParticipantTurns(userId, sessionIds);
   return (result.rowCount ?? 0) > 0;
 }

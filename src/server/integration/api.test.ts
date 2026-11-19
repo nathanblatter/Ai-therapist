@@ -122,10 +122,39 @@ describe('auth / role gating', () => {
     expect(res.status).toBe(401);
   });
 
+  // GET /admin (the page) sends a signed-out browser to /login
+  // (middleware/adminPageGuard.test.ts); the API behind it must not, even when
+  // the request looks like a browser page load.
+  it.each(['/admin/api/sessions', '/admin/api/users/7/profile', '/api/auth/status'])(
+    'keeps JSON (no redirect) on %s for a signed-out request that accepts HTML',
+    async (path) => {
+      const res = await request(app)
+        .get(path)
+        .set('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8');
+      expect(res.status).not.toBe(302);
+      expect(res.headers.location).toBeUndefined();
+      expect(res.headers['content-type']).toMatch(/json/);
+      if (path !== '/api/auth/status') expect(res.body).toEqual({ error: 'Authentication required' });
+    },
+  );
+
   it('returns 401 on a researcher-only route without a session', async () => {
     const res = await request(app).get('/admin/api/config');
     expect(res.status).toBe(401);
   });
+
+  // ai-therapist-374: what a #participant= page link opens loads from these;
+  // an anonymous visitor gets nothing about the participant.
+  it.each(['profile', 'sessions?limit=50', 'brief', 'study-status'])(
+    'returns 401 and no participant data for the profile loader %s without a session',
+    async (path) => {
+      queryMock.mockClear();
+      const res = await request(app).get(`/admin/api/users/7/${path}`);
+      expect(res.status).toBe(401);
+      expect(res.body).toEqual({ error: 'Authentication required' });
+      expect(queryMock.mock.calls.some((c) => /FROM users|therapy_sessions/.test(String(c[0])))).toBe(false);
+    },
+  );
 });
 
 describe('auth routes', () => {

@@ -3,6 +3,8 @@
 import bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { pool } from '../config/db.js';
+import { forgetParticipantTurns } from '../utils/recentTurns.js';
+import { participantSessionIds } from './sessions.queries.js';
 
 const SALT_ROUNDS = 10;
 
@@ -365,9 +367,12 @@ export async function updateUser(userid: number | string, updates: Record<string
   }
 }
 
-/** Delete a user by id; returns the deleted row. */
+/** Delete a user by id; returns the deleted row. Also drops the crisis
+ *  pipeline's in-memory copy of the participant's turns (ai-therapist-374). */
 export async function deleteUser(userid: number | string): Promise<UserRow> {
   try {
+    // Read first: the delete sets therapy_sessions.user_id to NULL.
+    const sessionIds = await participantSessionIds(userid);
     const result = await pool.query<UserRow>('DELETE FROM users WHERE userid = $1 RETURNING userid, username', [
       userid,
     ]);
@@ -376,6 +381,7 @@ export async function deleteUser(userid: number | string): Promise<UserRow> {
       throw new Error('User not found');
     }
 
+    forgetParticipantTurns(userid, sessionIds);
     return result.rows[0];
   } catch (error) {
     console.error('Error deleting user:', error);

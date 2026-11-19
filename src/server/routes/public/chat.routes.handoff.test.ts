@@ -514,6 +514,22 @@ describe('database timeouts at chat start and on a chat turn (ai-therapist-366)'
     expect(pipelineMocks.runCrisisPipeline).not.toHaveBeenCalled();
   });
 
+  // PR #88 review: the browser that started the session (its cookie lists it)
+  // is the owner without any database read; its words are still screened.
+  it('chat turn: the session read times out, but this browser started it: 503 and the turn is screened', async () => {
+    dbMocks.getSessionAccessInfo.mockRejectedValue(acquireTimeout());
+    const res = await request(makeApp({ ownedSessions: ['chat_1'] }))
+      .post('/api/chat/message')
+      .send({ sessionId: 'chat_1', message: 'I want to die' });
+    expect(res.status).toBe(503);
+    await vi.waitFor(() =>
+      expect(pipelineMocks.runCrisisPipeline).toHaveBeenCalledWith(
+        { sessionId: 'chat_1', messageId: null, content: 'I want to die' },
+        'chat',
+      ),
+    );
+  });
+
   it('an ordinary (non-database) failure is still a 500', async () => {
     dbMocks.insertMessagesBatch.mockRejectedValue(new Error('null value in column "role"'));
     const res = await request(makeApp()).post('/api/chat/message').send({ sessionId: 'chat_1', message: 'hello' });

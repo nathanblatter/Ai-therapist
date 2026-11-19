@@ -13,6 +13,7 @@
 // place rather than block or invent a score.
 // OpenAI, the DB and the pager are mocked; no network.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { warmCrisisPathImports } from '../testing/warmCrisisImports.js';
 
 const { queryMock, createMock, moderationCreateMock, reportQuotaMock, reportOutageMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
@@ -134,6 +135,10 @@ const HISTORY = [
   { role: 'user', content: PASSIVE },
   { role: 'user', content: IMMINENT },
 ];
+
+// Load the crisis path's lazy imports now, so the first test to reach the
+// assessor does not wait on real module loading under fake timers.
+await warmCrisisPathImports();
 
 beforeEach(() => {
   _resetAssessorHealthForTests();

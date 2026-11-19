@@ -41,6 +41,7 @@ import {
   recordAdminUsage,
   setAdminUsageView,
 } from '../utils/adminUsageTelemetry';
+import { openParticipantDeepLink, participantProfileSummary } from '../utils/deepLink';
 import ToastContainer from '../../shared/components/Toast';
 import { getJson } from '../../shared/http';
 import DemoSwitcher from '../../shared/components/DemoSwitcher';
@@ -259,12 +260,20 @@ export default function AdminApp() {
         /* fall through to the id-only label */
       }
     }
-    setSelectedUser({
-      userid: clientId,
-      username: cache.get(clientId) ?? `client #${clientId}`,
-      role: 'participant',
-    });
+    setSelectedUser(participantProfileSummary(clientId, cache));
   }, []);
+
+  // Participant deep link: a crisis page about a session that was never
+  // stored (a chat start that failed; its check-in was still screened) links
+  // to /admin#participant=<id> instead of a session that does not exist
+  // (ai-therapist-373). Read once on mount and cleared, like #session=.
+  useEffect(() => {
+    openParticipantDeepLink(
+      window.location,
+      (participant) => void openParticipantProfile(participant),
+      (url) => window.history.replaceState(null, '', url),
+    );
+  }, [openParticipantProfile]);
 
   const handleViewSession = (sessionId: string, editMode = false) => {
     setSelectedSessionId(sessionId);

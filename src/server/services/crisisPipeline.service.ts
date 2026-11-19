@@ -43,6 +43,7 @@ import { enqueueWorkItem } from './workQueue.service.js';
 import { trackBackground } from '../utils/backgroundWork.js';
 import { withReadDeadline } from '../utils/readDeadline.js';
 import { knownDemoAccountSession } from '../utils/sessionAccounts.js';
+import { recentTurns, rememberedCheckin } from '../utils/recentTurns.js';
 import { emitCrisisResources, hasEmittedHighRiskResources } from './crisisResources.js';
 import {
   pageHighRisk,
@@ -50,6 +51,7 @@ import {
   riskPageLevel,
   retryCrisisRecord,
   PAGE_LEVEL,
+  PAGE_FOLD_WINDOW_MS,
   type PageLevel,
   type PageSubject,
 } from './crisisPaging.service.js';
@@ -119,16 +121,116 @@ async function withCheckinContext<T extends { role: string; content?: string | n
   checkinRead?: Promise<SessionCheckin | null>,
 ): Promise<Array<T | { role: string; content: string }>> {
   if (turn.source === 'checkin' || history.length >= HISTORY_WINDOW) return history;
+  let text = '';
   try {
-    const text = checkinFreeText(
-      await (checkinRead ?? withReadDeadline(getSessionCheckin(sessionId), 'check-in read')),
-    );
-    if (!text) return history;
-    return [{ role: 'user', content: `[Written in the pre-session check-in form] ${text}` }, ...history];
+    text = checkinFreeText(await (checkinRead ?? withReadDeadline(getSessionCheckin(sessionId), 'check-in read')));
   } catch (err) {
-    console.error('[CrisisPipeline] check-in read failed (non-fatal):', err);
-    return history;
+    console.error('[CrisisPipeline] check-in read failed; using the copy kept at session start:', err);
   }
+  // The stored check-in could not be read, or was never stored (its write is
+  // best effort at session start): the copy this process kept when the
+  // session started (ai-therapist-373). A risk check-in followed by "hi" is
+  // read together whatever the database does.
+  if (!text) text = rememberedCheckin(sessionId) ?? '';
+  if (!text) return history;
+  return [{ role: 'user', content: `[Written in the pre-session check-in form] ${text}` }, ...history];
+}
+
+/** A row of the history the assessor reads (a stored message, or a turn kept
+ *  in memory shaped like one). */
+type HistoryRow = Awaited<ReturnType<typeof getRecentSessionMessages>>[number];
+
+/** Where a turn's history came from (ai-therapist-373):
+ *   database        the stored messages (the primary source);
+ *   memory          this process's copy, complete since the session started here;
+ *   memory_partial  this process's copy of a session it did not see start
+ *                   (a restart, another instance): it may be missing turns;
+ *   none            neither: the turn is read on its own. */
+export type HistorySource = 'database' | 'memory' | 'memory_partial' | 'none';
+
+/** Prefix of the stand-in id a remembered turn without a stored row carries,
+ *  so the split-sentence stitcher can find it. Never passed on as a row id. */
+const MEMORY_ID_PREFIX = 'mem:';
+
+/** The turns this process kept for the session, as history rows. */
+function rememberedHistory(sessionId: string): { rows: HistoryRow[]; complete: boolean } | null {
+  const held = recentTurns(sessionId);
+  if (!held || held.turns.length === 0) return held ? { rows: [], complete: held.complete } : null;
+  const rows = held.turns.slice(-HISTORY_WINDOW).map(
+    (t): HistoryRow => ({
+      role: t.role,
+      content: t.content,
+      content_redacted: null,
+      message_id: t.messageId ?? `${MEMORY_ID_PREFIX}${t.seq}`,
+      created_at: new Date(t.at),
+    }),
+  );
+  return { rows, complete: held.complete };
+}
+
+/**
+ * The history a turn is scored with, and where it came from (ai-therapist-373).
+ *
+ * The database is read first and is used whenever it answers in time and this
+ * turn was stored: it is complete across processes and restarts, so normal
+ * scoring is exactly what it was. This process's copy (utils/recentTurns) is
+ * used instead when
+ *   - the read failed or passed its 2 s bound: with no history the assessor
+ *     lost the split sentence and the answer to a safety question, and a
+ *     page became no page; or
+ *   - the turn itself could not be stored (no message id): the database is
+ *     evidently not keeping up, its history is missing at least this turn and
+ *     probably the ones around it.
+ * The copy is not merged into a history the database did give: the two
+ * clocks and the browser's batching make a merged order a guess, and a guess
+ * is not better than the stored order.
+ */
+export function chooseHistory(
+  turn: ParticipantTurn,
+  stored: HistoryRow[] | null,
+): { rows: HistoryRow[]; source: HistorySource } {
+  const databaseUsable = stored !== null && turn.messageId != null;
+  if (databaseUsable) return { rows: stored, source: 'database' };
+  const memory = rememberedHistory(turn.sessionId);
+  // The database answered and only this turn could not be stored: a copy this
+  // process knows to be partial (a session it did not see start) is not
+  // preferred over the stored history, which is complete up to this turn
+  // (PR #88 review). Preferring it would score the turn on fewer turns and
+  // put it under the context-blind rule although the history was read.
+  if (stored !== null && memory && !memory.complete) return { rows: stored, source: 'database' };
+  if (memory && memory.rows.length > 0) {
+    return { rows: memory.rows, source: memory.complete ? 'memory' : 'memory_partial' };
+  }
+  if (stored !== null) return { rows: stored, source: 'database' };
+  return { rows: [], source: memory?.complete ? 'memory' : 'none' };
+}
+
+/** The current turn's place in a remembered history: by its stored id, else
+ *  the latest participant turn with the same words. */
+function locateInMemory(turn: ParticipantTurn, rows: HistoryRow[]): string | number | null {
+  if (turn.messageId != null) {
+    const byId = rows.find((r) => r.message_id != null && String(r.message_id) === String(turn.messageId));
+    if (byId) return turn.messageId;
+  }
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i].role === 'user' && rows[i].content === turn.content) return rows[i].message_id as string | number;
+  }
+  return null;
+}
+
+/** stitchSplitTurnParts over a history from memory: the turn is found there
+ *  even without a stored id, and stand-in ids are never passed on. */
+function stitchFromMemory(
+  turn: ParticipantTurn,
+  rows: HistoryRow[],
+): { content: string; priorMessageIds: Array<string | number> } {
+  const id = locateInMemory(turn, rows);
+  if (id == null) return { content: turn.content, priorMessageIds: [] };
+  const parts = stitchSplitTurnParts({ ...turn, messageId: id }, rows);
+  return {
+    content: parts.content,
+    priorMessageIds: parts.priorMessageIds.filter((p) => !String(p).startsWith(MEMORY_ID_PREFIX)),
+  };
 }
 
 export type CrisisSeverity = 'none' | 'low' | 'medium' | 'high';
@@ -192,12 +294,13 @@ export async function runCrisisPipeline(
             logDbMiss('demo check')(err);
             return false;
           });
+    // null: the read failed or passed its bound (see chooseHistory).
     const historyRead = withReadDeadline(
       Promise.resolve().then(() => getRecentSessionMessages(turn.sessionId, HISTORY_WINDOW)),
       'history read',
-    ).catch((err: unknown) => {
-      logDbMiss('history read')(err);
-      return [] as Awaited<ReturnType<typeof getRecentSessionMessages>>;
+    ).catch((err: unknown): HistoryRow[] | null => {
+      console.error('[CrisisPipeline] history read failed; using the turns kept in memory:', err);
+      return null;
     });
     // Read alongside, used only while the session's start is in the window.
     const checkinRead =
@@ -208,8 +311,19 @@ export async function runCrisisPipeline(
             'check-in read',
           );
     checkinRead?.catch(() => undefined);
-    const [suppressed, history] = await Promise.all([demoRead, historyRead]);
+    const [suppressed, storedHistory] = await Promise.all([demoRead, historyRead]);
     if (suppressed) return NONE_RESULT;
+    // The check-in is screened on its own words: it has no history.
+    const { rows: history, source: historySource } =
+      turn.source === 'checkin'
+        ? { rows: [] as HistoryRow[], source: 'database' as const }
+        : chooseHistory(turn, storedHistory);
+    if (historySource !== 'database') {
+      console.warn(
+        `[CrisisPipeline] ${turn.sessionId.substring(0, 12)}...: turn scored with history from ${historySource} ` +
+          `(${history.length} turns)`,
+      );
+    }
 
     // Age-eligibility confirmation starts NOW, alongside risk scoring, and is
     // acted on after the crisis block below (ai-therapist-296). On voice the
@@ -226,9 +340,12 @@ export async function runCrisisPipeline(
     // half), so an explicit statement of intent was never flagged or paged.
     // Scoring and the age check therefore read the sentence as it was spoken:
     // this turn joined to the participant turn(s) that ended moments before it.
+    // From memory the turn is found without a stored id (ai-therapist-373).
     const stitched =
       channel === 'realtime' && turn.source !== 'checkin'
-        ? stitchSplitTurnParts(turn, history)
+        ? historySource === 'database'
+          ? stitchSplitTurnParts(turn, history)
+          : stitchFromMemory(turn, history)
         : { content: turn.content, priorMessageIds: [] };
     const scoredTurn = stitched.content === turn.content ? turn : { ...turn, content: stitched.content };
 
@@ -258,6 +375,10 @@ export async function runCrisisPipeline(
         // high, and paged, before this was passed).
         ...(stitched.priorMessageIds.length > 0 ? { stitched_message_ids: stitched.priorMessageIds } : {}),
         ...(turn.source ? { source: turn.source } : {}),
+        // Only when it is not the stored history (ai-therapist-373): recorded
+        // on the risk row, and 'none' / 'memory_partial' turn on the
+        // context-blind rule in the scorer.
+        ...(historySource !== 'database' ? { history_source: historySource } : {}),
       },
       await withCheckinContext(turn.sessionId, history, turn, checkinRead),
       { onScored },
@@ -451,7 +572,18 @@ export async function runCrisisPipeline(
         !flagByLevel && !flagBySubject.first && severity === 'high' && alreadyHigh && acute !== null
           ? await isFirstFlagAtStage(turn.sessionId, acute, subject)
           : false;
-      const shouldFlag = flagByLevel || flagBySubject.first || flagByEscalation || crossedCritical;
+      // The same turn scored a second time (a re-sent transcript batch after an
+      // unsaved one) is not flagged again once its flag is on record
+      // (ai-therapist-373): one turn, one crisis event, one adverse-event
+      // draft, and a staff unflag in between stands. Its page is the paging
+      // layer's to fold.
+      const duplicateTurn = flaggedTurnOnRecord(turn);
+      if (duplicateTurn) {
+        console.warn(
+          `[CrisisPipeline] ${turn.sessionId.substring(0, 12)}...: this turn's flag is already on record; not flagged again`,
+        );
+      }
+      const shouldFlag = !duplicateTurn && (flagByLevel || flagBySubject.first || flagByEscalation || crossedCritical);
       const escalationNote = acute
         ? `What changed: ${ESCALATION_NOTE[acute]}`
         : crossedCritical
@@ -479,6 +611,7 @@ export async function runCrisisPipeline(
           (alsoSubject ? `Also in the same message: ${FLAG_SUBJECT_NAME[alsoSubject]} - ` : '') +
           (fromCheckin ? 'Source: pre-session check-in text - ' : '') +
           `Factors: ${risk.factors.join(', ')}`;
+        const attemptedAt = Date.now();
         try {
           await flagSessionCrisis(
             turn.sessionId,
@@ -490,6 +623,7 @@ export async function runCrisisPipeline(
             flagFactors,
             flagNotes,
           );
+          noteTurnFlagged(turn);
         } catch (err) {
           logDbMiss('flag write')(err);
           if (severity === 'high') {
@@ -497,8 +631,14 @@ export async function runCrisisPipeline(
               sessionId: turn.sessionId,
               what: 'crisis flag',
               summary: `High risk flag, score ${risk.riskScore}/100${label ? ` (${label})` : ''}.`,
-              write: () =>
-                flagSessionCrisis(
+              // Idempotent per turn (ai-therapist-373): nothing is written
+              // when the same turn's flag reached the record another way
+              // meanwhile, or when staff unflagged the session after this
+              // attempt (flagSessionCrisis checks both in its transaction;
+              // this process's own record is checked first).
+              write: async () => {
+                if (flaggedTurnOnRecord(turn)) return 'skipped_duplicate';
+                const outcome = await flagSessionCrisis(
                   turn.sessionId,
                   severity,
                   risk.riskScore,
@@ -507,8 +647,11 @@ export async function runCrisisPipeline(
                   turn.messageId ?? null,
                   flagFactors,
                   flagNotes,
-                  { retry: true },
-                ),
+                  { retry: true, attemptedAt: new Date(attemptedAt) },
+                );
+                if (outcome === 'written') noteTurnFlagged(turn);
+                return outcome;
+              },
             });
           }
         }
@@ -675,6 +818,8 @@ interface EarlyPage {
   subject: PageSubject;
   level: PageLevel;
   stage: 0 | 1 | 2;
+  /** When it was requested (ms). Set by rememberEarlyPage. */
+  at?: number;
 }
 
 const EARLY_PAGES_MAX_SESSIONS = 2000;
@@ -683,6 +828,22 @@ const earlyPages = new Map<string, EarlyPage[]>();
 /** Test hook. */
 export function _resetEarlyPageStateForTests(): void {
   earlyPages.clear();
+  flaggedTurns.clear();
+}
+
+/** This session's early pages that can still stand for a page: those inside
+ *  the paging layer's fold window (ai-therapist-373). An older one has stopped
+ *  absorbing anything there, so it must not hold a new turn's page back here
+ *  either: a critical turn an hour after a critical page is paged at once, not
+ *  after the turn's database work. */
+function liveEarlyPages(sessionId: string, now: number): EarlyPage[] {
+  const all = earlyPages.get(sessionId);
+  if (!all) return [];
+  const live = all.filter((p) => p.at === undefined || now - p.at < PAGE_FOLD_WINDOW_MS);
+  if (live.length === all.length) return all;
+  if (live.length > 0) earlyPages.set(sessionId, live);
+  else earlyPages.delete(sessionId);
+  return live;
 }
 
 /** Is this page to be requested now, before the turn's own reads? Pure apart
@@ -694,7 +855,7 @@ export function pageAtOnce(
 ): boolean {
   // Not flagged high: the pipeline's level rule flags and pages this turn.
   if (sessionFlaggedHigh === false) return true;
-  const mine = earlyPages.get(sessionId) ?? [];
+  const mine = liveEarlyPages(sessionId, Date.now());
   if (mine.some((p) => p.subject === wanted.subject && p.level >= wanted.level && p.stage >= wanted.stage)) {
     return false;
   }
@@ -704,8 +865,10 @@ export function pageAtOnce(
   return true;
 }
 
-function rememberEarlyPage(sessionId: string, page: EarlyPage): () => void {
-  const list = [...(earlyPages.get(sessionId) ?? []), page];
+function rememberEarlyPage(sessionId: string, wanted: EarlyPage): () => void {
+  const now = Date.now();
+  const page: EarlyPage = { ...wanted, at: now };
+  const list = [...liveEarlyPages(sessionId, now), page];
   earlyPages.delete(sessionId);
   earlyPages.set(sessionId, list);
   if (earlyPages.size > EARLY_PAGES_MAX_SESSIONS) {
@@ -781,6 +944,56 @@ function respondToHighVerdict(
   } catch (err) {
     console.error('[CrisisPipeline] responding to a high verdict failed; the pipeline pages as before:', err);
     return { pageRequested: false };
+  }
+}
+
+// ---- one turn, one flag (ai-therapist-373) -----------------------------------
+//
+// A turn can be scored twice: a voice batch that /logs/batch could not store is
+// screened as it fails (no message id) and scored again when the browser
+// re-sends it and it is stored (a message id). A high flag whose write failed
+// is retried in the background for about 2.5 minutes. Together they produced
+// two crisis events and two adverse-event drafts for one turn, and either could
+// put back a flag that staff had cleared in between. This process remembers,
+// for FLAGGED_TURN_MEMORY_MS, each turn whose flag reached the record.
+//
+// The same turn: the same session and the same words, with the same message id
+// or with no id on one side (the unsaved copy). Two different stored ids are
+// two turns, even with the same words.
+
+/** Longer than the flag retries (5 s + 30 s + 2 min). */
+export const FLAGGED_TURN_MEMORY_MS = 5 * 60 * 1000;
+const FLAGGED_TURNS_MAX_SESSIONS = 2000;
+const flaggedTurns = new Map<string, Array<{ words: string; messageId: string | null; at: number }>>();
+
+function sameTurnEntries(sessionId: string, now: number) {
+  const list = (flaggedTurns.get(sessionId) ?? []).filter((e) => now - e.at < FLAGGED_TURN_MEMORY_MS);
+  if (list.length > 0) flaggedTurns.set(sessionId, list);
+  else flaggedTurns.delete(sessionId);
+  return list;
+}
+
+/** Has this turn's flag already reached the record (in this process)? */
+export function flaggedTurnOnRecord(turn: ParticipantTurn): boolean {
+  const words = turn.content.trim();
+  const id = turn.messageId == null ? null : String(turn.messageId);
+  return sameTurnEntries(turn.sessionId, Date.now()).some(
+    (e) => e.words === words && (e.messageId === null || id === null || e.messageId === id),
+  );
+}
+
+/** This turn's flag reached the record. */
+export function noteTurnFlagged(turn: ParticipantTurn): void {
+  const now = Date.now();
+  const list = sameTurnEntries(turn.sessionId, now);
+  list.push({ words: turn.content.trim(), messageId: turn.messageId == null ? null : String(turn.messageId), at: now });
+  flaggedTurns.delete(turn.sessionId);
+  flaggedTurns.set(turn.sessionId, list);
+  if (flaggedTurns.size > FLAGGED_TURNS_MAX_SESSIONS) {
+    for (const id of flaggedTurns.keys()) {
+      if (flaggedTurns.size <= FLAGGED_TURNS_MAX_SESSIONS / 2) break;
+      flaggedTurns.delete(id);
+    }
   }
 }
 

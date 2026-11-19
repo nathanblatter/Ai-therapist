@@ -61,6 +61,7 @@ import {
   type PagingRecordRow,
 } from '../db/paging.queries.js';
 import { field, page, renderPage, type PageField, type PageMessage } from '../utils/pageMessage.js';
+import { knownSessionParticipant } from '../utils/sessionAccounts.js';
 
 const log = createLogger('crisisPaging');
 
@@ -513,9 +514,12 @@ export function vendorCutLevel(peak: PeakSeverity): PageLevel | null {
 // carries (utils/smsText splitPageForSms). Each build*Message function is the
 // bridge text of the matching compose*Page.
 
+function adminBase(): string {
+  return (process.env.APP_BASE_URL ?? 'https://ai-therapist.nathanblatter.com').trim().replace(/\/+$/, '');
+}
+
 function adminLink(sessionId: string): string {
-  const base = (process.env.APP_BASE_URL ?? 'https://ai-therapist.nathanblatter.com').trim().replace(/\/+$/, '');
-  return `${base}/admin#session=${encodeURIComponent(sessionId)}`;
+  return `${adminBase()}/admin#session=${encodeURIComponent(sessionId)}`;
 }
 
 function shortId(sessionId: string): string {
@@ -523,8 +527,19 @@ function shortId(sessionId: string): string {
 }
 
 /** The admin link field. Its short form, for an SMS part 1 with no room for
- *  the link, is a stable instruction with the session reference. */
+ *  the link, is a stable instruction with the session reference. A session
+ *  whose row was never written (a chat start that failed; its check-in was
+ *  still screened) has nothing to open: the link opens the participant's
+ *  profile instead (ai-therapist-373). */
 function linkField(sessionId: string): PageField {
+  const participant = knownSessionParticipant(sessionId);
+  if (participant && !participant.stored) {
+    return field(
+      'link',
+      `${adminBase()}/admin#participant=${participant.userId}`,
+      `Open the participant's profile: participant ${participant.userId}`,
+    );
+  }
   return field('link', adminLink(sessionId), `Open Crisis Management: session ${shortId(sessionId)}`);
 }
 
@@ -931,10 +946,14 @@ async function isSandboxSession(sessionId: string): Promise<boolean> {
 async function readPagingHistory(
   sessionId: string,
 ): Promise<{ userId: number | null; rows: PagingRecordRow[]; failed: boolean }> {
+  // A participant known from the request that started the session needs no
+  // lookup, and keys the page even when the lookups fail or the session row
+  // was never written (ai-therapist-373).
+  const known = knownSessionParticipant(sessionId)?.userId ?? null;
   try {
     return await withTimeout(
       (async () => {
-        const userId = await getPagingParticipantUserId(sessionId);
+        const userId = known ?? (await getPagingParticipantUserId(sessionId));
         const rows = await getRecentPagingRecords(sessionId, userId, new Date(Date.now() - PAGE_FOLD_WINDOW_MS));
         return { userId, rows: rows ?? [], failed: false };
       })(),
@@ -945,7 +964,7 @@ async function readPagingHistory(
       { err },
       `[paging] could not read paging history for ${sessionId.substring(0, 12)}...; paging without it`,
     );
-    return { userId: null, rows: [], failed: true };
+    return { userId: known, rows: [], failed: true };
   }
 }
 
@@ -1007,7 +1026,13 @@ export function retryCrisisRecord(opts: {
       opts
         .write()
         .then((value) => {
-          log.warn(`[paging] ${opts.what} for ${short}... written on retry ${index + 1}`);
+          // A write that found nothing to do (ai-therapist-373: the same turn
+          // already on record, or the flag cleared by staff) is finished too.
+          if (typeof value === 'string' && value.startsWith('skipped')) {
+            log.warn(`[paging] ${opts.what} for ${short}... not written on retry ${index + 1}: ${value}`);
+          } else {
+            log.warn(`[paging] ${opts.what} for ${short}... written on retry ${index + 1}`);
+          }
           try {
             opts.onRecorded?.(value);
           } catch (err) {

@@ -46,6 +46,11 @@ full wording follows in the later parts. `docs/on-call-sop.md` section 1 says wh
 contains and `docs/crisis.md` has examples. Today's participant pages are 1 to 4 parts. The
 SMS channel counts as accepted only when every part was.
 
+Tapping the admin link while signed out opens the sign-in page; after signing in, the
+on-call staff member lands on the session or participant profile the link names (the
+link's `#session=` / `#participant=` hash is carried across sign-in in that browser tab for
+up to 15 minutes; `docs/squawk-auth.md`, "Signed out on a staff link").
+
 ### Why `SendTextMessage` and not SNS `Publish`
 
 AWS's own guidance for new messaging work is to use AWS End User Messaging directly; SNS sends

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router';
 import { Shield, Key, Lock, User } from 'react-feather';
 import { decodeAssertionOptions, encodeAssertion, isCancelled, passkeysSupported } from '../../shared/lib/webauthn';
+import { savePendingDeepLink } from '../../admin/utils/pendingDeepLink';
 
 // Errors Squawk's callback can send us back with (?error=).
 const CALLBACK_ERRORS: Record<string, string> = {
@@ -48,6 +49,18 @@ export default function Login() {
   const [mfaToken, setMfaToken] = useState('');
   const [useBackupCode, setUseBackupCode] = useState(false);
   const [backupCode, setBackupCode] = useState('');
+
+  // A crisis page link (/admin#session=... or #participant=...) opened while
+  // signed out lands here with its hash; keep it for the admin page to
+  // restore after sign-in, in either mode (pendingDeepLink.ts). Declared
+  // before the Squawk effect below, which may leave the page.
+  useEffect(() => {
+    try {
+      savePendingDeepLink(window.sessionStorage, window.location.hash, Date.now());
+    } catch {
+      /* storage unavailable: sign-in still lands on /admin, without the link */
+    }
+  }, []);
 
   // Squawk flow (auth-service-33): without a login_challenge the page sends
   // the browser to /api/auth/squawk/start; Squawk parks the request and comes

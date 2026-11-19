@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 
 // Mock the individual db query modules so buildMemoryBlock's composition —
 // which now flows through the shared getUserProfileBundle fan-out
@@ -563,9 +563,18 @@ describe('buildLeadConversationBlock (features.lead_conversation_enabled)', () =
 // participant, and memory is off by default, so the cadence cue cannot live
 // only inside the memory block.
 describe('screener cue independent of memory (ai-therapist-345)', () => {
-  // Relative to the real clock: the block counts days from Date.now(), so a
-  // fixed date here made this test fail exactly one day after it was written.
-  const now = new Date();
+  // The block counts days from the clock, so the clock is pinned: a fixed
+  // date against the real clock failed one day after it was written (#87),
+  // and a "now" read at collection time can still land on the other side of
+  // midnight from the test's own run.
+  const now = new Date('2026-11-18T18:00:00Z');
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(now);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
   const daysAgo = (d: number) => new Date(now.getTime() - d * 24 * 60 * 60 * 1000);
 
   it('memory OFF: the prompt context is the no-notes note and the screener cue, with no memory content', async () => {

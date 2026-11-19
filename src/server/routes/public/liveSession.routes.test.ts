@@ -79,11 +79,11 @@ function upstream(status: number, body: unknown, headers: Record<string, string>
   return new Response(typeof body === 'string' ? body : JSON.stringify(body), { status, headers });
 }
 
-function makeApp() {
+function makeApp(session: Record<string, unknown> = {}) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    (req as unknown as { session: Record<string, unknown> }).session = { consentVersion: 'v1' };
+    (req as unknown as { session: Record<string, unknown> }).session = { consentVersion: 'v1', ...session };
     next();
   });
   app.use(liveSessionRoutes());
@@ -336,6 +336,39 @@ describe('POST /api/live/session with a check-in', () => {
     expect(mocks.runCheckinCrisisScreen).toHaveBeenCalledTimes(1);
     expect(mocks.runCheckinCrisisScreen).toHaveBeenCalledWith('sess_live_ci', mocks.checkin, 'realtime');
     expect(order).toEqual(['attached', 'screened']);
+  });
+
+  // ai-therapist-373: the start and the check-in's words are kept in memory
+  // for the crisis pipeline (its context when the database cannot answer).
+  it('keeps the start and the check-in text in memory for the crisis pipeline', async () => {
+    const { recentTurns, rememberedCheckin, _resetRecentTurnsForTests } = await import('../../utils/recentTurns.js');
+    _resetRecentTurnsForTests();
+    mocks.checkin = { mood: 1, topic: "I don't really want to be alive" };
+    mocks.upstreamFetch.mockResolvedValue(healthy());
+    await start().expect(201);
+    await settle();
+    expect(rememberedCheckin('sess_live_ci')).toBe("I don't really want to be alive");
+    expect(recentTurns('sess_live_ci')?.complete).toBe(true);
+  });
+
+  // ai-therapist-374: kept with its participant, so a withdrawal or account
+  // deletion finds it without a read.
+  it("keeps the start with the signed-in participant's id", async () => {
+    const { recentTurns, forgetParticipantTurns, _resetRecentTurnsForTests } = await import(
+      '../../utils/recentTurns.js'
+    );
+    _resetRecentTurnsForTests();
+    mocks.upstreamFetch.mockResolvedValue(healthy());
+    await request(makeApp({ userId: 7, userRole: 'participant' }))
+      .post('/api/live/session')
+      .send({ sdp: 'v=0 offer' })
+      .expect(201);
+    await settle();
+    expect(recentTurns('sess_live_ci')?.complete).toBe(true);
+    forgetParticipantTurns(8);
+    expect(recentTurns('sess_live_ci')).not.toBeNull();
+    forgetParticipantTurns(7);
+    expect(recentTurns('sess_live_ci')).toBeNull();
   });
 
   it('no check-in: the pipeline is not called', async () => {

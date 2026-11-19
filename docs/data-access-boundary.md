@@ -104,7 +104,12 @@ codebook labels "treat as identifiable data." Neither is in the default export.
   nulls the raw `content` column. By default (`require_redaction_complete:
   true`, a documented admin config toggle) it wipes **only after** redaction is
   confirmed complete, and messages with redaction errors are skipped, not
-  blindly wiped. Every wipe is logged (`content_wipe_log`).
+  blindly wiped. Every wipe is logged (`content_wipe_log`). The retention
+  period is elapsed time: content is eligible exactly `retention_hours` real
+  hours after it was written, whatever the server's time zone (before
+  ai-therapist-374 it counted local wall-clock hours, so on a daylight-saving
+  change day in a DST zone it was 23 or 25). The crisis pipeline's in-memory
+  copy of recent turns (docs/crisis.md) drops the same turns after each wipe.
 - **De-identified data is retained** indefinitely for analysis (disclosed in
   consent).
 - **Audio recordings**: a separate retention job
