@@ -285,13 +285,21 @@ export async function sweepStaleScans(): Promise<number> {
  * Never throws.
  */
 export async function runSafetyBackstopPass(): Promise<void> {
-  await sweepStaleScans();
-  try {
-    const { sweepSilenceChecks } = await import('./crisisPaging.service.js');
-    await sweepSilenceChecks();
-  } catch (err) {
-    log.error({ err }, '[scan-sweep] silence-check sweep failed');
-  }
+  // Side by side, not one after the other: the stale-scan pass re-scans up to
+  // a batch of messages one at a time, each a risk-assessor call, so after a
+  // deploy (exactly when both have work) running it first could hold a due
+  // silence check back by minutes.
+  await Promise.all([
+    sweepStaleScans(),
+    (async () => {
+      try {
+        const { sweepSilenceChecks } = await import('./crisisPaging.service.js');
+        await sweepSilenceChecks();
+      } catch (err) {
+        log.error({ err }, '[scan-sweep] silence-check sweep failed');
+      }
+    })(),
+  ]);
 }
 
 /** Start the periodic safety backstop (boot pass after a short delay, then

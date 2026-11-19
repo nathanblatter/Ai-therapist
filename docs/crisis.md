@@ -336,7 +336,8 @@ Responses are tiered by severity/score:
     flags (including a researcher raising a session's risk by hand, `risk_score_updated` /
     `severity_changed`) and the scores the assessor gave their turns in `risk_score_history`.
     The incident is this session and the **recovery chain** behind it (each recovery session
-    continues the participant's previous session), however long the chain has run, with a 12 h
+    continues the participant's session whose vendor cut was recorded just before it started,
+    else the one started last: no column links them), however long the chain has run, with a 12 h
     backstop; plus the participant's other sessions in the last two hours. The automatic
     `recovery_continuation` stamp never counts. **high** pages once per incident;
     **medium** pages once per incident, worded "vendor cut, NOT a high risk score", says the
@@ -359,8 +360,12 @@ Responses are tiered by severity/score:
     instances cannot both run it, and its result is written back (`state: 'done'`, with
     `outcome` and the page's `action_id`) so it never runs twice. A claim whose process died
     is retried after 60 s; if that produces a second run, its page folds into the first when
-    that was delivered. A check found more than 15 minutes late (a long outage) is not paged:
-    it is marked `expired`, logged at error level and shown on the dashboards. Harness and
+    that was delivered. A check whose page no channel accepted is not done: it goes back to
+    `pending` with `attempts` counted and the next sweep sends it again. A check found more
+    than 15 minutes late (a long outage), or still undelivered then, is not paged: it is marked
+    `expired`, logged at error level and shown on the dashboards (an undelivered one as "page
+    NOT DELIVERED ... On-call has NOT been told"). The silence sweep runs beside the stale-scan
+    re-scan on the same tick, not behind it. Harness and
     demo sessions are never swept (their check runs only in the process that recorded the cut).
   - Only a page known to be delivered absorbs another. Lookup failures, timeouts (2 s) and an
     undelivered page all fail toward paging. The sandbox check and the history lookup run

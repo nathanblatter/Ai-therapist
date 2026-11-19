@@ -44,6 +44,7 @@ const {
   getParticipantAssessedRisk,
   getUnfinishedSilenceChecks,
   claimSilenceCheck,
+  releaseSilenceCheck,
   finishSilenceCheck,
   insertPagingRecord,
 } = await import('./paging.queries.js');
@@ -192,6 +193,45 @@ describe.skipIf(!LIVE)('paging SQL against a scratch Postgres', () => {
       expect(byClock.filter((e) => e.severity === 'high')).toHaveLength(0);
       const byChain = await getParticipantFlagEvents(chain, userId, twoHours);
       expect(byChain.map((e) => [e.session_id, e.severity, e.risk_score])).toEqual([[first, 'high', 82]]);
+    });
+
+    it('a second session opened between the cut and its recovery does not break the chain (two devices)', async () => {
+      // Owner with nothing else on record, so start order is fully controlled.
+      const { rows } = await q(
+        `INSERT INTO users (username, password, role, organization_id)
+         SELECT $1, 'x', 'participant', organization_id FROM users WHERE userid = $2 RETURNING userid`,
+        [`${tag}_twodev`, userId],
+      );
+      const u = rows[0].userid as number;
+      // Voice session flagged high 2 h 30 min ago, then cut by the vendor.
+      const voice = await makeSession('twodev_voice', u, 3 * HOUR);
+      await flagEvent(voice, { severity: 'high', score: 85, agoMs: 2.5 * HOUR });
+      // A typed chat opened on another device while the voice session ran.
+      const chat = await makeSession('twodev_chat', u, 2.8 * HOUR);
+      // The recovery session, started the moment the voice session was cut.
+      const recovery = await makeSession('twodev_rec', u, 2.7 * HOUR);
+      await stamp(recovery, 85, 2.7 * HOUR);
+      const cutRow = await insertPagingRecord(
+        voice,
+        'crisis_sms_alert',
+        { paging: { decision: 'paged', kind: 'vendor_cut', delivered: true } },
+        85,
+      );
+      await q(
+        `UPDATE intervention_actions SET performed_at = now() - make_interval(secs => $2::double precision)
+          WHERE action_id = $1`,
+        [cutRow, (2.7 * HOUR) / 1000 + 2],
+      );
+
+      const chain = await getIncidentChainSessionIds(recovery, new Date(Date.now() - 12 * HOUR));
+      expect(chain).toEqual([recovery, voice]);
+      expect(chain).not.toContain(chat);
+      const flags = await getParticipantFlagEvents(chain, u, new Date(Date.now() - 2 * HOUR));
+      expect(flags.map((e) => [e.session_id, e.severity])).toEqual([[voice, 'high']]);
+
+      // Without the cut row it falls back to start order (the chat session).
+      await q(`DELETE FROM intervention_actions WHERE action_id = $1`, [cutRow]);
+      expect(await getIncidentChainSessionIds(recovery, new Date(Date.now() - 12 * HOUR))).toEqual([recovery, chat]);
     });
 
     it('a session that is not a recovery session is a chain of one; a missing row still returns its own id', async () => {
@@ -404,6 +444,21 @@ describe.skipIf(!LIVE)('paging SQL against a scratch Postgres', () => {
       expect((await getUnfinishedSilenceChecks(24 * 3600, 60)).some((r) => r.action_id === actionId)).toBe(true);
       const again = await Promise.all([claimSilenceCheck(actionId, 'b1', 60), claimSilenceCheck(actionId, 'b2', 60)]);
       expect(again.filter((c) => c !== null)).toHaveLength(1);
+    });
+
+    it('an undelivered check handed back is pending again, keeps its attempts, and a later claim keeps them', async () => {
+      const s = await makeSession('sil_release', userId, 10 * 60_000);
+      const actionId = await noPageRow(s, 4 * 60_000, { state: 'pending' });
+      expect(await claimSilenceCheck(actionId, 'one', 60)).toMatchObject({ attempts: 0, isDemo: false });
+      expect(await releaseSilenceCheck(actionId, { attempts: 1, lastOutcome: 'not_delivered' })).toBe(true);
+      expect(await releaseSilenceCheck(actionId, { attempts: 9 })).toBe(false); // only from 'running'
+      const released = await checkOf(actionId);
+      expect(released).toEqual({ state: 'pending', attempts: 1, lastOutcome: 'not_delivered' });
+      const open = await getUnfinishedSilenceChecks(24 * 3600, 60);
+      expect(open.find((r) => r.action_id === actionId)).toMatchObject({ attempts: 1 });
+      expect(await claimSilenceCheck(actionId, 'two', 60)).toMatchObject({ attempts: 1 });
+      expect(await finishSilenceCheck(actionId, 'done', { outcome: 'paged' })).toBe(true);
+      expect(await checkOf(actionId)).toMatchObject({ state: 'done', outcome: 'paged', attempts: 1, claimedBy: 'two' });
     });
 
     it('rows the sweep must not take: no silence check, harness/demo sessions, other paging decisions', async () => {
