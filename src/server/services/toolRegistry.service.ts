@@ -294,8 +294,9 @@ export class ToolRegistry {
     try {
       console.log(`[ToolRegistry] Executing tool: ${name}`);
       // Bounded (toolTimeouts.ts): a hung handler is answered with a
-      // ToolTimeoutError, once; its late outcome is discarded.
-      const result = await runWithToolTimeout(name, () => tool.handler(args, ctx));
+      // ToolTimeoutError, once; its late outcome is discarded. Keyed by session
+      // so a repeat escalate_to_human waits on the one still running.
+      const result = await runWithToolTimeout(name, () => tool.handler(args, ctx), undefined, ctx.sessionId);
       return result;
     } catch (error) {
       console.error(`[ToolRegistry] Tool execution error for ${name}:`, error);

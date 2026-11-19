@@ -30,8 +30,8 @@ export const TOOL_TIMEOUT_DEFAULT_MS = 5_000;
  *    2.5 s timeout (rerank.service.ts): 10 s;
  *  - escalate_to_human at high urgency flags the session and runs the
  *    graduated crisis response, which pages the on-call: 20 s. If it times
- *    out the page may still go out; the model is told to stay with the
- *    participant either way.
+ *    out the flag and page are still on their way, and the model is told
+ *    exactly that (toolTimeoutMessage), never that help could not be reached.
  */
 export const TOOL_TIMEOUT_OVERRIDES_MS: Readonly<Record<string, number>> = {
   retrieve_psychoeducation: 10_000,
@@ -46,8 +46,59 @@ export function toolTimeoutMs(name: string): number {
   return TOOL_TIMEOUT_OVERRIDES_MS[name] ?? TOOL_TIMEOUT_DEFAULT_MS;
 }
 
+/**
+ * Tools whose handler writes something, or changes what the participant sees,
+ * after its slow step: a timed-out call of one of these may still go through,
+ * so the model must not tell the participant it failed (PR #80 review). The
+ * crisis tools have their own texts (CRISIS_TOOL_TIMEOUT_MESSAGES).
+ */
+export const TOOLS_UNCONFIRMED_ON_TIMEOUT: ReadonlySet<string> = new Set([
+  'set_session_goal',
+  'create_safety_plan',
+  'remember_this',
+  'forget_this',
+  'switch_language',
+  'flag_notable_moment',
+  'assign_practice',
+  'create_custom_worksheet',
+]);
+
+/**
+ * The crisis tools and end_session: what a slow call means differs, and the
+ * generic "tell them you could not do it" would be false or harmful. A
+ * timed-out escalate_to_human is still running: the flag, the crisis card and
+ * the page follow when it finishes, so the model must never tell a person in
+ * crisis that no one could be reached, and must not call it again (a second
+ * call raises a second crisis event, adverse-event draft and safety steer).
+ */
+const CRISIS_TOOL_TIMEOUT_MESSAGES: Readonly<Record<string, string>> = {
+  escalate_to_human:
+    'The alert to the monitoring team is still being sent and is not confirmed yet. Do not call escalate_to_human ' +
+    'again for this. Do not tell the participant that it failed or that no one could be reached, and do not ' +
+    'promise that a person will contact them or join. Stay with them. If they are talking about their safety, ' +
+    'follow your crisis protocol and make sure the crisis lines are on their screen.',
+  run_risk_check:
+    'This step was not confirmed as logged; it may still be saved. Do not call run_risk_check again for this ' +
+    'answer. It is silent: say nothing about it to the participant. Continue the assessment and follow your ' +
+    'crisis protocol.',
+  end_session:
+    'Ending the session was not confirmed; it may still close in a few seconds. Do not call end_session again ' +
+    'and do not start a new topic. If the participant is still talking, respond to them; if they are talking ' +
+    'about their safety, follow your crisis protocol.',
+};
+
 /** What a tool that did not finish returns to the model (as the error of its result). */
 export function toolTimeoutMessage(name: string): string {
+  const crisis = CRISIS_TOOL_TIMEOUT_MESSAGES[name];
+  if (crisis) return crisis;
+  if (TOOLS_UNCONFIRMED_ON_TIMEOUT.has(name)) {
+    return (
+      `The ${name} tool did not confirm in time; it may still go through. Do not call it again now. If the ` +
+      'participant asked for this, tell them you are not sure it went through: do not say it worked, and do not ' +
+      'say it failed. Stay with the participant; if they are talking about their safety, follow your crisis ' +
+      'protocol.'
+    );
+  }
   return (
     `The ${name} tool did not finish in time and returned nothing. Do not say it worked. If the participant ` +
     'asked for this, tell them plainly that you could not do it just now. Stay with the participant; if they are ' +
@@ -55,12 +106,22 @@ export function toolTimeoutMessage(name: string): string {
   );
 }
 
-/** A tool handler that did not settle within toolTimeoutMs(name). */
+/**
+ * Tools of which at most one call per session runs at a time. While one is
+ * still running (including after it timed out), another call does not start a
+ * second handler and is answered at once with the same timeout text.
+ */
+export const SINGLE_FLIGHT_TOOLS: ReadonlySet<string> = new Set(['escalate_to_human']);
+const inFlight = new Set<string>();
+
+/** A tool handler that did not settle within toolTimeoutMs(name), or a repeat of one still running. */
 export class ToolTimeoutError extends Error {
   readonly code = 'tool_timeout' as const;
   constructor(
     readonly toolName: string,
     readonly timeoutMs: number,
+    /** True when the call never ran because an earlier one is still running (SINGLE_FLIGHT_TOOLS). */
+    readonly alreadyRunning: boolean = false,
   ) {
     super(toolTimeoutMessage(toolName));
     this.name = 'ToolTimeoutError';
@@ -75,13 +136,25 @@ export function isToolTimeoutError(err: unknown): err is ToolTimeoutError {
 /**
  * Settle with the handler's outcome, or reject with ToolTimeoutError after
  * `timeoutMs`, whichever comes first: exactly once. A handler that settles
- * after the timeout is logged and otherwise ignored.
+ * after the timeout is logged and otherwise ignored. With a `flightKey` (the
+ * session id), a SINGLE_FLIGHT_TOOLS call made while an earlier one for the
+ * same key is still running is answered at once and its work never starts.
  */
 export function runWithToolTimeout<T>(
   name: string,
   work: () => Promise<T>,
   timeoutMs: number = toolTimeoutMs(name),
+  flightKey?: string,
 ): Promise<T> {
+  const key = flightKey && SINGLE_FLIGHT_TOOLS.has(name) ? `${name}\u0000${flightKey}` : null;
+  if (key && inFlight.has(key)) {
+    console.warn('[ToolRegistry] repeat call while the earlier one is still running', JSON.stringify({ tool: name }));
+    return Promise.reject(new ToolTimeoutError(name, timeoutMs, true));
+  }
+  if (key) inFlight.add(key);
+  const release = () => {
+    if (key) inFlight.delete(key);
+  };
   return new Promise<T>((resolve, reject) => {
     let done = false;
     const timer = setTimeout(() => {
@@ -101,12 +174,14 @@ export function runWithToolTimeout<T>(
     }
     pending.then(
       (value) => {
+        release();
         if (done) return late('result');
         done = true;
         clearTimeout(timer);
         resolve(value);
       },
       (err: unknown) => {
+        release();
         if (done) return late('error');
         done = true;
         clearTimeout(timer);

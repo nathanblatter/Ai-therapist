@@ -726,6 +726,15 @@ One run each: enough to show the mechanism, not a rate.
   <tool> tool did not finish in time ... Do not say it worked ..."}`), logs
   the call as `failed` with `timed_out: true`, and the watch resumes from
   there. The chat path runs the same `executeTool`, so it has the same bound.
+  The text depends on the tool (`toolTimeoutMessage`, PR #80 review): a
+  read-only lookup may say it could not do that; a tool that writes or changes
+  the screen (`TOOLS_UNCONFIRMED_ON_TIMEOUT`) says it is not sure it went
+  through, neither worked nor failed; `escalate_to_human` says the alert is
+  still being sent and must never be described as failed or as no one being
+  reachable; `run_risk_check` stays silent; `end_session` may still close. A
+  repeat `escalate_to_human` while the session's first one is still running
+  (`SINGLE_FLIGHT_TOOLS`) starts no second handler, so a retry cannot raise a
+  second crisis event, adverse-event draft or safety steer.
   Limits, one default and one table of overrides:
 
   | Tool | Limit | Why |
