@@ -100,7 +100,7 @@ describe('gate assertions: must fail', () => {
       body: { error: 'study_status', studyStatus: status, message: 'use the crisis resources shown' },
     });
     const steps: HttpProbeRecord['steps'] = {};
-    for (const route of ['chat', 'live', 'grok', 'create']) {
+    for (const route of ['chat', 'live', 'grok']) {
       steps[`withdrawn:${route}`] = refused('withdrawn');
       steps[`paused:${route}`] = refused('paused');
     }
@@ -108,7 +108,7 @@ describe('gate assertions: must fail', () => {
     expect(pass.find((r) => r.id === 'withdrawn-refused-on-every-start-route')!.passed).toBe(true);
     expect(pass.find((r) => r.id === 'no-telemetry-after-withdrawal')!.passed).toBe(true);
     const broken = await results(s, {
-      steps: { ...steps, 'withdrawn:create': { status: 200, body: { session_id: 'x' } } },
+      steps: { ...steps, 'withdrawn:chat': { status: 200, body: { sessionId: 'chat_x' } } },
       facts: { telemetryRowsAfterWithdrawal: 1 },
     });
     expect(broken.find((r) => r.id === 'withdrawn-refused-on-every-start-route')!.passed).toBe(false);

@@ -45,7 +45,7 @@ vi.mock('../../utils/sessionHelpers.js', () => helperMocks);
 vi.mock('../../utils/promptContext.js', () => ({
   sanitizeCheckin: () => null,
   buildCheckinBlock: () => '',
-  buildMemoryBlock: async () => '',
+  buildParticipantContextBlock: async () => '',
   buildToolGuidanceBlock: (names: string[], opts: { psychoeducationCue?: boolean }) =>
     opts.psychoeducationCue && names.includes('retrieve_psychoeducation') ? '\n\nCUE:retrieve_psychoeducation' : '',
   buildLeadConversationBlock: (enabled: boolean) => (enabled ? '\n\nLEAD' : ''),
@@ -282,6 +282,25 @@ describe('POST /api/chat/start', () => {
       .post('/api/chat/start')
       .send({});
     expect(res.status).toBe(429);
+    expect(dbMocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it('a cooldown refusal says when, in words, and carries crisis resources (ai-therapist-324)', async () => {
+    helperMocks.checkSessionLimits.mockResolvedValue({
+      allowed: false,
+      reason: 'cooldown',
+      message: 'internal',
+      cooldown_minutes: 30,
+      minutes_remaining: 28,
+    });
+    const res = await request(makeApp({ userId: 12, userRole: 'participant' }))
+      .post('/api/chat/start')
+      .send({});
+    expect(res.status).toBe(429);
+    expect(res.body).toMatchObject({ error: 'rate_limit_exceeded', reason: 'cooldown', minutes_remaining: 28 });
+    expect(res.body.message).toMatch(/in 28 minutes/);
+    expect(res.body.message).toMatch(/988/);
+    expect(res.body.crisis_resources.phone).toBeTruthy();
     expect(dbMocks.createSession).not.toHaveBeenCalled();
   });
 });

@@ -37,7 +37,7 @@ import {
 import {
   sanitizeCheckin,
   buildCheckinBlock,
-  buildMemoryBlock,
+  buildParticipantContextBlock,
   buildToolGuidanceBlock,
   buildLeadConversationBlock,
 } from '../../utils/promptContext.js';
@@ -46,6 +46,7 @@ import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwn
 import { requireConsent } from '../../middleware/consent.js';
 import { requireOutsideQuietHours } from '../../middleware/quietHours.js';
 import { requireActiveStudyStatus } from '../../middleware/studyStatus.js';
+import { sessionLimitRefusalFor, tooManyAttemptsRefusal } from '../../utils/sessionLimitRefusal.js';
 import { broadcastAdminEvent, broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
 
 import { createLogger } from '../../utils/logger.js';
@@ -77,7 +78,18 @@ export default function chatRoutes(): Router {
   // every /api/chat/message turn is a paid model call, so without these an
   // anonymous script could mint sessions and burn OpenAI spend without bound.
   // Generous enough that a real participant never sees them.
-  const chatStartLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 20, standardHeaders: true, legacyHeaders: false });
+  const chatStartLimiter = rateLimit({
+    windowMs: 15 * 60_000,
+    limit: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    // A shared address (a dorm network) can trip this, so it answers with the
+    // same readable body and crisis resources as a session-limit refusal
+    // instead of the library's bare "Too many requests" text.
+    handler: (_req, res) => {
+      void tooManyAttemptsRefusal().then((body) => res.status(429).json(body));
+    },
+  });
   const chatMessageLimiter = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: true, legacyHeaders: false });
 
   // POST /api/chat/start - start a chat-only therapy session. Blocked until
@@ -105,11 +117,9 @@ export default function chatRoutes(): Router {
         const isContinuation = typeof req.body?.continued_from === 'string';
         const limitCheck = await checkSessionLimits(numericUserId, userRole);
         if (!limitCheck.allowed && !isContinuation) {
-          return res.status(429).json({
-            error: 'Session limit exceeded',
-            reason: limitCheck.reason,
-            minutes_remaining: limitCheck.reason === 'cooldown' ? limitCheck.minutes_remaining : undefined,
-          });
+          // Same participant-readable body as the voice routes: when they can
+          // return, plus crisis resources (ai-therapist-324).
+          return res.status(429).json(await sessionLimitRefusalFor(limitCheck));
         }
 
         // One active session per user at a time (logged-in users only — the
@@ -151,7 +161,8 @@ export default function chatRoutes(): Router {
         // let getSystemPrompt re-roll internally and never recorded the arm, so
         // chat sessions could not be assigned to a condition for analysis.
         const checkin = sanitizeCheckin(req.body?.checkin);
-        const memoryBlock = await buildMemoryBlock(numericUserId);
+        // Memory block when opted in, else the screener cue alone (ai-therapist-345).
+        const memoryBlock = await buildParticipantContextBlock(numericUserId);
         const proactiveOffering = await resolveProactiveOffering();
         // Psychoeducation retrieval cue (ai-therapist-202): resolved once and
         // persisted like proactive_offering. Typed chat has no general tool
