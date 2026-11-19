@@ -1,0 +1,3412 @@
+{
+ "a01-login-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "13": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "a01-login-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "13": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "a02-landing-therapist-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 19,
+   "18": 1,
+   "16.2": 1,
+   "12.6": 33,
+   "10.8": 13,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a02-landing-therapist-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 19,
+   "18": 1,
+   "16.2": 1,
+   "12.6": 33,
+   "10.8": 13,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a03-nav-drawer-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 19,
+   "18": 1,
+   "16.2": 1,
+   "12.6": 33,
+   "10.8": 13,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a03-nav-drawer-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 19,
+   "18": 1,
+   "16.2": 1,
+   "12.6": 33,
+   "10.8": 13,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a04-escalations-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 17,
+   "16.2": 1,
+   "12.6": 10,
+   "10.8": 9,
+   "21.6": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Active (67x36)",
+   "Raised by me (112x36)",
+   "Resolved (82x36)",
+   "All (44x36)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a04-escalations-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 17,
+   "16.2": 1,
+   "12.6": 10,
+   "10.8": 9,
+   "21.6": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Active (67x36)",
+   "Raised by me (112x36)",
+   "Resolved (82x36)",
+   "All (44x36)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a05-escalation-detail-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 21,
+   "18": 1,
+   "16.2": 1,
+   "12.6": 11,
+   "10.8": 8
+  },
+  "inputFontPx": [
+   12.6
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a05-escalation-detail-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 21,
+   "18": 1,
+   "16.2": 1,
+   "12.6": 11,
+   "10.8": 8
+  },
+  "inputFontPx": [
+   12.6
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a06-crisis-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 17,
+   "27": 1,
+   "16.2": 2,
+   "12.6": 27,
+   "10.8": 42,
+   "21.6": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Refresh (106x34)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a06-crisis-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 17,
+   "27": 1,
+   "16.2": 2,
+   "12.6": 27,
+   "10.8": 42,
+   "21.6": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Refresh (106x34)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a07-triage-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 23,
+   "16.2": 2,
+   "12.6": 14,
+   "10.8": 21,
+   "21.6": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Refresh (98x34)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a07-triage-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 23,
+   "16.2": 2,
+   "12.6": 14,
+   "10.8": 21,
+   "21.6": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Refresh (98x34)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a08-work-queue-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 17,
+   "16.2": 2,
+   "12.6": 14,
+   "10.8": 19,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.6,
+   12.6,
+   12.6,
+   12.6
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Refresh (98x34)",
+   "Active (67x29)",
+   "Resolved (82x29)",
+   "All (39x24)",
+   "crisis flag (91x24)",
+   "escalation inbound (137x24)",
+   "View client (71x14)",
+   "BUTTON (34x27)",
+   "BUTTON (34x27)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a08-work-queue-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 17,
+   "16.2": 2,
+   "12.6": 14,
+   "10.8": 19,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.6,
+   12.6,
+   12.6,
+   12.6
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Refresh (98x34)",
+   "Active (67x29)",
+   "Resolved (82x29)",
+   "All (39x24)",
+   "crisis flag (91x24)",
+   "escalation inbound (137x24)",
+   "View client (71x14)",
+   "BUTTON (34x27)",
+   "BUTTON (34x27)",
+   "View client (71x14)",
+   "BUTTON (34x27)",
+   "BUTTON (34x27)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a09-participant-profile-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "11": 1,
+   "13": 23,
+   "16.2": 2,
+   "12.6": 90,
+   "10.8": 93,
+   "21.6": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Refresh (98x34)",
+   "All (37x22)",
+   "Progress (70x22)",
+   "Case (44x22)",
+   "New note (100x36)",
+   "New (59x25)",
+   "Re-issue (91x25)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a09-participant-profile-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "11": 1,
+   "13": 23,
+   "16.2": 2,
+   "12.6": 93,
+   "10.8": 93,
+   "21.6": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Refresh (98x34)",
+   "All (37x22)",
+   "Progress (70x22)",
+   "Case (44x22)",
+   "New note (100x36)",
+   "New (59x25)",
+   "Re-issue (91x25)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a10-caseload-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 19,
+   "18": 1,
+   "16.2": 1,
+   "12.6": 33,
+   "10.8": 13,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a10-caseload-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 19,
+   "18": 1,
+   "16.2": 1,
+   "12.6": 33,
+   "10.8": 13,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a11-messages-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 15,
+   "16.2": 2,
+   "12.6": 6,
+   "10.8": 6
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a11-messages-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 15,
+   "16.2": 2,
+   "12.6": 6,
+   "10.8": 6
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a12-sessions-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 73,
+   "16.2": 1,
+   "12.6": 95,
+   "10.8": 65,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Search session ID, name, or username... (288x36)",
+   "Start date (147x38)",
+   "End date (147x38)",
+   "Min messages (115x38)",
+   "Max messages (115x36)",
+   "Advanced Filters ▼ (169x34)",
+   "Clear All (99x34)",
+   "View (52x25)",
+   "Edit (52x25)",
+   "Delete (67x25)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a12-sessions-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 73,
+   "16.2": 1,
+   "12.6": 95,
+   "10.8": 65,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Search session ID, name, or username... (318x36)",
+   "Start date (147x38)",
+   "End date (147x38)",
+   "Min messages (115x36)",
+   "Max messages (115x36)",
+   "Advanced Filters ▼ (169x34)",
+   "Clear All (99x34)",
+   "View (52x25)",
+   "Edit (52x25)",
+   "Delete (67x25)",
+   "View (52x25)",
+   "Edit (52x25)",
+   "Delete (67x25)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a13-session-detail-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 90,
+   "18": 1,
+   "16.2": 1,
+   "12.6": 120,
+   "10.8": 82,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Search session ID, name, or username... (288x36)",
+   "Start date (147x38)",
+   "End date (147x38)",
+   "Min messages (115x38)",
+   "Max messages (115x36)",
+   "Advanced Filters ▼ (169x34)",
+   "Clear All (99x34)",
+   "View (52x25)",
+   "Edit (52x25)",
+   "Delete (67x25)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a13-session-detail-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 90,
+   "18": 1,
+   "16.2": 1,
+   "12.6": 120,
+   "10.8": 82,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Search session ID, name, or username... (318x36)",
+   "Start date (147x38)",
+   "End date (147x38)",
+   "Min messages (115x36)",
+   "Max messages (115x36)",
+   "Advanced Filters ▼ (169x34)",
+   "Clear All (99x34)",
+   "View (52x25)",
+   "Edit (52x25)",
+   "Delete (67x25)",
+   "View (52x25)",
+   "Edit (52x25)",
+   "Delete (67x25)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a14-live-monitor-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 22,
+   "27": 1,
+   "16.2": 1,
+   "12.6": 17,
+   "10.8": 6,
+   "21.6": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Overview (82x25)",
+   "Therapy bot (94x43)",
+   "Clinician dashboard (147x43)",
+   "Close menu (34x34)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Adverse Events (201x38)",
+   "Users (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a14-live-monitor-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 22,
+   "27": 1,
+   "16.2": 1,
+   "12.6": 17,
+   "10.8": 6,
+   "21.6": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Overview (82x25)",
+   "Therapy bot (105x25)",
+   "Clinician dashboard (165x25)",
+   "Close menu (34x34)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Adverse Events (201x38)",
+   "Users (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a15-live-session-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 32,
+   "18": 1,
+   "27": 1,
+   "16.2": 1,
+   "12.6": 31,
+   "10.8": 19,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.6,
+   12.96
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Overview (82x25)",
+   "Therapy bot (94x43)",
+   "Clinician dashboard (147x43)",
+   "Close menu (34x34)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Adverse Events (201x38)",
+   "Users (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a15-live-session-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 32,
+   "18": 1,
+   "27": 1,
+   "16.2": 1,
+   "12.6": 31,
+   "10.8": 19,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.6,
+   12.96
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Overview (82x25)",
+   "Therapy bot (105x25)",
+   "Clinician dashboard (165x25)",
+   "Close menu (34x34)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Adverse Events (201x38)",
+   "Users (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a16-analytics-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 59,
+   "27": 5,
+   "16.2": 13,
+   "12.6": 15,
+   "10.8": 6,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.96,
+   12.96
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Overview (82x25)",
+   "Therapy bot (94x43)",
+   "Clinician dashboard (147x43)",
+   "Close menu (34x34)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Adverse Events (201x38)",
+   "Users (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Usage (67x34)",
+   "Performance (112x34)",
+   "Cost (59x34)",
+   "Tools (67x34)",
+   "Start date (147x38)",
+   "End date (147x38)",
+   "Current Month (130x34)",
+   "Advanced Filters ▼ (169x34)",
+   "Clear All (99x34)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a16-analytics-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 59,
+   "27": 5,
+   "16.2": 13,
+   "12.6": 15,
+   "10.8": 6,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.96,
+   12.96
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Overview (82x25)",
+   "Therapy bot (105x25)",
+   "Clinician dashboard (165x25)",
+   "Close menu (34x34)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Adverse Events (201x38)",
+   "Users (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Usage (67x34)",
+   "Performance (112x34)",
+   "Cost (59x34)",
+   "Tools (67x34)",
+   "Start date (147x38)",
+   "End date (147x38)",
+   "Current Month (130x34)",
+   "Advanced Filters ▼ (169x34)",
+   "Clear All (99x34)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a17-assistant-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 15,
+   "18": 1,
+   "16.2": 1,
+   "12.6": 10,
+   "10.8": 6
+  },
+  "inputFontPx": [
+   12.6
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Ask about your data… (253x34)",
+   "Ask (71x34)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a17-assistant-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 15,
+   "18": 1,
+   "16.2": 1,
+   "12.6": 10,
+   "10.8": 6
+  },
+  "inputFontPx": [
+   12.6
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Summarize my caseload's recent activity. (326x31)",
+   "Ask about your data… (283x34)",
+   "Ask (71x34)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a18-users-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 35,
+   "16.2": 1,
+   "12.6": 145,
+   "10.8": 71,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations (201x38)",
+   "Adverse Events (201x38)",
+   "Users (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "User Sessions (201x38)",
+   "Mail (201x38)",
+   "Rate Limits (201x38)",
+   "Search by username or user ID... (194x36)",
+   "Filters (112x36)",
+   "View profile for demo_3bd4c236 (98x18)",
+   "View profile for demo_bd9774ce (98x18)",
+   "View profile for demo_e2a93043 (98x18)",
+   "View profile for demo_715783cb (98x18)",
+   "View profile for demo_bfd3a510 (98x18)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a18-users-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 35,
+   "16.2": 1,
+   "12.6": 145,
+   "10.8": 71,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations (201x38)",
+   "Adverse Events (201x38)",
+   "Users (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "User Sessions (201x38)",
+   "Mail (201x38)",
+   "Rate Limits (201x38)",
+   "System Prompts (201x38)",
+   "Knowledge Base (201x38)",
+   "Search by username or user ID... (224x36)",
+   "Filters (112x36)",
+   "View profile for demo_3bd4c236 (98x18)",
+   "View profile for demo_bd9774ce (98x18)",
+   "View profile for demo_e2a93043 (98x18)",
+   "View profile for demo_715783cb (98x18)",
+   "View profile for demo_bfd3a510 (98x18)",
+   "View profile for demo_7b04215f (98x18)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a19-system-config-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 42,
+   "16.2": 16,
+   "12.6": 81,
+   "10.8": 185,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.6,
+   12.96,
+   12.96,
+   12.96,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   12.6,
+   12.6,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Mail (201x38)",
+   "Rate Limits (201x38)",
+   "System Prompts (201x38)",
+   "Knowledge Base (201x38)",
+   "Evals (201x38)",
+   "Redaction Review (201x38)",
+   "Transcript Search (201x38)",
+   "Data Access (201x38)",
+   "Consent Versions (201x38)",
+   "Study Ops (201x38)",
+   "Sandbox Invites (201x38)",
+   "Qualtrics Sync (201x38)",
+   "Survey Data (201x38)",
+   "Export (201x38)",
+   "OpenAI Spend (201x38)",
+   "System Config (201x38)",
+   "Data Retention (201x38)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a19-system-config-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 45,
+   "16.2": 16,
+   "12.6": 81,
+   "10.8": 185,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.6,
+   12.96,
+   12.96,
+   12.96,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   12.6,
+   12.6,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   10.8,
+   12.96,
+   12.6,
+   12.6,
+   12.6,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Messages (201x38)",
+   "User Sessions (201x38)",
+   "Mail (201x38)",
+   "Rate Limits (201x38)",
+   "System Prompts (201x38)",
+   "Knowledge Base (201x38)",
+   "Evals (201x38)",
+   "Redaction Review (201x38)",
+   "Transcript Search (201x38)",
+   "Data Access (201x38)",
+   "Consent Versions (201x38)",
+   "Study Ops (201x38)",
+   "Sandbox Invites (201x38)",
+   "Qualtrics Sync (201x38)",
+   "Survey Data (201x38)",
+   "Export (201x38)",
+   "OpenAI Spend (201x38)",
+   "System Config (201x38)",
+   "Data Retention (201x38)",
+   "INPUT (14x14)",
+   "988 Suicide & Crisis Lifeline (304x36)",
+   "988 (304x36)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a20-adverse-events-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 16,
+   "16.2": 1,
+   "12.6": 10,
+   "10.8": 9,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.6
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Draft (59x29)",
+   "Submitted (92x31)",
+   "Closed (69x31)",
+   "All (46x31)",
+   "Filter by category (139x29)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "a20-adverse-events-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 16,
+   "16.2": 1,
+   "12.6": 10,
+   "10.8": 9,
+   "21.6": 1
+  },
+  "inputFontPx": [
+   12.6
+  ],
+  "smallTargets": [
+   "Open navigation menu (38x38)",
+   "Notifications (34x34)",
+   "MFA Security (34x34)",
+   "Portal tutorial (34x34)",
+   "Switch to dark mode (34x34)",
+   "Logout (67x32)",
+   "Close menu (34x34)",
+   "Triage (201x38)",
+   "Work Queue (201x38)",
+   "Live Monitoring (201x38)",
+   "Sessions (201x38)",
+   "Analytics (201x38)",
+   "Assistant (201x38)",
+   "Crisis Management (201x38)",
+   "Escalations 1 (201x38)",
+   "Adverse Events (201x38)",
+   "Caseload (201x38)",
+   "Messages (201x38)",
+   "Rate Limits (201x38)",
+   "Export (201x38)",
+   "Participant App (201x38)",
+   "Draft (59x29)",
+   "Submitted (92x31)",
+   "Closed (69x31)",
+   "All (46x31)",
+   "Filter by category (139x29)",
+   "Report feedback (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p01-login-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "32.4": 1,
+   "16.2": 1,
+   "12.6": 4,
+   "14.4": 1
+  },
+  "inputFontPx": [
+   12.96,
+   12.96
+  ],
+  "smallTargets": [
+   "Enter your username (274x43)",
+   "Enter your password (274x43)",
+   "988 Suicide & Crisis Lifeline: 988 (227x32)"
+  ],
+  "overflowX": []
+ },
+ "p01-login-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "32.4": 1,
+   "16.2": 1,
+   "12.6": 4,
+   "14.4": 1
+  },
+  "inputFontPx": [
+   12.96,
+   12.96
+  ],
+  "smallTargets": [
+   "Enter your username (304x43)",
+   "Enter your password (304x43)",
+   "988 Suicide & Crisis Lifeline: 988 (212x32)"
+  ],
+  "overflowX": []
+ },
+ "p02-login-keyboard-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "32.4": 1,
+   "16.2": 1,
+   "12.6": 4,
+   "14.4": 1
+  },
+  "inputFontPx": [
+   12.96,
+   12.96
+  ],
+  "smallTargets": [
+   "Enter your username (274x43)",
+   "Enter your password (274x43)",
+   "988 Suicide & Crisis Lifeline: 988 (227x32)"
+  ],
+  "overflowX": []
+ },
+ "p02-login-keyboard-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "32.4": 1,
+   "16.2": 1,
+   "12.6": 4,
+   "14.4": 1
+  },
+  "inputFontPx": [
+   12.96,
+   12.96
+  ],
+  "smallTargets": [
+   "Enter your username (304x43)",
+   "Enter your password (304x43)",
+   "988 Suicide & Crisis Lifeline: 988 (212x32)"
+  ],
+  "overflowX": []
+ },
+ "p03-home-new-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 2,
+   "21.6": 2,
+   "16.2": 1,
+   "10.8": 3,
+   "12.6": 8
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "Watch the short tour of the app (251x18)",
+   "988 (23x14)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p03-home-new-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 2,
+   "21.6": 2,
+   "16.2": 1,
+   "10.8": 3,
+   "12.6": 8
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "Watch the short tour of the app (251x18)",
+   "988 (23x14)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p04-consent-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 2,
+   "18": 1,
+   "21.6": 2,
+   "16.2": 1,
+   "10.8": 3,
+   "12.6": 20
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "Watch the short tour of the app (251x18)",
+   "988 (23x14)",
+   "INPUT (13x13)",
+   "Cancel (74x32)",
+   "I agree, start session (195x32)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p04-consent-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 2,
+   "18": 1,
+   "21.6": 2,
+   "16.2": 1,
+   "10.8": 3,
+   "12.6": 20
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "Watch the short tour of the app (251x18)",
+   "988 (23x14)",
+   "INPUT (13x13)",
+   "Cancel (74x32)",
+   "I agree, start session (195x32)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p05-home-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 2,
+   "21.6": 2,
+   "16.2": 1,
+   "10.8": 11,
+   "12.6": 15,
+   "14.4": 2
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p05-home-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 2,
+   "21.6": 2,
+   "16.2": 1,
+   "10.8": 11,
+   "12.6": 15,
+   "14.4": 2
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p06-home-scrolled-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 1,
+   "21.6": 1,
+   "16.2": 1,
+   "10.8": 10,
+   "12.6": 12,
+   "14.4": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "Mark done (80x36)",
+   "988 (23x14)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p06-home-scrolled-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 1,
+   "21.6": 1,
+   "16.2": 1,
+   "10.8": 11,
+   "12.6": 14,
+   "14.4": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "Mark done (80x36)",
+   "988 (23x14)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p07-checkin-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 2,
+   "21.6": 2,
+   "16.2": 2,
+   "10.8": 13,
+   "12.6": 21,
+   "14.4": 2
+  },
+  "inputFontPx": [
+   12.96,
+   12.6,
+   12.6
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "INPUT (288x16)",
+   "e.g. stress about exams, a difficult con (288x34)",
+   "e.g. feel a bit calmer, think through op (288x34)",
+   "Skip (52x32)",
+   "Start session (134x36)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p07-checkin-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 2,
+   "21.6": 2,
+   "16.2": 2,
+   "10.8": 10,
+   "12.6": 18,
+   "14.4": 1
+  },
+  "inputFontPx": [
+   12.96,
+   12.6,
+   12.6
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "988 (23x14)",
+   "INPUT (318x16)",
+   "e.g. stress about exams, a difficult con (318x34)",
+   "e.g. feel a bit calmer, think through op (318x34)",
+   "Skip (52x32)",
+   "Start session (134x36)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p08-session-settings-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 1,
+   "21.6": 2,
+   "16.2": 2,
+   "10.8": 43,
+   "12.6": 31
+  },
+  "inputFontPx": [
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.6
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "988 (23x14)",
+   "INPUT (14x14)",
+   "INPUT (14x14)",
+   "INPUT (14x14)",
+   "INPUT (14x14)",
+   "INPUT (14x14)",
+   "INPUT (14x14)",
+   "INPUT (14x14)",
+   "INPUT (14x14)",
+   "INPUT (14x14)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p08-session-settings-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 1,
+   "21.6": 2,
+   "16.2": 2,
+   "10.8": 43,
+   "12.6": 31
+  },
+  "inputFontPx": [
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.96,
+   12.6
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "988 (23x14)",
+   "INPUT (14x14)",
+   "INPUT (14x14)",
+   "INPUT (14x14)",
+   "INPUT (14x14)",
+   "INPUT (14x14)",
+   "INPUT (14x14)",
+   "INPUT (14x14)",
+   "INPUT (14x14)",
+   "INPUT (14x14)",
+   "INPUT (14x14)",
+   "INPUT (14x14)",
+   "Play Marin preview (32x32)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p09-voice-idle-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 1,
+   "21.6": 2,
+   "16.2": 3,
+   "12.6": 4,
+   "10.8": 3
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "Play soft background ambience (30x30)",
+   "BUTTON (40x40)",
+   "Microphone off, click to unmute (40x40)",
+   "Type a message... (205x43)",
+   "BUTTON (40x40)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p09-voice-idle-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 1,
+   "21.6": 2,
+   "16.2": 3,
+   "12.6": 4,
+   "10.8": 3
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "Play soft background ambience (30x30)",
+   "BUTTON (40x40)",
+   "Microphone off, click to unmute (40x40)",
+   "Type a message... (235x43)",
+   "BUTTON (40x40)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p10-voice-listening-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 3,
+   "21.6": 2,
+   "16.2": 3,
+   "12.6": 4,
+   "10.8": 3
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "Play soft background ambience (30x30)",
+   "BUTTON (40x40)",
+   "Microphone on, click to mute (40x40)",
+   "Type a message... (205x43)",
+   "BUTTON (40x40)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p10-voice-listening-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 3,
+   "21.6": 2,
+   "16.2": 3,
+   "12.6": 4,
+   "10.8": 3
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "Play soft background ambience (30x30)",
+   "BUTTON (40x40)",
+   "Microphone on, click to mute (40x40)",
+   "Type a message... (235x43)",
+   "BUTTON (40x40)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p11-voice-speaking-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 9,
+   "21.6": 2,
+   "16.2": 3,
+   "12.6": 4,
+   "10.8": 3
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "Play soft background ambience (30x30)",
+   "BUTTON (40x40)",
+   "Microphone off, click to unmute (40x40)",
+   "Type a message... (205x43)",
+   "BUTTON (40x40)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p11-voice-speaking-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 9,
+   "21.6": 2,
+   "16.2": 3,
+   "12.6": 4,
+   "10.8": 3
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "Play soft background ambience (30x30)",
+   "BUTTON (40x40)",
+   "Microphone off, click to unmute (40x40)",
+   "Type a message... (235x43)",
+   "BUTTON (40x40)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p12-chat-long-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 9,
+   "21.6": 1,
+   "16.2": 3,
+   "12.6": 3,
+   "10.8": 3
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "BUTTON (40x40)",
+   "Type a message... (252x43)",
+   "BUTTON (40x40)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p12-chat-long-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 9,
+   "21.6": 1,
+   "16.2": 3,
+   "12.6": 3,
+   "10.8": 3
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "BUTTON (40x40)",
+   "Type a message... (282x43)",
+   "BUTTON (40x40)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p13-chat-keyboard-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 9,
+   "14.4": 1,
+   "16.2": 2,
+   "12.6": 3
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "BUTTON (40x40)",
+   "Type a message... (252x43)",
+   "BUTTON (40x40)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p13-chat-keyboard-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 9,
+   "14.4": 1,
+   "16.2": 2,
+   "12.6": 3
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "BUTTON (40x40)",
+   "Type a message... (282x43)",
+   "BUTTON (40x40)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p14-breathing-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 3,
+   "21.6": 2,
+   "16.2": 3,
+   "12.6": 5,
+   "10.8": 3
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "BUTTON (40x40)",
+   "Type a message... (252x43)",
+   "BUTTON (40x40)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p14-breathing-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 3,
+   "21.6": 2,
+   "16.2": 3,
+   "12.6": 5,
+   "10.8": 3
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "BUTTON (40x40)",
+   "Type a message... (282x43)",
+   "BUTTON (40x40)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p15-grounding-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 4,
+   "27": 1,
+   "21.6": 1,
+   "16.2": 3,
+   "12.6": 5,
+   "10.8": 3
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "BUTTON (40x40)",
+   "Type a message... (252x43)",
+   "BUTTON (40x40)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p15-grounding-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 4,
+   "27": 1,
+   "21.6": 1,
+   "16.2": 3,
+   "12.6": 5,
+   "10.8": 3
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "BUTTON (40x40)",
+   "Type a message... (282x43)",
+   "BUTTON (40x40)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p16-crisis-resources-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 8,
+   "21.6": 1,
+   "16.2": 4,
+   "12.6": 11,
+   "10.8": 9
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "BUTTON (40x40)",
+   "Type a message... (252x43)",
+   "BUTTON (40x40)",
+   "Call 988 (125x36)",
+   "Text 988 (125x36)",
+   "Text HOME (257x36)",
+   "Call 801-422-3035 (257x36)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p16-crisis-resources-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 8,
+   "21.6": 1,
+   "16.2": 4,
+   "12.6": 11,
+   "10.8": 9
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "BUTTON (40x40)",
+   "Type a message... (282x43)",
+   "BUTTON (40x40)",
+   "Call 988 (140x36)",
+   "Text 988 (140x36)",
+   "Text HOME (287x36)",
+   "Call 801-422-3035 (287x36)",
+   "Call 1-800-662-4357 (287x36)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p17-thought-record-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 3,
+   "21.6": 1,
+   "16.2": 4,
+   "12.6": 5,
+   "10.8": 4,
+   "14.4": 1
+  },
+  "inputFontPx": [
+   12.96,
+   12.6
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "BUTTON (40x40)",
+   "Type a message... (252x43)",
+   "BUTTON (40x40)",
+   "Cancel (67x36)",
+   "Next (66x36)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p17-thought-record-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 3,
+   "21.6": 1,
+   "16.2": 4,
+   "12.6": 5,
+   "10.8": 4,
+   "14.4": 1
+  },
+  "inputFontPx": [
+   12.96,
+   12.6
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "BUTTON (40x40)",
+   "Type a message... (282x43)",
+   "BUTTON (40x40)",
+   "Cancel (67x36)",
+   "Next (66x36)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p18-scale-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 3,
+   "21.6": 1,
+   "16.2": 4,
+   "12.6": 8,
+   "10.8": 12
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "BUTTON (40x40)",
+   "Type a message... (252x43)",
+   "BUTTON (40x40)",
+   "Not at all (140x34)",
+   "Several days (140x34)",
+   "Not at all (140x34)",
+   "Several days (140x34)",
+   "Skip (52x32)",
+   "Done (66x36)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p18-scale-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 3,
+   "21.6": 1,
+   "16.2": 4,
+   "12.6": 8,
+   "10.8": 12
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "BUTTON (40x40)",
+   "Type a message... (282x43)",
+   "BUTTON (40x40)",
+   "Not at all (155x34)",
+   "Several days (155x34)",
+   "Not at all (155x34)",
+   "Several days (155x34)",
+   "Skip (52x32)",
+   "Done (66x36)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p19-safety-plan-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 3,
+   "21.6": 1,
+   "16.2": 4,
+   "12.6": 14,
+   "10.8": 9
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "BUTTON (40x40)",
+   "Type a message... (252x43)",
+   "BUTTON (40x40)",
+   "Call or text 988 — Suicide & Crisis Life (259x36)",
+   "Text HOME to 741741 — Crisis Text Line (259x36)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p19-safety-plan-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 3,
+   "21.6": 1,
+   "16.2": 4,
+   "12.6": 14,
+   "10.8": 9
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "BUTTON (40x40)",
+   "Type a message... (282x43)",
+   "BUTTON (40x40)",
+   "Call or text 988 — Suicide & Crisis Life (289x36)",
+   "Text HOME to 741741 — Crisis Text Line (289x18)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p20-journal-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 4,
+   "21.6": 1,
+   "16.2": 4,
+   "12.6": 5,
+   "10.8": 4
+  },
+  "inputFontPx": [
+   12.96,
+   12.6
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "BUTTON (40x40)",
+   "Type a message... (252x43)",
+   "BUTTON (40x40)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p20-journal-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 4,
+   "21.6": 1,
+   "16.2": 4,
+   "12.6": 5,
+   "10.8": 4
+  },
+  "inputFontPx": [
+   12.96,
+   12.6
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "BUTTON (40x40)",
+   "Type a message... (282x43)",
+   "BUTTON (40x40)",
+   "Keep it private (135x32)",
+   "Share with the AI (165x36)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p21-recap-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 5,
+   "21.6": 1,
+   "16.2": 4,
+   "12.6": 3,
+   "10.8": 9
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "BUTTON (40x40)",
+   "Type a message... (252x43)",
+   "BUTTON (40x40)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p21-recap-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 5,
+   "21.6": 1,
+   "16.2": 4,
+   "12.6": 3,
+   "10.8": 9
+  },
+  "inputFontPx": [
+   12.96
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "Copy (65x25)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "BUTTON (40x40)",
+   "Type a message... (282x43)",
+   "BUTTON (40x40)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p22-post-session-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 2,
+   "21.6": 2,
+   "16.2": 2,
+   "10.8": 9,
+   "12.6": 9
+  },
+  "inputFontPx": [
+   12.6
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "1 (36x36)",
+   "2 (36x36)",
+   "3 (36x36)",
+   "4 (36x36)",
+   "5 (36x36)",
+   "1 (36x36)",
+   "2 (36x36)",
+   "3 (36x36)",
+   "4 (36x36)",
+   "5 (36x36)",
+   "1 (36x36)",
+   "2 (36x36)",
+   "3 (36x36)",
+   "4 (36x36)",
+   "5 (36x36)",
+   "Skip (52x36)",
+   "Submit feedback (149x36)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p22-post-session-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 2,
+   "21.6": 2,
+   "16.2": 2,
+   "10.8": 9,
+   "12.6": 9
+  },
+  "inputFontPx": [
+   12.6
+  ],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "1 (36x36)",
+   "2 (36x36)",
+   "3 (36x36)",
+   "4 (36x36)",
+   "5 (36x36)",
+   "1 (36x36)",
+   "2 (36x36)",
+   "3 (36x36)",
+   "4 (36x36)",
+   "5 (36x36)",
+   "1 (36x36)",
+   "2 (36x36)",
+   "3 (36x36)",
+   "4 (36x36)",
+   "5 (36x36)",
+   "Skip (52x36)",
+   "Submit feedback (149x36)",
+   "Return to start (113x18)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p23-messages-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 1,
+   "21.6": 2,
+   "16.2": 1,
+   "10.8": 3,
+   "12.6": 7,
+   "14.4": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "988 (23x14)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p23-messages-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 1,
+   "21.6": 2,
+   "16.2": 1,
+   "10.8": 3,
+   "12.6": 7,
+   "14.4": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "988 (23x14)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p24-profile-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 11,
+   "27": 2,
+   "32.4": 1,
+   "21.6": 3,
+   "12.6": 32,
+   "16.2": 1,
+   "10.8": 8
+  },
+  "inputFontPx": [
+   12.96,
+   12.96,
+   12.96
+  ],
+  "smallTargets": [
+   "Watch the tour or read the guide (242x14)",
+   "Download everything we have about you (257x32)"
+  ],
+  "overflowX": []
+ },
+ "p24-profile-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 11,
+   "27": 2,
+   "32.4": 1,
+   "21.6": 3,
+   "12.6": 32,
+   "16.2": 1,
+   "10.8": 8
+  },
+  "inputFontPx": [
+   12.96,
+   12.96,
+   12.96
+  ],
+  "smallTargets": [
+   "Watch the tour or read the guide (242x14)",
+   "Download everything we have about you (257x32)"
+  ],
+  "overflowX": []
+ },
+ "p25-profile-scrolled-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 8,
+   "21.6": 1,
+   "12.6": 20,
+   "10.8": 8
+  },
+  "inputFontPx": [
+   12.96,
+   12.96,
+   12.96
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p25-profile-scrolled-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 8,
+   "21.6": 1,
+   "12.6": 20,
+   "10.8": 8
+  },
+  "inputFontPx": [
+   12.96,
+   12.96,
+   12.96
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p26-menu-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 1,
+   "21.6": 2,
+   "16.2": 1,
+   "10.8": 3,
+   "12.6": 9
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "Crisis Resources (185x40)",
+   "Messages (185x40)",
+   "Profile (185x40)",
+   "Logout (185x40)",
+   "988 (23x14)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p26-menu-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "13": 1,
+   "21.6": 2,
+   "16.2": 1,
+   "10.8": 3,
+   "12.6": 9
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Collapse header (36x36)",
+   "988 (21x12)",
+   "988lifeline.org (75x12)",
+   "Crisis Resources (185x40)",
+   "Messages (185x40)",
+   "Profile (185x40)",
+   "Logout (185x40)",
+   "988 (23x14)",
+   "Report a problem (45x38)"
+  ],
+  "overflowX": []
+ },
+ "p27-moderation-recovery-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "16.2": 1,
+   "12.6": 10
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "988 (23x14)",
+   "HOME to 741741 (234x32)",
+   "911 (23x14)",
+   "Try to reconnect (288x40)"
+  ],
+  "overflowX": []
+ },
+ "p27-moderation-recovery-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "16.2": 1,
+   "12.6": 10
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "988 (23x14)",
+   "HOME to 741741 (234x32)",
+   "911 (23x14)",
+   "Try to reconnect (318x40)"
+  ],
+  "overflowX": []
+ },
+ "p28-quiet-hours-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "16.2": 1,
+   "12.6": 8,
+   "10.8": 3
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "988 (23x14)",
+   "741741 (45x14)",
+   "801-422-2222 (219x32)",
+   "911 (19x12)",
+   "801-422-3035 (78x12)"
+  ],
+  "overflowX": []
+ },
+ "p28-quiet-hours-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "16.2": 1,
+   "12.6": 8,
+   "10.8": 3
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "988 (23x14)",
+   "741741 (45x14)",
+   "801-422-2222 (91x14)",
+   "911 (19x12)",
+   "801-422-3035 (78x12)"
+  ],
+  "overflowX": []
+ },
+ "p29-study-status-360": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "16.2": 1,
+   "12.6": 13,
+   "10.8": 3
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "988 (23x14)",
+   "741741 (45x14)",
+   "801-422-2222 (219x32)",
+   "james.gaskin@byu.edu (151x14)",
+   "nzb22@byu.edu (98x14)",
+   "911 (19x12)",
+   "801-422-3035 (78x12)"
+  ],
+  "overflowX": []
+ },
+ "p29-study-status-390": {
+  "bodyFontPx": 12.96,
+  "textSizes": {
+   "16.2": 1,
+   "12.6": 13,
+   "10.8": 3
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "988 (23x14)",
+   "741741 (45x14)",
+   "801-422-2222 (91x14)",
+   "james.gaskin@byu.edu (151x14)",
+   "nzb22@byu.edu (98x14)",
+   "911 (19x12)",
+   "801-422-3035 (78x12)"
+  ],
+  "overflowX": []
+ }
+}
