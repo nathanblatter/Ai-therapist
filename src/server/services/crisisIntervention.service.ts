@@ -477,53 +477,19 @@ export const SAFETY_PROTOCOL_GUIDANCE =
   RISK_CHECK_DIRECTIVE;
 
 /**
- * Page the on-call phone. THE single paging choke point for high-severity
- * crisis signals (session pipeline and thread-message scans). Message copy is
- * the caller's — it must already be PHI-free.
+ * Page the on-call phone with a message that is NOT tied to a therapy session
+ * (thread-message alerts: the caller owns its own sandbox short-circuit and
+ * its own once-per-message guard). Message copy is the caller's and must
+ * already be PHI-free.
  *
- * With a `session` option, the session-linked policy applies: sandbox-owned
- * sessions (synthetic demo caseloads, spec s7 #3) NEVER page the on-call —
- * the suppression is logged, but dashboard emits / sideband steering at the
- * caller stay ON, that being the product demoed. ('crisis_sms_suppressed_
- * sandbox' is not in the intervention_actions CHECK (054), so the suppression
- * rides 'external_api_called' with a detail payload.) A real page is followed
- * by a 'crisis_sms_alert' intervention log.
- *
- * FAIL TOWARD PAGING: the page is only suppressed on an affirmative
- * sandbox=true. A transient throw from the sandbox lookup (or from any
- * suppression logging) must never swallow a REAL page, so the check is
- * isolated in its own try/catch and the suppression log stays out of the
- * paging critical path entirely (fire-and-forget).
- *
- * Without `session` (e.g. thread-message alerts, which have no therapy
- * session to link), the message is sent as-is with no suppression check or
- * intervention log — the caller owns its own sandbox short-circuit.
+ * Session-linked pages do not come through here: they go through
+ * crisisPaging.service (pageHighRisk / pageVendorTermination), which owns the
+ * sandbox suppression, the per-participant de-duplication across sessions,
+ * the wording, and the 'crisis_sms_alert' / suppression rows.
  */
-export async function pageOnCall(message: string, session?: { sessionId: string; riskScore: number }): Promise<void> {
+export async function pageOnCall(message: string): Promise<void> {
   const { sendCrisisAlert } = await import('./crisisAlert.service.js');
-  if (!session) {
-    await sendCrisisAlert(message);
-    return;
-  }
-  const { sessionId, riskScore } = session;
-  let suppressed = false;
-  try {
-    const { sessionSuppressesCrisisPaging } = await import('./suppression.js');
-    suppressed = (await sessionSuppressesCrisisPaging(sessionId)) === true;
-  } catch (err) {
-    console.error('[Crisis] sandbox check failed; paging anyway (fail toward paging):', err);
-  }
-  if (suppressed) {
-    console.log(`[Crisis] SMS page suppressed for sandbox session ${sessionId}`);
-    logInterventionAction(sessionId, 'external_api_called', {
-      suppressed: 'crisis_sms_alert',
-      reason: 'sandbox',
-      riskScore,
-    }).catch((err) => console.error('[Crisis] failed to log sandbox SMS suppression:', err));
-    return;
-  }
   await sendCrisisAlert(message);
-  await logInterventionAction(sessionId, 'crisis_sms_alert', { riskScore });
 }
 
 /**
@@ -545,16 +511,14 @@ async function executeHighRiskResponse(sessionId: string, riskScore: number): Pr
       emergencyProtocol: 'activated',
     });
 
-    // Page a human — the dashboard socket alert only works if someone is
-    // looking at the dashboard. Fire-and-forget; suppression/logging policy
-    // lives in pageOnCall.
-    // Deep-link straight to the session (AdminApp reads #session=<id> on
-    // load); APP_BASE_URL keeps the link pointed at the right environment.
-    const adminBase = (process.env.APP_BASE_URL ?? 'https://ai-therapist.nathanblatter.com').trim().replace(/\/+$/, '');
-    pageOnCall(
-      `URGENT: AI-Therapist HIGH crisis flag\nSession ${sessionId.substring(0, 16)}… — risk ${riskScore}/100\n${adminBase}/admin#session=${encodeURIComponent(sessionId)}`,
-      { sessionId, riskScore },
-    ).catch((err) => console.error('Error sending crisis SMS:', err));
+    // Page a human: the dashboard socket alert only works if someone is
+    // looking at the dashboard. Fire-and-forget. Whether this becomes an SMS,
+    // or is folded into a page the on-call already has for this participant,
+    // is crisisPaging.service's decision (sandbox suppression, wording and
+    // the audit row live there too).
+    import('./crisisPaging.service.js')
+      .then((m) => m.pageHighRisk(sessionId, riskScore))
+      .catch((err) => console.error('Error sending crisis SMS:', err));
 
     // Steer the live model into a structured safety assessment.
     try {

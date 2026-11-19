@@ -17,7 +17,9 @@ const {
   isDemoAccountSessionMock,
   getSessionAccessInfoMock,
   enqueueWorkItemMock,
+  pageHighTurnWithoutReflagMock,
 } = vi.hoisted(() => ({
+  pageHighTurnWithoutReflagMock: vi.fn(async () => null),
   analyzeMessageRiskMock: vi.fn(),
   flagSessionCrisisMock: vi.fn(),
   logInterventionActionMock: vi.fn(),
@@ -56,6 +58,7 @@ vi.mock('../db/index.js', () => ({
   getCaseworkerIdsForClient: vi.fn(async () => []),
 }));
 vi.mock('./workQueue.service.js', () => ({ enqueueWorkItem: enqueueWorkItemMock }));
+vi.mock('./crisisPaging.service.js', () => ({ pageHighTurnWithoutReflag: pageHighTurnWithoutReflagMock }));
 
 const { runCrisisPipeline } = await import('./crisisPipeline.service.js');
 
@@ -161,6 +164,38 @@ describe('runCrisisPipeline — flag matrix', () => {
     risk(70, 'medium'); // +15 > +10
     const r = await runCrisisPipeline(TURN, 'realtime');
     expect(r.flagged).toBe(true);
+  });
+
+  // A recovery session is stamped high at the inherited score, or at 100, so
+  // the re-flag rule never fires in it. The paging policy is asked about every
+  // high turn the rule lets pass; it pages when the stored flag is only that
+  // stamp (crisisPaging.service.test.ts).
+  it('a high turn in an already-high session that is not re-flagged is handed to the paging policy', async () => {
+    getSessionCrisisStateMock.mockResolvedValue({
+      crisis_flagged: true,
+      crisis_severity: 'high',
+      crisis_risk_score: 100,
+    });
+    risk(90, 'high');
+    const r = await runCrisisPipeline(TURN, 'realtime');
+    expect(r.flagged).toBe(false);
+    expect(flagSessionCrisisMock).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(pageHighTurnWithoutReflagMock).toHaveBeenCalledWith('chat_1', 90));
+  });
+
+  it('is not asked when the turn re-flags (that path pages itself), nor for a turn below high', async () => {
+    getSessionCrisisStateMock.mockResolvedValue({
+      crisis_flagged: true,
+      crisis_severity: 'high',
+      crisis_risk_score: 75,
+    });
+    risk(95, 'high'); // +20: re-flag, executeGraduatedResponse pages
+    await runCrisisPipeline(TURN, 'realtime');
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 95);
+    risk(60, 'medium');
+    await runCrisisPipeline(TURN, 'realtime');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(pageHighTurnWithoutReflagMock).not.toHaveBeenCalled();
   });
 });
 
