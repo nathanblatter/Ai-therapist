@@ -174,7 +174,7 @@ describe('updateMessage', () => {
     expect(clientSql()).toEqual(['BEGIN', 'UPDATE', 'COMMIT']);
     const [sql, params] = clientQueryMock.mock.calls[1] as [string, unknown[]];
     expect(sql).toMatch(
-      /SET content = \$1,\s+content_redacted = \$2,\s+embedding = NULL,\s+metadata = COALESCE\(metadata, '\{\}'::jsonb\) \|\| \$3::jsonb\s+WHERE message_id = \$4\s+RETURNING \*/,
+      /SET content = \$1,\s+content_redacted = \$2,\s+embedding = NULL,\s+metadata = \(COALESCE\(metadata, '\{\}'::jsonb\) - 'redaction_error' - 'redaction_rejected'\) \|\| \$3::jsonb\s+WHERE message_id = \$4\s+RETURNING \*/,
     );
     expect(params).toEqual(['Alice said hi', '[NAME] said hi', JSON.stringify(meta), 5]);
     expect(releaseMock).toHaveBeenCalledTimes(1);
@@ -203,6 +203,22 @@ describe('updateMessage', () => {
     await expect(updateMessage(5, 'Alice said hi', 'content', {})).rejects.toThrow('model down');
     expect(connectMock).not.toHaveBeenCalled();
     expect(clientQueryMock).not.toHaveBeenCalled();
+  });
+
+  it('therapist edit: a REJECTED redaction (refusal) saves the edit with content_redacted NULL and marks the row (ai-therapist-382)', async () => {
+    redactMock.mockRejectedValue(
+      Object.assign(new Error('Redaction output rejected: refusal'), { name: 'RedactionRejectedError' }),
+    );
+    clientQueryMock.mockImplementation(async (sql: string) =>
+      sql.startsWith('UPDATE') ? { rows: [ROW] } : { rows: [] },
+    );
+    await expect(updateMessage(5, 'I have my pills ready', 'content', { edited_by: 'dr_t' })).resolves.toBe(ROW);
+    const [, params] = clientQueryMock.mock.calls[1] as [string, unknown[]];
+    expect(params[0]).toBe('I have my pills ready');
+    expect(params[1]).toBeNull();
+    const meta = JSON.parse(params[2] as string);
+    expect(meta).toMatchObject({ edited_by: 'dr_t', redaction_error: 'Redaction output rejected: refusal' });
+    expect(meta.redaction_rejected).toEqual(expect.any(String));
   });
 
   it('researcher edit: writes only content_redacted and never runs redaction', async () => {

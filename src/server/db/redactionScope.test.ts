@@ -8,7 +8,7 @@ vi.mock('../services/redaction.service.js', () => ({
   redactPHIBatch: vi.fn(async () => new Map<number, string>()),
 }));
 
-import { redactableRowsSql, REDACTABLE_ROWS_SQL } from './redactionScope.js';
+import { notRejectedSql, redactableRowsSql, REDACTABLE_ROWS_SQL } from './redactionScope.js';
 import { getRedactionStatusBreakdown, getRedactionStatus } from './adminSessions.queries.js';
 import { redactSession } from '../services/sessionRedaction.service.js';
 import { findEndedSessionsWithRedactionGaps } from '../services/contentWipe.service.js';
@@ -84,5 +84,25 @@ describe('redaction-scope agreement across call sites', () => {
     expect(scopeOf(statusSql).length).toBeGreaterThan(0);
     expect(scopeOf(redactSql).length).toBeGreaterThan(0);
     expect(new Set(scopeOf(statusSql))).toEqual(new Set(scopeOf(redactSql)));
+  });
+});
+
+// ai-therapist-382: a rejected redaction (refusal or reply instead of the
+// message) must not be re-sent by the automatic jobs, or the same text would be
+// refused again every 15 minutes, forever.
+describe('notRejectedSql', () => {
+  it('guards NULL metadata with COALESCE (NULL ? key is NULL, which would drop the row)', () => {
+    expect(notRejectedSql()).toBe("NOT (COALESCE(metadata, '{}'::jsonb) ? 'redaction_rejected')");
+    expect(notRejectedSql('m')).toBe("NOT (COALESCE(m.metadata, '{}'::jsonb) ? 'redaction_rejected')");
+  });
+
+  it('redactSession and the 15-minute sweep both exclude rejected rows', async () => {
+    queryMock.mockResolvedValue({ rows: [] });
+    await redactSession('s1');
+    expect(String(queryMock.mock.calls[0][0])).toContain(notRejectedSql());
+    queryMock.mockReset();
+    queryMock.mockResolvedValue({ rows: [] });
+    await findEndedSessionsWithRedactionGaps();
+    expect(String(queryMock.mock.calls[0][0])).toContain(notRejectedSql('m'));
   });
 });

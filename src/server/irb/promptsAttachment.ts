@@ -1119,7 +1119,13 @@ function buildItems(): Item[] {
   if (!REDACTION_BATCH_INSTRUCTIONS.startsWith(REDACTION_PROMPT)) {
     throw new Error('irb prompts attachment: batch redaction prompt no longer extends the base prompt');
   }
-  add('note', 'For whole-session batches, the following is appended to the prompt above, verbatim:');
+  add(
+    'note',
+    'Every redaction request (a whole-session batch, or a single message re-sent on its own when its batch output ' +
+      'fails the automatic check that it is a redaction of the original) appends the following to the prompt ' +
+      'above, verbatim. A message whose output still fails that check is never stored as redacted: its original ' +
+      'is kept, it is excluded from the content wipe, and it is counted as a redaction error for staff review.',
+  );
   add('pre', block(REDACTION_BATCH_INSTRUCTIONS.slice(REDACTION_PROMPT.length)));
 
   add('h2', `C.4 Session-name prompt (${SESSION_NAME_MODEL})`);
