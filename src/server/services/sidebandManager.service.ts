@@ -50,7 +50,7 @@ import { insertMessagesBatch } from '../db/index.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { emitCrisisResources } from './crisisResources.js';
 import { isToolTimeoutError, toolTimeoutMs } from './toolTimeouts.js';
-import { reportVoiceToolOutcome, voiceOverlayEvent, withScreenNote } from './toolOverlays.js';
+import { clearVoiceToolOutcomes, reportVoiceToolOutcome, voiceOverlayEvent, withScreenNote } from './toolOverlays.js';
 import { buildRecoverySpeakFirstNudge, type RecoveryCrisisContact } from '../../shared/recoveryPrompt.js';
 
 /**
@@ -3005,6 +3005,10 @@ export class SidebandManager {
    * can prevent the final event from ever arriving, leaving usage unconfirmed.
    */
   async disconnect(sessionId: string, opts: { graceMs?: number } = {}): Promise<void> {
+    // Every end path comes through here (both backends): the session's kept
+    // overlay outcomes are no longer asked for (the browser's gate resets on
+    // teardown) and hold participant content (toolOverlays.ts).
+    clearVoiceToolOutcomes(sessionId);
     const delegate = this.delegateFor(sessionId);
     if (delegate) return delegate.disconnect(sessionId, opts);
     this.endedSessions.add(sessionId);

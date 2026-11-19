@@ -172,6 +172,32 @@ describe('when the server message never arrives', () => {
     expect(lastPending()).toEqual([]);
   });
 
+  // PR #85 review: an HTTP answer about a DIFFERENT call (a stale response, a
+  // proxy or cache mix-up) must not settle or open this one.
+  it('an HTTP outcome for another call id is ignored: the screener stays unshown and pending', async () => {
+    const { gate, open, fetchMock, lastPending } = makeGate(async () =>
+      outcome('s_other', 'administer_scale', 'shown', { scale: 'phq2' }),
+    );
+    gate.onModelCall('s1', 'administer_scale', { scale: 'gad2' });
+    await vi.advanceTimersByTimeAsync(VOICE_OVERLAY_FALLBACK_MS);
+    expect(fetchMock).toHaveBeenCalledWith('s1');
+    expect(open).not.toHaveBeenCalled();
+    expect(lastPending().map((p) => p.callId)).toEqual(['s1']);
+    // Its own outcome still settles it later.
+    gate.onOutcome(outcome('s1', 'administer_scale', 'hidden'));
+    await vi.advanceTimersByTimeAsync(VOICE_OVERLAY_CONFIRM_DEADLINE_MS);
+    expect(open).not.toHaveBeenCalled();
+    expect(lastPending()).toEqual([]);
+  });
+
+  it('an HTTP outcome for another call id does not stand in for a display-only overlay either', async () => {
+    const { gate, open } = makeGate(async () => outcome('t_other', 'start_thought_record', 'hidden'));
+    gate.onModelCall('t1', 'start_thought_record', {});
+    await vi.advanceTimersByTimeAsync(VOICE_OVERLAY_FALLBACK_MS);
+    // No answer about t1: shown after the bound, as for a lost message.
+    expect(open).toHaveBeenCalledWith('start_thought_record', {}, {});
+  });
+
   it('an outcome on the socket before the bound means no HTTP request at all', async () => {
     const { gate, fetchMock } = makeGate();
     gate.onModelCall('s1', 'administer_scale', {});

@@ -13,6 +13,14 @@ import { sessionLimitNotice, type SessionLimitNotice } from '../lib/sessionLimit
 import ExerciseOverlay, { type ActiveExercise } from './ExerciseOverlay';
 import ToolOverlays, { type ToolUI, type SafetyPlanData } from './ToolOverlays';
 import PendingToolNotice from './PendingToolNotice';
+import {
+  emptySlot,
+  presentOverlay,
+  replaceOverlay,
+  closeOverlay,
+  dropHeld,
+  type OverlaySlot,
+} from '../lib/overlaySlot';
 import PostSessionScreen, {
   type PostSessionData,
   type SessionRecapData,
@@ -315,7 +323,21 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCheckInOpen, setIsCheckInOpen] = useState(false);
   const [activeExercise, setActiveExercise] = useState<ActiveExercise | null>(null);
-  const [toolUI, setToolUI] = useState<ToolUI | null>(null);
+  const [toolUI, setToolUIState] = useState<ToolUI | null>(null);
+  // One overlay slot (lib/overlaySlot.ts): while the crisis-resource card is on
+  // screen, an overlay a tool call asks for is held until the participant
+  // closes the card, unless it is the safety plan (which carries the crisis
+  // lines itself). Kept in a ref so handlers registered in an earlier render
+  // see the slot as it is now.
+  const toolSlotRef = useRef<OverlaySlot<ToolUI>>(emptySlot<ToolUI>());
+  const applyToolSlot = (next: OverlaySlot<ToolUI>) => {
+    toolSlotRef.current = next;
+    setToolUIState(next.shown);
+  };
+  /** What the app or the server puts up directly: the crisis card, a clear. */
+  const setToolUI = (next: ToolUI | null) => applyToolSlot(replaceOverlay(toolSlotRef.current, next));
+  /** An overlay a tool call asked for (voice gate or chat reply). */
+  const presentToolUI = (next: ToolUI) => applyToolSlot(presentOverlay(toolSlotRef.current, next));
   // Artifacts the participant chose to keep/share during the session, for
   // "Download my work" (ai-therapist-76) — never the raw transcript.
   const [sessionRecap, setSessionRecap] = useState<SessionRecapData | null>(null);
@@ -1616,6 +1638,7 @@ export default function App() {
     isTearingDownRef.current = false;
     handledToolCallsRef.current = new Set();
     voiceOverlayGateRef.current?.reset();
+    applyToolSlot(dropHeld(toolSlotRef.current));
     // Always: caption rows are grouped by position on the SESSION timeline,
     // which restarts at zero here. Carrying rows across would let the first
     // words of the recovery session merge into the last row of the terminated
@@ -2342,6 +2365,7 @@ export default function App() {
     isTearingDownRef.current = false;
     handledToolCallsRef.current = new Set();
     voiceOverlayGateRef.current?.reset();
+    applyToolSlot(dropHeld(toolSlotRef.current));
     grokRowsRef.current = new Map();
     captionRowsRef.current = { user: [], assistant: [] };
     moderationHandledRef.current = false;
@@ -2838,8 +2862,9 @@ export default function App() {
 
   async function stopSession() {
     setActiveExercise(null);
-    // No overlay may open after the call ends; pending ones are dropped.
+    // No overlay may open after the call ends; pending and held ones are dropped.
     voiceOverlayGateRef.current?.reset();
+    toolSlotRef.current = dropHeld(toolSlotRef.current);
     // A vendor cut (ai-therapist-293) keeps the crisis resource card: this
     // teardown runs underneath the recovery screen, and clearing the card here
     // is how a card the server had just opened used to vanish with the call.
@@ -3492,11 +3517,11 @@ export default function App() {
       return { shown: true };
     },
     start_values_sort: async () => {
-      setToolUI({ kind: 'values_sort' });
+      presentToolUI({ kind: 'values_sort' });
       return { shown: true };
     },
     start_fear_ladder: async () => {
-      setToolUI({ kind: 'fear_ladder' });
+      presentToolUI({ kind: 'fear_ladder' });
       return { shown: true };
     },
     show_resource_card: async (args: unknown) => {
@@ -3505,12 +3530,12 @@ export default function App() {
       return { shown: true };
     },
     start_thought_record: async () => {
-      setToolUI({ kind: 'thought_record' });
+      presentToolUI({ kind: 'thought_record' });
       return { shown: true };
     },
     show_journaling_prompt: async (args: unknown) => {
       const a = (args ?? {}) as { prompt?: string };
-      setToolUI({ kind: 'journal', prompt: a.prompt || 'What would you like to put into words right now?' });
+      presentToolUI({ kind: 'journal', prompt: a.prompt || 'What would you like to put into words right now?' });
       return { shown: true };
     },
     create_custom_worksheet: async (args: unknown) => {
@@ -3526,7 +3551,7 @@ export default function App() {
       if (!a.title || !Array.isArray(a.sections) || a.sections.length === 0) {
         return { shown: false };
       }
-      setToolUI({
+      presentToolUI({
         kind: 'custom_worksheet',
         title: a.title,
         intro: a.intro ?? null,
@@ -3537,19 +3562,19 @@ export default function App() {
     display_session_recap: async (args: unknown) => {
       const a = (args ?? {}) as { focus?: string; techniques?: string[]; takeaway?: string };
       const recap = { focus: a.focus || 'Today’s conversation', techniques: a.techniques, takeaway: a.takeaway || '' };
-      setToolUI({ kind: 'recap', ...recap });
+      presentToolUI({ kind: 'recap', ...recap });
       setSessionRecap(recap); // kept for "Download my work" (ai-therapist-76)
       return { shown: true };
     },
     create_safety_plan: async (args: unknown, opts?: { unconfirmed?: boolean }) => {
       const plan = (args ?? {}) as SafetyPlanData;
-      setToolUI({ kind: 'safety_plan', plan, ...(opts?.unconfirmed ? { unconfirmed: true } : {}) });
+      presentToolUI({ kind: 'safety_plan', plan, ...(opts?.unconfirmed ? { unconfirmed: true } : {}) });
       setSessionSafetyPlan(plan); // kept for "Download my work" (ai-therapist-76)
       return { shown: true };
     },
     administer_scale: async (args: unknown) => {
       const a = (args ?? {}) as { scale?: string };
-      if (a.scale) setToolUI({ kind: 'scale', scale: a.scale });
+      if (a.scale) presentToolUI({ kind: 'scale', scale: a.scale });
       return { shown: Boolean(a.scale) };
     },
     end_session: async () => {
@@ -3762,7 +3787,7 @@ export default function App() {
       {/* Wave-2 tool surfaces: resource card, thought record, journal, recap, safety plan, screeners */}
       <ToolOverlays
         ui={toolUI}
-        onClose={() => setToolUI(null)}
+        onClose={() => applyToolSlot(closeOverlay(toolSlotRef.current))}
         onShareText={(text) => {
           sendTextMessage(text);
           // Only journal uses onShareText; keep it for "Download my work" (ai-therapist-76).
