@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 
 const { queryMock, warnMock } = vi.hoisted(() => ({ queryMock: vi.fn(), warnMock: vi.fn() }));
 vi.mock('../config/db.js', () => ({ pool: { query: queryMock, on: vi.fn() } }));
@@ -80,6 +80,15 @@ describe('salted derivation', () => {
     vi.stubEnv(SAFETY_IDENTIFIER_SALT_ENV, 'a-guessed-salt');
     expect(candidates.find((id) => safetyIdentifierForUser(id) === salted)).toBeUndefined();
     expect(salted).not.toContain('1234');
+  });
+
+  it('is HMAC-SHA256 keyed by the salt over the seed (not a hash of salt and seed concatenated)', () => {
+    vi.stubEnv(SAFETY_IDENTIFIER_SALT_ENV, 'salt-stage');
+    const hmac = (seed: string) => createHmac('sha256', 'salt-stage').update(seed, 'utf8').digest('hex');
+    expect(safetyIdentifierForUser(7)).toBe(hmac('user:7'));
+    expect(safetyIdentifierForParticipantCookie('abc')).toBe(hmac('participant:abc'));
+    expect(deriveSafetyIdentifier('anon-session:s1')).toBe(hmac('anon-session:s1'));
+    expect(safetyIdentifierForUser(7)).not.toBe(sha256('salt-stageuser:7'));
   });
 
   it('a whitespace-only salt counts as unset', () => {
