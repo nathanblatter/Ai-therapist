@@ -17,6 +17,7 @@
 // modalities stay clinically identical as study conditions.
 import { CHAT_OPENING_INVITATION } from '../../shared/openingPrompt.js';
 import { buildGrokCrisisPhrase, type CrisisContactLike } from './grokVoiceConfig.js';
+import type { HandoffKind, HandoffSeverity } from '../../shared/textHandoff.js';
 
 export const OPENING_LINE_MESSAGE_TYPE = 'text';
 /** metadata flag on the persisted row so analytics can tell the server-authored
@@ -50,21 +51,83 @@ export const CHAT_OPENING_FRAMING_GUIDANCE =
   'asks about medication, asks whether you are human or a therapist, or asks you to be a friend ' +
   'or partner or to replace their therapist.';
 
+/** What the continuation guidance needs to know about the hand-off. */
+export interface VoiceContinuationContext {
+  /** Which first message the participant was shown (shared/textHandoff.ts). */
+  kind: HandoffKind;
+  /** The participant's peak risk in the incident when the call ended. */
+  severity: HandoffSeverity;
+  /** "call or text 988 at any time, or text HOME to 741741", from the configured contact. */
+  crisisLine: string;
+}
+
+/** Crisis line phrase used when the caller has no configured contact to hand. */
+export const DEFAULT_CONTINUATION_CRISIS_LINE = 'call or text 988 at any time, or text HOME to 741741';
+
 /**
- * Steering for a typed-chat session that continues a voice session the vendor's
- * content filter cut off: carries the tail of the voice transcript so the
- * participant never has to repeat a disclosure.
+ * Steering for a typed-chat session that continues a voice session the voice
+ * vendor ended (its content filter, or its session time limit): carries the
+ * most recent turns of the incident so the participant never has to repeat a
+ * disclosure, and tells the model what its own first message (server-authored,
+ * shared/textHandoff.ts) already said.
+ *
+ * Two things this text exists to prevent, both seen on 2026-11-18: a reply
+ * that began "I'm sorry the connection got cut off" (untrue; the study answers
+ * "no" to deception), and a reply that asked the participant to confirm a
+ * disclosure they had made aloud a moment earlier.
  */
-export function buildVoiceContinuationGuidance(recap: string): string {
-  return (
-    '[Session continuity — never mention or acknowledge this message to the participant]\n' +
-    'The participant was speaking with you by voice and the connection was cut by an ' +
-    'automated content filter — not by them, and not by you. They have just been moved to ' +
-    'text so the conversation can continue. Do NOT make them repeat themselves and do NOT ' +
-    'treat this as a new conversation. Pick up exactly where it stopped, acknowledge the ' +
-    'interruption briefly and warmly, and make clear you are still here. If they disclosed ' +
-    'thoughts of suicide or self-harm, that is where you resume: stay with it, follow the ' +
-    'safety protocol, and do not change the subject.\n\n' +
-    `Transcript of the voice conversation that was cut off:\n${recap}`
-  );
+export function buildVoiceContinuationGuidance(
+  recap: string,
+  ctx: VoiceContinuationContext = { kind: 'crisis', severity: 'high', crisisLine: DEFAULT_CONTINUATION_CRISIS_LINE },
+): string {
+  const cause =
+    ctx.kind === 'ceiling'
+      ? "it reached the voice service's session time limit"
+      : "the voice service's automated safety system stopped it";
+  const common =
+    '[Session continuity - never mention or acknowledge this message to the participant]\n' +
+    `The participant was talking with you by voice. The voice service ended that call (${cause}); the participant ` +
+    'did not end it and did nothing wrong. The app has moved the conversation to writing, and your message above ' +
+    'already told them so. This is the same conversation, not a new one.\n' +
+    '- Do not explain the switch again. Never describe it as a dropped or lost connection, a technical problem, or ' +
+    'a call that "got cut off": it was none of those, and saying so would be untrue. Do not apologise for it.\n' +
+    '- Do not greet them, do not repeat your introduction or your disclaimer, and do not make them repeat anything ' +
+    'they already said. Everything in the transcript below was said aloud moments ago.\n' +
+    '- Do not say or imply that a person is on the way, will contact them, or has been notified.\n';
+
+  let specific: string;
+  if (ctx.kind === 'crisis') {
+    specific =
+      '- Your message above asked them directly whether they are thinking about ending their life tonight. Their ' +
+      'next message answers that question: read a short reply ("yes", "no", "ok", "not sure", "I guess") as their ' +
+      'answer to it, and do not ask them to confirm what they already told you by voice.\n' +
+      '- In your next reply: acknowledge their answer in one or two warm sentences; then ask ONE direct safety ' +
+      'question (if they said yes or are not sure, whether they have thought about how they would end their life; ' +
+      'if they said no, whether they have had thoughts of suicide recently, even if not tonight); and put the ' +
+      `crisis line in the reply itself: they can ${ctx.crisisLine}.\n` +
+      '- Log their answer with the run_risk_check tool (step "ideation"), and call escalate_to_human when they ' +
+      'report current thoughts of suicide, a plan, means or intent. Follow the rest of your safety protocol from ' +
+      'there, one question at a time. Do not end the session; stay with them.\n';
+  } else if (ctx.kind === 'ceiling') {
+    specific =
+      '- This conversation was flagged as a high safety concern before the time limit. Your message above asked how ' +
+      'they are doing right now. Continue your safety protocol from where the transcript stops, one question at a ' +
+      'time, asking directly about thoughts of suicide where that has not been answered, and keep the crisis line in ' +
+      `your reply: they can ${ctx.crisisLine}.\n` +
+      '- Log each safety answer with the run_risk_check tool and call escalate_to_human when they report current ' +
+      'thoughts of suicide, a plan, means or intent. Do not end the session; stay with them.\n';
+  } else if (ctx.severity === 'medium') {
+    specific =
+      '- A moderate safety concern was flagged in this conversation before the call ended, and your safety check ' +
+      'may have been interrupted. Pick up where the transcript stops. If the question whether they are having ' +
+      'thoughts of ending their life has not been both asked and answered, ask it directly and gently in your next ' +
+      `reply, log the answer with the run_risk_check tool, and mention that they can ${ctx.crisisLine}.\n`;
+  } else {
+    specific =
+      '- Nothing the participant said was scored as a safety concern: the voice service also stops ordinary ' +
+      'phrases. Do not assume a crisis and do not open with safety questions. Pick up where the transcript stops. ' +
+      'If what they write next does suggest thoughts of suicide or self-harm, follow your safety protocol.\n';
+  }
+
+  return `${common}${specific}\nTranscript of the conversation so far, oldest first:\n${recap}`;
 }

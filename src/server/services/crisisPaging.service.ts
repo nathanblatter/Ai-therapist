@@ -383,7 +383,7 @@ export function buildVendorCutMessage(
       'URGENT: AI-Therapist voice session ENDED BY THE VENDOR FILTER during a HIGH crisis flag',
       `Why: VENDOR CUT, not a new risk score. The participant lost the assistant mid-conversation; ` +
         `their risk before the cut was HIGH${score}.`,
-      `Session ${shortId(sessionId)}. The app tries to reconnect them under a new session id; ` +
+      `Session ${shortId(sessionId)}. The app moves them to typed chat under a new session id; ` +
         'further cuts in the next 15 minutes are recorded, not paged.',
       followUpLine(ctx),
       'Review the transcript and consider reaching out.',
@@ -395,8 +395,8 @@ export function buildVendorCutMessage(
     peak.severity === 'medium'
       ? `Why: VENDOR CUT, NOT a high risk score. Risk before the cut was MEDIUM${score}, below the paging threshold.`
       : 'Why: VENDOR CUT. The risk level for this session could NOT be read, so treat it as possibly serious.',
-    `Session ${shortId(sessionId)}. The participant lost the assistant mid-conversation; the app tries to ` +
-      'reconnect them under a new session id. You are paged again at once if their risk rises.',
+    `Session ${shortId(sessionId)}. The participant lost the voice call mid-conversation; the app moves them ` +
+      'to typed chat under a new session id. You are paged again at once if their risk rises.',
     followUpLine(ctx),
     'Review the transcript.',
     adminLink(sessionId),
@@ -453,7 +453,7 @@ export function buildVendorCeilingMessage(
 ): string {
   return lines(
     'URGENT: AI-Therapist voice session hit the vendor session ceiling during a HIGH crisis flag',
-    'Why: VENDOR SESSION LIMIT, not a new risk score. The app is reconnecting them automatically.',
+    'Why: VENDOR SESSION LIMIT, not a new risk score. The app moves them to typed chat under a new session id.',
     `Session ${shortId(sessionId)}`,
     followUpLine(ctx),
     'Review the transcript and consider reaching out.',

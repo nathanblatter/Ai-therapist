@@ -1739,7 +1739,7 @@ export class SidebandManager {
   private onUserTurn(sessionId: string, text: string, startMs: number, endMs: number): void {
     this.emitTranscript(sessionId, { role: 'user', text, final: true });
 
-    void (async () => {
+    const work = (async () => {
       let messageId: string | number | null = null;
       try {
         const inserted = await insertMessagesBatch([
@@ -1775,6 +1775,64 @@ export class SidebandManager {
         console.error(`[Live] Crisis pipeline failed for ${sessionId.substring(0, 12)}...:`, err);
       }
     })();
+    this.trackUserTurnWork(sessionId, work);
+  }
+
+  /**
+   * Participant turns of each session that are still being persisted and
+   * scored. Kept after the session's own state is gone: the vendor can close a
+   * session a second or two after the participant's last words, while the risk
+   * assessor is still reading them, and the text hand-off that follows has to
+   * know how that turn scored before it chooses its wording
+   * (textHandoff.service).
+   */
+  private userTurnWork = new Map<string, Set<Promise<void>>>();
+
+  private trackUserTurnWork(sessionId: string, work: Promise<void>): void {
+    const set = this.userTurnWork.get(sessionId) ?? new Set<Promise<void>>();
+    set.add(work);
+    this.userTurnWork.set(sessionId, set);
+    void work.finally(() => {
+      set.delete(work);
+      if (set.size === 0 && this.userTurnWork.get(sessionId) === set) this.userTurnWork.delete(sessionId);
+    });
+  }
+
+  /**
+   * Wait until this voice session's participant turns have been persisted and
+   * scored, for at most `timeoutMs`. First waits (up to `closeWaitMs` of the
+   * budget) for the sideband to have seen the session close, which is what
+   * flushes a half-spoken final turn into the pipeline: the browser can ask
+   * for the hand-off a few milliseconds before the server's own socket
+   * delivers the same close.
+   *
+   * Resolves true when nothing is pending, false when the budget ran out with
+   * work still in flight (the caller then treats the risk as not yet known).
+   * A session this process has no record of resolves true at once. Never
+   * throws.
+   */
+  async waitForUserTurnsScored(sessionId: string, timeoutMs: number, closeWaitMs = 1_000): Promise<boolean> {
+    const deadline = Date.now() + Math.max(0, timeoutMs);
+    const closeDeadline = Math.min(deadline, Date.now() + Math.max(0, closeWaitMs));
+    while (Date.now() < closeDeadline) {
+      const state = this.sessions.get(sessionId);
+      if (!state || state.finalized) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    for (;;) {
+      const pending = this.userTurnWork.get(sessionId);
+      if (!pending || pending.size === 0) return true;
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        Promise.allSettled([...pending]),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, remaining);
+        }),
+      ]);
+      clearTimeout(timer);
+    }
   }
 
   /** A complete assistant turn. Persisted and surfaced; also moderated. */

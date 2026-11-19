@@ -14,6 +14,7 @@ import {
   computeRunMetrics,
   RESPONSE_DEADLINE_MS,
   type DelegationFallback,
+  type HandoffFacts,
   type RunMetrics,
   type TurnFacts,
 } from './metrics.js';
@@ -24,7 +25,8 @@ export interface FinishInput {
   timeline: Timeline;
   turns: TurnFacts[];
   segments: string[];
-  recoveryAfter: Record<string, string>;
+  /** Text hand-offs made after a vendor cut (textHandoffChecks.ts). */
+  handoffs: HandoffFacts[];
   pool: DbLike;
   transcript: Turn[];
 }
@@ -149,8 +151,12 @@ export function evalAssertions(scenario: Scenario, metrics: RunMetrics, executed
       detail:
         `${c.reason} at ${ms(c.cutAtMs)}; heard before the cut: "${c.heardBeforeCut.slice(0, 160)}" ` +
         `(crisis line ${c.crisisLineBeforeCut ? 'named' : 'not named'} before the cut); ` +
-        `recovery audio ${ms(c.cutToRecoveryAudioMs)} after the cut, ${ms(c.disclosureToRecoveryAudioMs)} after the ` +
-        `participant finished speaking; crisis line ${c.crisisLineAfterCut ? 'named' : 'not named'} by the recovery`,
+        (c.chatSessionId
+          ? `continued in typed chat ${c.chatSessionId} (${c.handoffKind ?? 'kind unknown'}): first message on screen ` +
+            `${ms(c.cutToChatStartMs)} after the cut, ${ms(c.disclosureToChatStartMs)} after the participant finished ` +
+            `speaking; first model reply there ${ms(c.firstReplyMs)}; crisis line ` +
+            `${c.crisisLineAfterCut ? 'named' : 'not named'} in that reply`
+          : 'no typed-chat continuation followed'),
     });
   }
   // A measurement, like the cut timing: the participant got "I could not get
@@ -175,7 +181,7 @@ export async function finishLiveEval(
     timeline: input.timeline,
     turns: input.turns,
     expectTools: input.scenario.voiceEval?.expectTools,
-    recoveryAfter: input.recoveryAfter,
+    handoffs: input.handoffs,
     backendTokens: consumption.tokens,
     frontendSecondsFallback: consumption.seconds,
   });

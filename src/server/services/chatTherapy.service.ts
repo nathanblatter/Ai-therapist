@@ -297,16 +297,138 @@ function recordChatLatency(sessionId: string, turnIndex: number, startedAt: Date
   }).catch((err) => console.error('[ChatTherapy] Failed to record turn latency (non-fatal):', err));
 }
 
+// ---------------------------------------------------------------------------
+// Narrow crisis turn (ai-therapist-356, step 1b)
+// ---------------------------------------------------------------------------
+// The first participant turn after a crisis text hand-off answers a question
+// the app itself asked ("Are you thinking about ending your life tonight?").
+// An ordinary crisis turn makes about three and a half model calls before the
+// participant sees a word: the reply waits behind each tool round trip
+// (run_risk_check, escalate_to_human, the resource card), measured at 5.7 to
+// 8.3 s on 2026-11-18. That is a long silence straight after "yes".
+//
+// On this one turn the reply is written first, in a single model call with
+// tools withheld, and the tool calls the protocol requires are made
+// immediately afterwards in a second call the participant does not wait for.
+// Nothing is dropped: the answer is still logged with run_risk_check, the
+// model still decides on escalate_to_human, and both are in the history
+// before the next turn is built (sendMessage waits for them).
+
+/** Tools the documentation call may use. The resource card is not among them:
+ *  after a hand-off the crisis card is pinned by the browser itself. */
+const NARROW_TURN_DOCUMENTATION_TOOLS = new Set(['run_risk_check', 'escalate_to_human']);
+
+/** Longest a following turn waits for the documentation call to land. */
+const NARROW_TURN_DOCUMENTATION_WAIT_MS = 10_000;
+
+/** Instruction for the documentation call. Sent as its last input item; not
+ *  kept in the session history. */
+export const NARROW_TURN_DOCUMENTATION_PROMPT =
+  '[Documentation step - never visible to the participant] Your reply above has already been sent. Now record ' +
+  'this turn with your tools and write no reply text. Call run_risk_check once to log the answer the participant ' +
+  'just gave to your question about ending their life (step "ideation", their answer in their own words, and ' +
+  'your clinical risk_band). If their answer or the transcript shows current thoughts of suicide, a plan, means ' +
+  'or intent, also call escalate_to_human.';
+
+const narrowTurnDocumentation = new Map<string, Promise<void>>();
+
+export interface SendMessageOptions {
+  /** Answer this turn on the narrow path described above. Set by the chat
+   *  route for the first participant turn of a crisis text hand-off only. */
+  narrowCrisisTurn?: boolean;
+}
+
+async function waitForNarrowTurnDocumentation(sessionId: string): Promise<void> {
+  const pending = narrowTurnDocumentation.get(sessionId);
+  if (!pending) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    pending,
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, NARROW_TURN_DOCUMENTATION_WAIT_MS);
+    }),
+  ]);
+  clearTimeout(timer);
+}
+
+/** Test hook: resolves when a session's narrow-turn documentation has landed. */
+export async function _narrowTurnDocumentationSettled(sessionId: string): Promise<void> {
+  await narrowTurnDocumentation.get(sessionId);
+}
+
+/**
+ * The tool calls a narrow turn owes, made after its reply was returned. The
+ * model is required to call a tool (`tool_choice: 'required'`) from the two it
+ * is given; each call runs through the same logged executor as any chat tool
+ * call, and the call items and their outputs are appended to the session
+ * history so later turns see that the step was logged.
+ */
+async function documentNarrowTurn(input: {
+  sessionId: string;
+  client: ResponsesClient;
+  model: string;
+  history: ChatHistoryItem[];
+  tools: Array<Record<string, unknown>>;
+  safetyIdentifier: string | undefined;
+}): Promise<void> {
+  const { sessionId, client, model, history } = input;
+  const response = await client.responses.create({
+    model,
+    input: [...history, { role: 'system', content: NARROW_TURN_DOCUMENTATION_PROMPT }],
+    store: false,
+    ...(input.safetyIdentifier ? { safety_identifier: input.safetyIdentifier } : {}),
+    tools: input.tools,
+    tool_choice: 'required',
+  });
+  recordChatUsage(sessionId, model, response.usage);
+
+  const output = response.output ?? [];
+  const calls = output.filter((o) => o.type === 'function_call' && o.name && o.call_id);
+  if (calls.length === 0) {
+    console.warn(`[ChatTherapy] Narrow-turn documentation for ${sessionId.substring(0, 12)}... made no tool call`);
+    return;
+  }
+  // Reasoning items must travel with their function calls (see the tool loop
+  // in sendMessage); any text the model wrote anyway is dropped, since the
+  // participant's reply has already been sent.
+  const items: ChatHistoryItem[] = output.filter((o) => o.type !== 'message') as unknown as ChatHistoryItem[];
+  const { executeLoggedToolCall } = await import('./toolExecution.helpers.js');
+  for (const call of calls) {
+    let args: Record<string, unknown> = {};
+    try {
+      args = JSON.parse(call.arguments || '{}') as Record<string, unknown>;
+    } catch {
+      console.error(`[ChatTherapy] Unparseable arguments for ${call.name}; executing with {}`);
+    }
+    const { result } = await executeLoggedToolCall(sessionId, call.name!, args, call.call_id!, 'chat');
+    items.push({ type: 'function_call_output', call_id: call.call_id, output: JSON.stringify(result) });
+  }
+  // The session may have ended while this ran; never resurrect its history.
+  if (conversationHistory.get(sessionId) === history) history.push(...items);
+  console.log(
+    `[ChatTherapy] Session ${sessionId.substring(0, 12)}... - narrow turn documented ` +
+      `(${calls.map((c) => c.name).join(', ')})`,
+  );
+}
+
 /**
  * Send a message and get AI response
  * @param {string} sessionId - Session identifier
  * @param {string} userMessage - User's message
  * @returns {Promise<ChatTurnResult>} - Assistant text + executed tool events
  */
-export async function sendMessage(sessionId: string, userMessage: string): Promise<ChatTurnResult> {
+export async function sendMessage(
+  sessionId: string,
+  userMessage: string,
+  options: SendMessageOptions = {},
+): Promise<ChatTurnResult> {
   const turnStartedAt = new Date();
   const apiKey = await getOpenAIKey();
   const client = new OpenAI({ apiKey }) as unknown as ResponsesClient;
+
+  // A narrow turn's tool calls may still be landing (see documentNarrowTurn):
+  // they belong in the history before this turn is built on it.
+  await waitForNarrowTurnDocumentation(sessionId);
 
   // Get the conversation history, lazily rebuilding it from the database when
   // this process has never seen the session (ai-therapist-222: server restart
@@ -400,10 +522,14 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
     const toolEvents: ChatToolEvent[] = [];
     const turnItems: ChatHistoryItem[] = []; // raw output + tool-output items to persist in history
     let toolCallCount = 0;
-    let response = await callModel('auto');
+    // Narrow turn (options.narrowCrisisTurn): the reply is written in ONE
+    // model call with tools withheld, and the tool calls that turn owes are
+    // made straight after it, off the participant's clock.
+    const narrow = options.narrowCrisisTurn === true;
+    let response = await callModel(narrow ? 'none' : 'auto');
     recordChatUsage(sessionId, chatModel, response.usage);
 
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    for (let round = 0; !narrow && round < MAX_TOOL_ROUNDS; round++) {
       const calls = (response.output ?? []).filter((o) => o.type === 'function_call' && o.name && o.call_id);
       if (calls.length === 0) break;
 
@@ -461,6 +587,24 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
 
     // Update conversation history
     conversationHistory.set(sessionId, messages);
+
+    if (narrow) {
+      const documentationTools = tools.filter((t) => NARROW_TURN_DOCUMENTATION_TOOLS.has(String(t['name'])));
+      if (documentationTools.length > 0) {
+        const work = documentNarrowTurn({
+          sessionId,
+          client,
+          model: chatModel,
+          history: messages,
+          tools: documentationTools,
+          safetyIdentifier,
+        }).catch((err) => console.error('[ChatTherapy] Narrow-turn documentation failed (non-fatal):', err));
+        narrowTurnDocumentation.set(sessionId, work);
+        void work.finally(() => {
+          if (narrowTurnDocumentation.get(sessionId) === work) narrowTurnDocumentation.delete(sessionId);
+        });
+      }
+    }
 
     console.log(
       `[ChatTherapy] Session ${sessionId.substring(0, 12)}... - Message exchanged` +

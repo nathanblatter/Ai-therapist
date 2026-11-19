@@ -146,8 +146,8 @@ export function isAudiblePcm(pcm: Buffer, threshold = 500): boolean {
   return Math.sqrt(sum / samples) >= threshold;
 }
 
-/** Close reasons the browser answers with a recovery start rather than an
- *  error: the content filter, and the vendor ceiling on a crisis session (the
+/** Close reasons the browser answers with the text hand-off rather than an
+ *  ordinary end: the content filter, and the vendor ceiling on a crisis session (the
  *  runner checks the crisis part; the transport just reports the reason). */
 export function isRecoverableClose(reason: string | null): reason is 'content' | 'expired' {
   return reason === 'content' || reason === 'expired';
@@ -270,8 +270,10 @@ export class LiveVoiceSession implements VoiceTransport {
     const sdp = pc.localDescription?.sdp;
     if (!sdp) throw new Error('werift produced no local SDP');
 
-    // A recovery start is the browser's answer to a content-filter cut
-    // (App.tsx startRecoveryVoiceSession): same route, `recovery: true`, and
+    // A recovery start was the browser's answer to a content-filter cut and
+    // still is where typed chat is disabled (App.tsx
+    // startRecoveryVoiceSession; otherwise the cut goes to the text hand-off,
+    // ai-therapist-356): same route, `recovery: true`, and
     // the server swaps in the narrow crisis prompt with no history.
     // CRAWL/WALK: prior turns ride in session.input (voice/sessionInput.ts).
     vs.timing.postSentAt = Date.now();
@@ -773,8 +775,8 @@ export class LiveVoiceSession implements VoiceTransport {
       if (this.closed && isRecoverableClose(this.closeReason)) {
         // OpenAI's content filter ended the session (docs/gpt-live.md,
         // incident 2026-09-11), or the vendor ceiling expired it
-        // (ai-therapist-281). Report what was said; the runner decides whether
-        // to recover, as the browser would.
+        // (ai-therapist-281). Report what was said; the runner decides what
+        // follows, as the browser would.
         this.terminatedBy = this.closeReason;
         const text = joinFragments(this.assistantFrags);
         this.assistantFrags = [];

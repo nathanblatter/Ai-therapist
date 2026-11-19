@@ -15,14 +15,24 @@ interface ChatLogProps {
   /** Fired (throttled) when the participant scrolls back up through earlier
    *  messages — Phase 2 engagement telemetry; no-op when unset/disabled. */
   onScrollBack?: () => void;
+  /** Keep the newest message in view as messages arrive. Set for a text
+   *  hand-off chat (ai-therapist-356), which opens underneath the captions of
+   *  the voice call it continues: its first message must not start off screen. */
+  followLatest?: boolean;
 }
 
 // A participant is "scrolled back" once they are this far above the bottom.
 const SCROLL_BACK_PX = 300;
 const SCROLL_BACK_THROTTLE_MS = 15_000;
 
-export default function ChatLog({ messages, assistantStream, onScrollBack }: ChatLogProps) {
+export default function ChatLog({ messages, assistantStream, onScrollBack, followLatest = false }: ChatLogProps) {
   const lastScrollBackAt = React.useRef(0);
+  const latestRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    if (!followLatest) return;
+    latestRef.current?.scrollIntoView({ block: 'end' });
+  }, [followLatest, messages.length]);
 
   function handleScroll(e: React.UIEvent<HTMLDivElement>) {
     if (!onScrollBack) return;
@@ -83,6 +93,7 @@ export default function ChatLog({ messages, assistantStream, onScrollBack }: Cha
           </div>
         </div>
       )}
+      <div ref={latestRef} aria-hidden="true" />
     </div>
   );
 }

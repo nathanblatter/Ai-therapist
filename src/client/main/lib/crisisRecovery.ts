@@ -7,6 +7,13 @@
 // Nothing here touches the DOM, React state or the network. App.tsx reads the
 // answers and acts on them.
 
+import {
+  HANDOFF_NEUTRAL_FIRST_MESSAGE_NO_VOICE,
+  handoffSpokenBridge,
+  type HandoffReason,
+  type HandoffStartPayload,
+} from '../../../shared/textHandoff';
+
 /** `error.code` the Live API sends when its moderation stops a generation. */
 export const LIVE_CONTENT_FILTER_CODE = 'content_filter';
 
@@ -47,21 +54,33 @@ export function crisisEmergencyMarksCrisis(payload: { severity?: unknown } | nul
 }
 
 export type RecoveryStep =
-  /** Bring the voice agent back on a recovery session. */
-  | 'voice'
-  /** Voice is spent or unavailable: continue the same conversation in typed chat. */
+  /** Continue the same conversation in typed chat (the text hand-off). */
   | 'text'
+  /** No typed chat in this deployment: bring the voice agent back on a recovery session. */
+  | 'voice'
   /** Nothing left to continue in: the crisis screen stays up with the numbers. */
   | 'unavailable';
 
 /**
- * Where a cut conversation goes next.
+ * Where a conversation goes when the voice vendor ends the call.
  *
- * This is the whole terminal ladder, and it has no rung that ends on a dead
- * screen: voice up to the cap, then typed chat, then (only when this
- * deployment has no typed chat) the crisis screen with 988, the text line and
- * 911, which stays up. A failed chat start lands on the same screen with a
- * retry button (the 'failed' stage in App.tsx).
+ * Straight to typed chat (ai-therapist-356). Until 2026-11-19 the first two
+ * rungs were new voice sessions on the same service, which was cut again the
+ * moment the participant repeated what they had said: in the owner's test on
+ * 2026-11-18 the conversation only continued after three cuts. The vendor must
+ * never be the one who ends a crisis conversation, so a cut now goes to the
+ * pipeline the vendor's voice filter does not end.
+ *
+ * The recovery voice session survives for one case only: a deployment with
+ * typed chat switched off (`features.chat_enabled: false`). There a voice
+ * session on the narrow crisis prompt, capped at `maxVoiceAttempts`, is still
+ * better than a screen with nothing but numbers; after the cap the crisis
+ * screen with 988, the text line and 911 stays up.
+ *
+ * A typed chat that fails to START is not a reason to go back to voice: the
+ * participant sees the crisis lines and a retry button (the 'failed' stage of
+ * ModerationRecoveryScreen), never a blank screen and never another call that
+ * will hang up on them.
  */
 export function nextRecoveryStep(input: {
   voiceEnabled: boolean;
@@ -69,10 +88,105 @@ export function nextRecoveryStep(input: {
   voiceAttemptsSpent: number;
   maxVoiceAttempts: number;
 }): RecoveryStep {
-  if (input.voiceEnabled && input.voiceAttemptsSpent < input.maxVoiceAttempts) return 'voice';
   if (input.chatEnabled) return 'text';
+  if (input.voiceEnabled && input.voiceAttemptsSpent < input.maxVoiceAttempts) return 'voice';
   return 'unavailable';
 }
+
+/** The hand-off reason the server is told, from the close (or the socket
+ *  backstop's `content_filter` / `expired`). Anything that is not the vendor's
+ *  session ceiling is its content filter. */
+export function handoffReasonFromClose(reason: unknown): HandoffReason {
+  return reason === 'expired' ? 'expired' : 'content';
+}
+
+/** What the browser does with the answer to its hand-off chat start. */
+export type HandoffStartOutcome =
+  | {
+      /** The written conversation is open: show it. */
+      screen: 'chat';
+      sessionId: string;
+      /** First message to show; the server's when it authored one. */
+      firstMessage: string;
+      /** False when the server sent no first message (an older server during a
+       *  deploy, or a session it could not link): the line is then shown as an
+       *  app notice, since it is not in the stored conversation. */
+      serverAuthored: boolean;
+      handoff: Pick<HandoffStartPayload, 'kind' | 'quickReplies' | 'voiceReturnAllowed' | 'spokenBridge'>;
+    }
+  | {
+      /** It could not be opened: the crisis lines and a retry button. */
+      screen: 'failed';
+      reason: string;
+    };
+
+/**
+ * Read the response to POST /api/chat/start for a hand-off.
+ *
+ * Every way the start can go wrong ends on the same screen: the static crisis
+ * card and a retry button. There is no outcome that leaves the participant on
+ * a blank screen or the post-session screen.
+ *
+ * `status` 0 stands for "no response at all" (network failure, timeout), with
+ * `detail` saying which.
+ */
+export function readHandoffStart(status: number, body: unknown, detail?: string): HandoffStartOutcome {
+  if (status < 200 || status >= 300) {
+    return { screen: 'failed', reason: status === 0 ? `no response${detail ? `: ${detail}` : ''}` : `status ${status}` };
+  }
+  const data = (body ?? {}) as {
+    sessionId?: unknown;
+    alreadyActive?: unknown;
+    opening?: unknown;
+    handoff?: Partial<HandoffStartPayload> | null;
+  };
+  // `alreadyActive` means the server handed back some other session, which is
+  // not one this conversation can safely continue in.
+  if (data.alreadyActive === true) return { screen: 'failed', reason: 'blocked by an active session' };
+  if (typeof data.sessionId !== 'string' || !data.sessionId) return { screen: 'failed', reason: 'no session id' };
+
+  const handoff = data.handoff ?? null;
+  const kind = handoff?.kind === 'crisis' || handoff?.kind === 'ceiling' || handoff?.kind === 'neutral' ? handoff.kind : null;
+  if (kind && typeof data.opening === 'string' && data.opening.trim()) {
+    return {
+      screen: 'chat',
+      sessionId: data.sessionId,
+      firstMessage: data.opening,
+      serverAuthored: true,
+      handoff: {
+        kind,
+        quickReplies: Array.isArray(handoff?.quickReplies)
+          ? handoff.quickReplies.filter((q): q is string => typeof q === 'string' && q.trim().length > 0)
+          : [],
+        voiceReturnAllowed: handoff?.voiceReturnAllowed === true,
+        spokenBridge:
+          typeof handoff?.spokenBridge === 'string' && handoff.spokenBridge
+            ? handoff.spokenBridge
+            : handoffSpokenBridge(kind),
+      },
+    };
+  }
+  // A chat session exists but the server said nothing about the hand-off.
+  // Continue in it with the neutral line and no assumptions: no suicide
+  // question from the app, no offer of a voice call.
+  return {
+    screen: 'chat',
+    sessionId: data.sessionId,
+    firstMessage: HANDOFF_NEUTRAL_FIRST_MESSAGE_NO_VOICE,
+    serverAuthored: false,
+    handoff: {
+      kind: 'neutral',
+      quickReplies: [],
+      voiceReturnAllowed: false,
+      spokenBridge: handoffSpokenBridge('neutral'),
+    },
+  };
+}
+
+/** Longest the browser waits for the hand-off chat start before showing the
+ *  retry screen. The server holds the request up to 3 s for the last spoken
+ *  turn to be scored (textHandoff.service HANDOFF_SCORING_WAIT_MS). */
+export const HANDOFF_START_TIMEOUT_MS = 12_000;
 
 /** How long the recovery screen stays up waiting for the returning assistant's
  *  first words before it comes down anyway. A healthy recovery session speaks

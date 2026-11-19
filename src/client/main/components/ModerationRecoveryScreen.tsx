@@ -8,23 +8,24 @@
 // post-session screen. We hung up on someone in crisis.
 //
 // This screen is what they see instead: a short, calm hold with crisis resources
-// on it while the client brings the VOICE agent straight back on a crisis-support
-// prompt and puts them back into the conversation, still talking. It is up for
-// seconds, not minutes. Text is only reached after the voice attempts are spent.
+// on it while the conversation is moved to typed chat (ai-therapist-356), where
+// the vendor's voice filter cannot end it. It is normally up for well under a
+// few seconds: the chat that replaces it already has its first message. If the
+// chat cannot be opened it stays, with the same numbers and a retry button.
 //
-// The recovery session carries no history by design — restating the disclosure
-// that tripped the filter is the most likely way to trip it again — so this
-// screen's copy is what tells the participant the drop was not their fault.
-// It is presentation only; the recovery itself lives in App.tsx.
+// The 'voice' stage is the older path, kept for a deployment with typed chat
+// switched off: a new voice session on a crisis-support prompt.
+//
+// It is presentation only; the hand-off itself lives in App.tsx.
 import { Heart, Loader, Phone, MessageSquare, AlertTriangle, RefreshCw } from 'react-feather';
 import type { CrisisContact } from '../../../shared/systemConfig';
 
 export type ModerationRecoveryStage =
-  /** Bringing the voice agent back. The expected path, and the common one. */
-  | 'voice'
-  /** Voice attempts are spent; falling back to continuing in text. */
+  /** Moving the conversation to typed chat. The expected path. */
   | 'text'
-  /** Everything failed. Resources stay up; the participant can retry. */
+  /** No typed chat in this deployment: bringing the voice agent back. */
+  | 'voice'
+  /** The typed chat could not be opened. Resources stay up; the participant can retry. */
   | 'failed'
   /** No modality left to continue in (text disabled for this deployment). */
   | 'unavailable';
@@ -74,12 +75,14 @@ export default function ModerationRecoveryScreen({ stage, crisisContact, onRetry
             </h2>
           </div>
 
-          {/* "The call was cut off", not "the connection dropped": it was ended
-              by an automated system on the voice service, and the study answers
-              "no" to deception (Q-SYS2). Same wording the browser speaks aloud
-              (shared/recoveryPrompt.ts). */}
+          {/* What happened, said truthfully (the study answers "no" to
+              deception, Q-SYS2): the voice service stopped the call. Never "the
+              connection dropped". The recovery voice path keeps the wording its
+              spoken line uses (shared/recoveryPrompt.ts). */}
           <p className="text-sm text-gray-700 mb-2">
-            The call was cut off — that wasn&apos;t your fault, and nothing you said was wrong.
+            {stage === 'voice'
+              ? 'The call was cut off — that wasn\u2019t your fault, and nothing you said was wrong.'
+              : 'The voice call has stopped. That wasn\u2019t your fault, and nothing you said was wrong.'}
           </p>
 
           {stage === 'voice' && (
@@ -92,7 +95,7 @@ export default function ModerationRecoveryScreen({ stage, crisisContact, onRetry
           {stage === 'text' && (
             <p className="text-sm text-gray-700 mb-4 flex items-center gap-2" role="status">
               <Loader size={14} className="animate-spin text-indigo-600 flex-shrink-0" aria-hidden="true" />
-              The call won&apos;t hold right now, so I&apos;m bringing us back in writing instead. Stay with me.
+              I&apos;m moving us to writing so we can keep going. One moment.
             </p>
           )}
 
@@ -101,8 +104,8 @@ export default function ModerationRecoveryScreen({ stage, crisisContact, onRetry
               <p className="text-sm text-amber-900 flex items-start gap-2">
                 <AlertTriangle size={14} className="text-amber-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
                 <span>
-                  I couldn&apos;t get us reconnected just now. You haven&apos;t done anything wrong. You can try again
-                  below — and the numbers underneath are staffed right now, tonight, whatever time it is.
+                  I couldn&apos;t open our written conversation just now. You haven&apos;t done anything wrong. You can
+                  try again below, and the numbers underneath are answered right now, tonight, whatever time it is.
                 </span>
               </p>
             </div>
@@ -159,10 +162,10 @@ export default function ModerationRecoveryScreen({ stage, crisisContact, onRetry
             <button
               type="button"
               onClick={onRetry}
-              className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl px-4 py-3"
+              className="w-full min-h-[44px] flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl px-4 py-3"
             >
               <RefreshCw size={16} aria-hidden="true" />
-              Try to reconnect
+              Try again
             </button>
           )}
         </div>
