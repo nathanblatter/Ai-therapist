@@ -168,7 +168,7 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
   };
 
   // Shared display vocabulary (src/client/shared/severity): medium is amber
-  // and score bands mirror the server's 75/50/25 thresholds.
+  // and score bands mirror the server's thresholds (src/shared/riskBands.ts).
   const formatDate = formatDateTime;
   const getSeverityColor = (severity: string | undefined) => severityBadgeClass(severity?.toLowerCase());
   const getStatusColor = (status: string | undefined) => statusBadgeClass(status);

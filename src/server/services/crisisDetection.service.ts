@@ -15,6 +15,7 @@ import {
   type OpenAIErrorInfo,
 } from '../utils/openaiErrors.js';
 import { assessorIncidentOpen, noteAssessorSuccess, noteAssessorFailure } from './riskAssessorHealth.service.js';
+import { RISK_BANDS, riskSeverityForScore } from '../../shared/riskBands.js';
 
 const log = createLogger('crisisDetection');
 
@@ -1004,8 +1005,8 @@ Context judgment matters more than keywords:
 - "negated": "I'm not suicidal", "I'd never hurt myself" → score 0-15, severity none (unless other signals contradict).
 - "bystander": talking about someone ELSE's loss, past struggles or ordinary worry about them → score 0-20, severity none/low (their own grief may still warrant low). Someone else's CURRENT suicidal crisis is different and is scored by the "Third party at risk" rule below.
 - "genuine" acute distress WITHOUT ideation → 15-30, low. Distress alone is hopelessness, worthlessness, exhaustion, "can't take it" — e.g. "I just feel hopeless and worthless lately" is 15-30, low. It is NOT passive ideation: reserve that label for an expressed wish to die, disappear, not exist, not wake up, not be here, or not have to go on. Never score distress alone as medium.
-- "genuine" passive ideation → 50-65, medium, ALWAYS at least 50. C-SSRS counts a passive wish to be dead as ideation, not as distress, so it must reach medium — never score it low. This includes INDIRECT and euphemistic phrasing, which is how participants usually say it first: "it would be easier if I didn't have to do this anymore", "I wouldn't mind not waking up", "I'm tired of being here", "I just want it all to be over", "everyone would be fine without me", "I don't want to be here anymore", "no point going on". Hedges and softeners ("I think", "sometimes", "just", "kind of", "maybe") do NOT downgrade it — tentative wording is the normal way passive ideation is disclosed. Absence of a plan, method, or intent does NOT downgrade it either; that is the difference between passive ideation and active ideation, which scores higher still.
-- "genuine" active ideation without plan → 60-75, high.
+- "genuine" passive ideation → 50-60, medium, ALWAYS at least 50. C-SSRS counts a passive wish to be dead as ideation, not as distress, so it must reach medium — never score it low. This includes INDIRECT and euphemistic phrasing, which is how participants usually say it first: "it would be easier if I didn't have to do this anymore", "I wouldn't mind not waking up", "I'm tired of being here", "I just want it all to be over", "everyone would be fine without me", "I don't want to be here anymore", "no point going on". Hedges and softeners ("I think", "sometimes", "just", "kind of", "maybe") do NOT downgrade it — tentative wording is the normal way passive ideation is disclosed. Absence of a plan, method, or intent does NOT downgrade it either; that is the difference between passive ideation and active ideation, which scores higher still.
+- "genuine" active ideation without plan → 65-75, high, ALWAYS at least 65. Active ideation is thinking about suicide, about killing themselves or about ending their life, as opposed to a passive wish to be dead or gone: "I've been thinking about ending my life a lot lately", "I keep thinking about suicide and it's getting louder", "I'm thinking about killing myself". No plan, method or intent is needed for this band, and saying "I don't have a plan" does not take it below 65.
 - "genuine" ideation with plan, means, or timeframe → 80-100, high.
 Resolve references against the conversation before scoring. The latest message is often short and carries no crisis word because its subject was said earlier:
 - If the participant expressed ideation or self-harm earlier in the transcript (or the session risk context below the transcript says so), read "it", "this", "that" and unfinished sentences in the latest message against that. "I'm going to do it tonight", "I've decided", "tonight's the night", "I have what I need", "I know how I'd do it", "this is the last time we'll talk", "you won't have to listen to me much longer", "I've said my goodbyes" are then statements of intent, plan, timing or goodbye → 80-100, high, context "genuine". An attempt already made or under way scores the same.
@@ -1019,7 +1020,7 @@ The last two fields are plain observations, not risk judgments. Answer them lite
 - The session risk context, when present, is background for understanding what the latest message refers to. It is not new evidence: a latest message that adds nothing ("ok", a change of subject, a practical question) must not be scored HIGHER than the level already noted, and ordinary life events mentioned afterwards are not warning signs merely because risk was noted earlier.
 Third party at risk. When the participant reports that SOMEONE ELSE is suicidal, keep context "bystander" and score what is happening to that other person:
 - ACTIVE or IMMINENT and unresolved → 80-100, high. That is: they said they are going to or want to kill themselves or end their life; they have a plan, a method or a time; an attempt has been made or is under way; they wrote or posted a goodbye or suicide note; or they said something suicidal (including not wanting to be alive) and now cannot be reached. A second-hand report ("she texted me", "he told me last night"), a calm participant, or the absence of a plan does not lower it: a real person may be in danger, and the study team is alerted so they can help the participant respond.
-- Passive or long-standing thoughts with nothing imminent ("my mom has depression and some days she says she wishes she wasn't here") → 50-65, medium.
+- Passive or long-standing thoughts with nothing imminent ("my mom has depression and some days she says she wishes she wasn't here") → 50-60, medium.
 - Ordinary worry, a past crisis that has resolved, a death or suicide that has already happened, a film, a book or the news → 0-20, none/low.
 - If the participant also voices ideation of their OWN, score that instead, with context "genuine".
 Slang and shorthand: "kms" (kill myself), "ctb" or "catch the bus" (die by suicide), "unalive", "sewerslide", "off myself", "I want out" (of life, of everything). Said in earnest about themselves, score them as the plain words they stand for ("been thinking about ctb a lot lately" is active ideation; "I want out. Of everything." is at least passive ideation, 50 or more). With an ordinary meaning in the conversation (a distance in kms, an unrelated abbreviation, an actual bus, wanting out of a lease or a class) → 0-10, none.
@@ -1074,10 +1075,10 @@ export const THIRD_PARTY_FACTOR = 'third party at risk (reported by participant)
 
 const SEVERITY_RANK_ORDER = { none: 0, low: 1, medium: 2, high: 3 } as const;
 
-/** Score → severity band. Single definition; every caller must agree. */
-function severityForScore(score: number): 'none' | 'low' | 'medium' | 'high' {
-  return score >= 75 ? 'high' : score >= 50 ? 'medium' : score >= 25 ? 'low' : 'none';
-}
+/** Score → severity band. Single definition (src/shared/riskBands.ts); every
+ *  caller must agree. High starts at RISK_BANDS.high: 65 since 2026-11-18
+ *  (owner decision), 75 before. */
+const severityForScore = riskSeverityForScore;
 
 // Contexts in which the screen's tier score must NOT stand: the assessor has
 // positively judged the language to be about someone else, negated, or a

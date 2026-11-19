@@ -7,8 +7,9 @@
 // The band vocabulary is the one the study team uses (none / low / moderate /
 // high). It maps onto the pipeline's 0-100 risk score with the SAME
 // thresholds as crisisDetection.service.ts severityForScore (types.ts
-// scoreToBand mirrors it): high >= 75 (crisis flag + on-call page), moderate
-// 50-74 (the pipeline's `medium`: crisis flag + dashboard alert + steering,
+// scoreToBand mirrors it): high >= 65 (crisis flag + on-call page; 75 until
+// the owner decision of 2026-11-18, src/shared/riskBands.ts), moderate
+// 50-64 (the pipeline's `medium`: crisis flag + dashboard alert + steering,
 // no page), low 25-49 (steering only, no flag), none < 25.
 import { z } from 'zod';
 import { scoreToBand } from '../types.js';

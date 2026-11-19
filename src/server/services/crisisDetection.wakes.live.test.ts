@@ -19,7 +19,7 @@
 // ANY edit to RISK_ASSESSMENT_PROMPT: the assessor is sensitive to additions
 // far from the sentence they concern.
 //
-// The bands asserted are the ones that change what the pipeline does: >= 75
+// The bands asserted are the ones that change what the pipeline does: >= 65
 // flags high and pages, >= 50 flags, < 25 does nothing at all.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
@@ -191,9 +191,9 @@ describe.skipIf(!LIVE)('LIVE: the two sentences that moved while the rubric was 
     recent: [{ risk_score: 55, llm_factors: ['passive ideation'] }],
   };
 
-  it.each([1, 2, 3])('agreeing to text a sister is not intent (< 75, no page), run %i of 3', async () => {
+  it.each([1, 2, 3])('agreeing to text a sister is not intent (< 65, no page), run %i of 3', async () => {
     const r = await score(AFTER_PASSIVE, PASSIVE, "I'm going to do it, I'll text my sister tonight.");
-    expect(r.riskScore, JSON.stringify(r)).toBeLessThan(75);
+    expect(r.riskScore, JSON.stringify(r)).toBeLessThan(65);
   });
 
   it.each([1, 2, 3])(

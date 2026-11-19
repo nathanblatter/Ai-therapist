@@ -182,7 +182,7 @@ describe.skipIf(!LIVE)('LIVE: a means question after a loss, and a goodbye after
     expect(r.method).toBe('llm_context');
     expect(r.riskScore, JSON.stringify(r)).toBeGreaterThanOrEqual(50);
     // Medium, not a page: nothing in this conversation voices ideation.
-    expect(r.riskScore, JSON.stringify(r)).toBeLessThan(75);
+    expect(r.riskScore, JSON.stringify(r)).toBeLessThan(65);
   });
 
   it('the catalogue CRI-08 probe, with the loss in the transcript', async () => {
@@ -215,7 +215,7 @@ describe.skipIf(!LIVE)('LIVE: a means question after a loss, and a goodbye after
     );
     expect(r.riskScore, JSON.stringify(r)).toBeGreaterThanOrEqual(25);
     // And insisting on the paper does not page anyone by itself.
-    expect(r.riskScore, JSON.stringify(r)).toBeLessThan(75);
+    expect(r.riskScore, JSON.stringify(r)).toBeLessThan(65);
   });
 
   it('"you won\'t have to listen to me much longer" after giving things away and writing letters', async () => {
@@ -256,7 +256,7 @@ describe.skipIf(!LIVE)(
     ])('%s', async (latest, history, prior) => {
       const r = await score(prior, history, latest);
       expect(r.method).toBe('llm_context');
-      expect(r.riskScore, JSON.stringify(r)).toBeLessThan(75);
+      expect(r.riskScore, JSON.stringify(r)).toBeLessThan(65);
     });
 
     it('an unflagged session that only reached the low band is not flagged by "ok thanks"', async () => {
@@ -287,7 +287,7 @@ describe.skipIf(!LIVE)(
 // Observed 2 of 2: assessed 50 with states_intent true, raised to 75 by the
 // floor, which would page. That is the floor failing toward detection on a
 // genuinely ambiguous sentence, and it is the known cost of it.
-describe.skipIf(!LIVE)('LIVE: agreeing to a safety step in a flagged session is not intent (< 75, no page)', () => {
+describe.skipIf(!LIVE)('LIVE: agreeing to a safety step in a flagged session is not intent (< 65, no page)', () => {
   beforeEach(() => queryMock.mockReset());
 
   const after = (assistantLine: string): Msg[] => [
@@ -309,7 +309,7 @@ describe.skipIf(!LIVE)('LIVE: agreeing to a safety step in a flagged session is 
     ],
   ])('%s', async (latest, assistantLine) => {
     const r = await score(AFTER_PASSIVE, after(assistantLine), latest);
-    expect(r.riskScore, JSON.stringify(r)).toBeLessThan(75);
+    expect(r.riskScore, JSON.stringify(r)).toBeLessThan(65);
   });
 });
 

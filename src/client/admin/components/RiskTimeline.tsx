@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { getJson, HttpError } from '../../shared/http';
 import { ChevronDown, ChevronRight, Activity } from 'react-feather';
 import { riskScoreTextClass } from '../../shared/severity';
+import { RISK_BANDS } from '../../../shared/riskBands';
 
 interface RiskEntry {
   history_id: string;
@@ -39,9 +40,9 @@ function Sparkline({ scores }: { scores: number[] }) {
     <svg width={w} height={h} className="block" aria-label="Risk score sparkline">
       <line
         x1={0}
-        y1={h - (75 / 100) * h}
+        y1={h - (RISK_BANDS.high / 100) * h}
         x2={w}
-        y2={h - (75 / 100) * h}
+        y2={h - (RISK_BANDS.high / 100) * h}
         stroke="#fecaca"
         strokeWidth={1}
         strokeDasharray="3,3"
@@ -63,7 +64,15 @@ function Sparkline({ scores }: { scores: number[] }) {
             cx={i * step}
             cy={h - (s / 100) * h}
             r={2.5}
-            fill={s >= 75 ? '#dc2626' : s >= 50 ? '#d97706' : s >= 25 ? '#16a34a' : '#9ca3af'}
+            fill={
+              s >= RISK_BANDS.high
+                ? '#dc2626'
+                : s >= RISK_BANDS.medium
+                  ? '#d97706'
+                  : s >= RISK_BANDS.low
+                    ? '#16a34a'
+                    : '#9ca3af'
+            }
           />
         ) : null,
       )}
@@ -132,7 +141,8 @@ export default function RiskTimeline({ sessionId }: RiskTimelineProps) {
             <div className="bg-white rounded p-3">
               <Sparkline scores={history.map((e) => e.risk_score)} />
               <p className="text-xs text-gray-400 mt-1">
-                {history.length} scored messages · dashed lines at 50 (medium) and 75 (high)
+                {history.length} scored messages · dashed lines at {RISK_BANDS.medium} (medium) and {RISK_BANDS.high}{' '}
+                (high)
               </p>
             </div>
           )}

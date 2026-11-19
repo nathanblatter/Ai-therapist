@@ -523,8 +523,11 @@ describe('review of PR #46: a stitched voice sentence is not its own run-up', ()
     historyIs();
     createMock.mockResolvedValue(verdict(55));
     const r = await analyzeMessageRisk({ ...turn(sentence), stitched_message_ids: ['8'] }, []);
+    // The score is what this test pins: the sentence's own earlier part adds
+    // no spike. 70 was medium when high began at 75; since the cutoff moved to
+    // 65 (2026-11-18) the remaining +15 from the genuine run-up makes it high.
     expect(r.riskScore).toBe(70);
-    expect(r.severity).toBe('medium');
+    expect(r.severity).toBe('high');
   });
 
   it('an ordinary turn after the same history keeps the spike bonus, as before', async () => {
