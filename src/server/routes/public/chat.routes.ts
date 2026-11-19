@@ -29,7 +29,6 @@ import {
 } from '../../utils/sessionHelpers.js';
 import {
   buildChatOpeningLine,
-  buildVoiceContinuationGuidance,
   CHAT_OPENING_FRAMING_GUIDANCE,
   OPENING_LINE_MESSAGE_TYPE,
   OPENING_LINE_METADATA,
@@ -48,6 +47,8 @@ import { requireOutsideQuietHours } from '../../middleware/quietHours.js';
 import { requireActiveStudyStatus } from '../../middleware/studyStatus.js';
 import { sessionLimitRefusalFor, tooManyAttemptsRefusal } from '../../utils/sessionLimitRefusal.js';
 import { broadcastAdminEvent, broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
+import type { HandoffStartPayload } from '../../../shared/textHandoff.js';
+import type { RecoveryCrisisContact } from '../../../shared/recoveryPrompt.js';
 
 import { createLogger } from '../../utils/logger.js';
 
@@ -59,6 +60,13 @@ const log = createLogger('chatRoutes');
  *  leaves room for those without ever tying the participant's reply to an
  *  assessor that is timing out (10s per attempt) or being retried. */
 const CHAT_CONTEXT_ASSESS_DEADLINE_MS = 6000;
+
+/** On the first turn after a crisis text hand-off the reply is not held for
+ *  the risk assessor (it runs alongside the model call). Once the reply is
+ *  ready, this is how long the response waits for a score that is still
+ *  outstanding before answering "voice return: not yet". The reply is usually
+ *  the slower of the two, so this rarely adds anything. */
+const HANDOFF_FIRST_TURN_SCORE_WAIT_MS = 400;
 
 /**
  * Synthetic-account gate (caseworker portal, spec section 7 item 6): demo-role
@@ -321,37 +329,63 @@ export default function chatRoutes(): Router {
           }
         }
 
+        // TEXT HAND-OFF (ai-therapist-356). The voice vendor ended a session
+        // and the browser came straight here, in parallel with tearing the
+        // dead call down. services/textHandoff.service decides the wording
+        // from the participant's real risk in the incident, flags this session
+        // as its continuation and seeds it from every session of the incident;
+        // the first assistant message is authored HERE, persisted like any
+        // opening line and returned in this response, so it is on screen
+        // before any model call.
+        let handoff: HandoffStartPayload | null = null;
         if (continuedFrom) {
           try {
-            const { getSessionAccessInfo, getSessionMessages } = await import('../../db/index.js');
-            const prior = await getSessionAccessInfo(continuedFrom);
-            // Ownership is required: this seeds one session's transcript into
-            // another, so it must never be reachable with someone else's id.
-            if (prior && canAccessSession(req, prior, continuedFrom)) {
-              const priorMessages = await getSessionMessages(continuedFrom, false);
-              const recap = priorMessages
-                .filter((m) => m.role === 'user' || m.role === 'assistant')
-                .slice(-20)
-                .map((m) => `${m.role === 'user' ? 'Participant' : 'You'}: ${(m.content ?? '').trim()}`)
-                .filter((l) => l.length > 12)
-                .join('\n')
-                .slice(-6000);
-
-              if (recap) {
-                const { injectGuidance } = await import('../../services/chatTherapy.service.js');
-                injectGuidance(sessionId, buildVoiceContinuationGuidance(recap));
-                log.info(
-                  `[ChatStart] Seeded ${sessionId.substring(0, 12)}... as a continuation of terminated ` +
-                    `voice session ${continuedFrom.substring(0, 12)}...`,
-                );
+            const { prepareTextHandoff } = await import('../../services/textHandoff.service.js');
+            const cfg = await getSystemConfig();
+            const prepared = await prepareTextHandoff({
+              chatSessionId: sessionId,
+              continuedFrom,
+              reason: req.body?.handoff_reason === 'expired' ? 'expired' : 'content',
+              // Ownership is required: this seeds one session's transcript into
+              // another, so it must never be reachable with someone else's id.
+              canAccess: (row, id) => canAccessSession(req, row, id),
+              crisisContact: cfg.crisis_contact as RecoveryCrisisContact | undefined,
+              voiceEnabled: (cfg.features as { voice_enabled?: boolean } | undefined)?.voice_enabled !== false,
+            });
+            if (prepared) {
+              const { seedAssistantOpening, injectGuidance } = await import('../../services/chatTherapy.service.js');
+              // Transcript first, then the message that follows it: the model
+              // reads the incident, then its own first words in writing.
+              if (prepared.guidance) injectGuidance(sessionId, prepared.guidance);
+              seedAssistantOpening(sessionId, prepared.firstMessage);
+              opening = prepared.firstMessage;
+              handoff = prepared.payload;
+              await insertMessagesBatch([
+                {
+                  session_id: sessionId,
+                  role: 'assistant',
+                  message_type: OPENING_LINE_MESSAGE_TYPE,
+                  content: prepared.firstMessage,
+                  // Machine-authored and PHI-free: no redaction call needed.
+                  content_redacted: prepared.firstMessage,
+                  metadata: { ...OPENING_LINE_METADATA, text_handoff: prepared.payload.kind },
+                },
+              ]).catch((err) => log.error({ err }, '[ChatStart] Failed to persist the hand-off first message'));
+              if (global.io) {
+                global.io.to(`session:${sessionId}`).emit('message:new', {
+                  sessionId,
+                  role: 'assistant',
+                  message: prepared.firstMessage,
+                  timestamp: new Date(),
+                });
               }
             } else {
               log.warn(`[ChatStart] continued_from ${continuedFrom} not accessible; starting fresh.`);
             }
           } catch (err) {
-            // Continuity is best-effort: a failure here must still leave the
-            // participant with a working chat session rather than no session.
-            log.error({ err }, '[ChatStart] Failed to seed continuation context');
+            // A failure here must still leave the participant with a working
+            // chat session rather than no session.
+            log.error({ err }, '[ChatStart] Failed to prepare the text hand-off');
           }
         }
 
@@ -363,6 +397,7 @@ export default function chatRoutes(): Router {
           sessionType: 'chat',
           continuedFrom: continuedFrom ?? null,
           opening,
+          handoff,
           message: 'Chat therapy session started',
         });
       } catch (error: unknown) {
@@ -519,9 +554,30 @@ export default function chatRoutes(): Router {
       // down. Past the deadline the pipeline keeps running (it still flags and
       // pages when it finishes) and its steer lands on the next turn, exactly
       // like the deferred path.
+      //
+      // One exception (ai-therapist-356, step 1b): the first participant turn
+      // after a crisis text hand-off. It answers a question the app itself
+      // asked a moment ago, in a session that is already flagged and already
+      // carries the safety-protocol steer (textHandoff.service), so waiting
+      // two to three seconds for the assessor would buy no steering the model
+      // does not have. The pipeline runs ALONGSIDE the model call instead: it
+      // scores, flags and pages exactly as it would have, and any steer it
+      // returns lands on the next turn.
+      const { consumeNarrowFirstTurn, isHandoffSession, resolveVoiceReturn } = await import(
+        '../../services/textHandoff.service.js'
+      );
+      const narrowFirstTurn = consumeNarrowFirstTurn(sessionId);
+      let narrowPipeline: Promise<unknown> | null = null;
+
       let steering: string | null = null;
       try {
-        if (detectCrisisKeywords(message).keywordScore > 0) {
+        if (narrowFirstTurn) {
+          narrowPipeline = runCrisisPipeline({ sessionId, messageId: userMsg.message_id, content: message }, 'chat')
+            .then((r) => {
+              if (r.steeringGuidance) injectGuidance(sessionId, r.steeringGuidance);
+            })
+            .catch((err) => log.error({ err }, '[ChatCrisis] hand-off first-turn pipeline failed'));
+        } else if (detectCrisisKeywords(message).keywordScore > 0) {
           const risk = await runCrisisPipeline({ sessionId, messageId: userMsg.message_id, content: message }, 'chat');
           steering = risk.steeringGuidance;
         } else if (
@@ -579,7 +635,9 @@ export default function chatRoutes(): Router {
 
       // Model call, with steering injected BEFORE the turn when present.
       if (steering) injectGuidance(sessionId, steering);
-      const { text: aiResponse, toolEvents } = await sendMessage(sessionId, message);
+      const { text: aiResponse, toolEvents } = narrowFirstTurn
+        ? await sendMessage(sessionId, message, { narrowCrisisTurn: true })
+        : await sendMessage(sessionId, message);
 
       // Persist the assistant turn; content_redacted is filled in once per
       // session at session end (see sessionRedaction.service), not per message.
@@ -601,7 +659,34 @@ export default function chatRoutes(): Router {
       // safety plan, thought record, ...). The chat client dispatches these
       // through the same fns map the realtime data channel drives, so tool
       // overlays render identically in both modes (ai-therapist-118).
-      res.json({ success: true, response: aiResponse, toolEvents, sessionId });
+      //
+      // handoff.voiceReturnAllowed (hand-off sessions only): whether the
+      // browser may offer a new voice call now. On the narrow first turn the
+      // assessor is given a moment to finish, so a "yes" that scores high is
+      // already counted; if it has not finished, the answer is no.
+      let handoffState: { voiceReturnAllowed: boolean } | undefined;
+      if (isHandoffSession(sessionId)) {
+        let scored = true;
+        if (narrowPipeline) {
+          let timer: NodeJS.Timeout | undefined;
+          scored = await Promise.race([
+            narrowPipeline.then(() => true),
+            new Promise<boolean>((resolve) => {
+              timer = setTimeout(() => resolve(false), HANDOFF_FIRST_TURN_SCORE_WAIT_MS);
+            }),
+          ]);
+          clearTimeout(timer);
+        }
+        handoffState = { voiceReturnAllowed: scored && (await resolveVoiceReturn(sessionId)) === true };
+      }
+
+      res.json({
+        success: true,
+        response: aiResponse,
+        toolEvents,
+        sessionId,
+        ...(handoffState ? { handoff: handoffState } : {}),
+      });
     } catch (error: unknown) {
       log.error({ err: error }, 'Failed to process chat message');
 
@@ -664,6 +749,10 @@ export default function chatRoutes(): Router {
       // in-memory cleanup on the realtime side).
       const { clearSteeringState } = await import('../../services/crisisIntervention.service.js');
       clearSteeringState(sessionId);
+      // The hand-off's stored rows stay (a voice call started from this chat
+      // is checked against them); only the in-process copy goes.
+      const { clearHandoffState } = await import('../../services/textHandoff.service.js');
+      clearHandoffState(sessionId);
 
       const updatedSession = await updateSessionStatus(sessionId, 'ended', 'user');
 
@@ -698,6 +787,35 @@ export default function chatRoutes(): Router {
         error: 'Failed to end session',
         details: error instanceof Error ? error.message : String(error),
       });
+    }
+  });
+
+  // POST /api/chat/voice-return - may a new voice call be started from this
+  // text hand-off chat right now? (ai-therapist-356.) Asked by the browser
+  // before it ends the chat to start the call, so a risk check that is no
+  // longer clear costs the participant nothing: the chat simply continues.
+  // POST /api/live/session checks again when the call is actually requested.
+  router.post('/api/chat/voice-return', chatMessageLimiter, async (req, res) => {
+    const sessionId: unknown = req.body?.sessionId;
+    if (typeof sessionId !== 'string' || !sessionId) {
+      return res.status(400).json({ error: 'sessionId is required' });
+    }
+    try {
+      // The new voice call is an ordinary start, which quiet hours refuse for
+      // a participant (requireOutsideQuietHours on /api/live/session). Saying
+      // "yes" here would end this chat first and then land them on Home with a
+      // refusal (PR #77 review), so the answer is no and the chat continues.
+      const role = req.session?.userRole ?? 'participant';
+      if (role === 'participant' && !req.session?.isSandbox) {
+        const { getQuietHoursStatus } = await import('../../utils/quietHours.js');
+        if (getQuietHoursStatus().active) return res.json({ allowed: false });
+      }
+      const { verifyVoiceReturn } = await import('../../services/textHandoff.service.js');
+      const allowed = await verifyVoiceReturn(sessionId, (row, id) => canAccessSession(req, row, id));
+      res.json({ allowed });
+    } catch (error: unknown) {
+      log.error({ err: error }, 'Failed to check voice return');
+      res.json({ allowed: false });
     }
   });
 

@@ -52,7 +52,8 @@ high-severity event becomes an SMS"; code: `crisisPaging.service`):
     has not said anything in any session for 3 minutes. If it also says "at
     HIGH risk" it is URGENT.
 - **`Why: VENDOR SESSION LIMIT`**: a voice session reached the vendor's
-  maximum length during a high flag; the app reconnects the participant.
+  maximum length during a high flag; the app moves the participant to typed chat
+  under a new session id.
 
 One participant, one incident, few texts. After a page is **delivered**, later
 events for the **same participant** in the next **15 minutes** (the

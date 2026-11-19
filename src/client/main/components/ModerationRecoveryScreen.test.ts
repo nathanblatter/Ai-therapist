@@ -22,25 +22,50 @@ describe('ModerationRecoveryScreen', () => {
     expect(html).toContain('HOME to 741741');
   });
 
-  it.each(STAGES)('stage %s: says the call was cut off, never that the connection dropped', (stage) => {
+  it.each(STAGES)('stage %s: says truthfully what happened, never that the connection dropped', (stage) => {
     const html = render(stage);
-    expect(html).toContain('The call was cut off');
     expect(html).toContain('your fault');
-    expect(html).not.toMatch(/connection dropped/i);
+    expect(html).toContain('nothing you said was wrong');
+    expect(html).not.toMatch(/connection/i);
     expect(html).not.toMatch(/technical/i);
+  });
+
+  it('the text hand-off stages say the voice call stopped; only the voice path says "cut off"', () => {
+    // ai-therapist-356: the hand-off wording does not say the call "got cut
+    // off"; the recovery voice path keeps the line its spoken copy uses.
+    for (const stage of ['text', 'failed', 'unavailable'] as ModerationRecoveryStage[]) {
+      const html = render(stage);
+      expect(html).toContain('The voice call has stopped');
+      expect(html).not.toMatch(/cut off/i);
+    }
+    expect(render('voice')).toContain('The call was cut off');
   });
 
   it('no stage is a dead end: each either says what is happening next or what to do', () => {
     expect(render('voice')).toContain('coming right back');
-    expect(render('text')).toContain('in writing');
-    // Reconnect failed: a retry button, and the numbers are pointed at.
-    const failed = render('failed');
-    expect(failed).toContain('Try to reconnect');
-    expect(failed).toContain('<button');
+    expect(render('text')).toContain('moving us to writing');
     // Nothing left to continue in: told plainly to use the numbers.
     const unavailable = render('unavailable');
     expect(unavailable).toContain('Please use one of the numbers below');
     expect(unavailable).not.toContain('<button');
+  });
+
+  it('chat start failure: the crisis lines and a retry button, never a blank screen', () => {
+    const failed = render('failed');
+    expect(failed).toContain('couldn&#x27;t open our written conversation');
+    expect(failed).toContain('Try again');
+    expect(failed).toContain('<button');
+    expect(failed).toContain('href="tel:988"');
+    expect(failed).toContain('href="sms:741741"');
+    expect(failed).toContain('href="tel:911"');
+    // It does not promise a call that would hang up on them again.
+    expect(failed).not.toMatch(/reconnect/i);
+  });
+
+  it('promises no person and claims no notification on any stage', () => {
+    for (const stage of STAGES) {
+      expect(render(stage)).not.toMatch(/has been notified|have been notified|on (the|their) way|will call you/i);
+    }
   });
 
   it('falls back to the national lines when the configured contact is disabled or blank', () => {

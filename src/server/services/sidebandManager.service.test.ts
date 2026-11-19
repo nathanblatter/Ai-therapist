@@ -2540,6 +2540,21 @@ describe('session.closed reason=expired', () => {
     }
   });
 
+  it('waitForUserTurnsScored: a close not yet seen is not "nothing pending"', async () => {
+    const sessionId = 's-handoff-wait';
+    await attach(sessionId);
+    // The vendor's close has not reached the sideband: a final turn may still
+    // be unflushed, so the hand-off must hear "not known".
+    const waiting = sidebandManager.waitForUserTurnsScored(sessionId, 120);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(await waiting).toBe(false);
+    // Once the close has been seen and nothing is in flight: settled.
+    sb.sessions.get(sessionId).finalized = true;
+    expect(await sidebandManager.waitForUserTurnsScored(sessionId, 120)).toBe(true);
+    // A session this process does not hold: nothing to wait for.
+    expect(await sidebandManager.waitForUserTurnsScored('s-unknown-to-us', 120)).toBe(true);
+  });
+
   it('is an ordinary end when the session is not flagged', async () => {
     const sessionId = 's-expired-calm';
     await attach(sessionId);

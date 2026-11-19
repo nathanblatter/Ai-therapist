@@ -19,7 +19,6 @@ import {
   VOICE_SAMPLE_RATE,
   FRAME_BYTES,
   planAfterTermination,
-  MAX_VOICE_RECOVERY_ATTEMPTS,
 } from './voiceClient.js';
 import type { CapturedEmission } from './types.js';
 import { joinFragments, isAudiblePcm } from './liveVoiceClient.js';
@@ -171,34 +170,41 @@ describe('joinFragments — GPT-Live transcript assembly', () => {
   });
 });
 
-describe("planAfterTermination — the browser's content-filter recovery, mirrored (ai-therapist-268)", () => {
-  it('recovers a GPT-Live content cut up to the browser cap, then stops', () => {
-    expect(planAfterTermination('live', 'content', 0)).toBe('recover');
-    expect(planAfterTermination('live', 'content', 1)).toBe('recover');
-    expect(planAfterTermination('live', 'content', MAX_VOICE_RECOVERY_ATTEMPTS)).toBe('stop');
+describe("planAfterTermination: the browser's answer to a vendor cut, mirrored (ai-therapist-356)", () => {
+  it('a GPT-Live content cut goes to the text hand-off, whatever the flag, every time', () => {
+    expect(planAfterTermination('live', 'content')).toBe('handoff');
+    expect(planAfterTermination('live', 'content', false)).toBe('handoff');
+    expect(planAfterTermination('live', 'content', true)).toBe('handoff');
   });
 
-  it('treats the vendor ceiling like the filter only on a high-flagged session (App.tsx crisisActiveRef)', () => {
-    expect(planAfterTermination('live', 'expired', 0, true)).toBe('recover');
-    expect(planAfterTermination('live', 'expired', 0, false)).toBe('stop');
-    expect(planAfterTermination('live', 'expired', MAX_VOICE_RECOVERY_ATTEMPTS, true)).toBe('stop');
+  it('the vendor ceiling is handed off only on a high-flagged session (App.tsx crisisActiveRef)', () => {
+    expect(planAfterTermination('live', 'expired', true)).toBe('handoff');
+    expect(planAfterTermination('live', 'expired', false)).toBe('stop');
+    expect(planAfterTermination('live', 'expired')).toBe('stop');
   });
 
-  it('never recovers on Grok or for any other close reason', () => {
-    expect(planAfterTermination('grok', 'content', 0)).toBe('stop');
-    expect(planAfterTermination('live', 'connection_lost', 0)).toBe('stop');
-    expect(planAfterTermination('live', 'close_requested', 0)).toBe('stop');
+  it('nothing is handed off on Grok or for any other close reason', () => {
+    expect(planAfterTermination('grok', 'content', true)).toBe('stop');
+    expect(planAfterTermination('grok', 'expired', true)).toBe('stop');
+    expect(planAfterTermination('live', 'connection_lost', true)).toBe('stop');
+    expect(planAfterTermination('live', 'close_requested', true)).toBe('stop');
+  });
+
+  it('the scenario runners no longer start a recovery voice session after a cut', () => {
+    for (const file of ['./voiceClient.ts', './voice/runMode.ts']) {
+      const source = readFileSync(new URL(file, import.meta.url), 'utf8');
+      expect(source).not.toMatch(/recovery: true/);
+      expect(source).toContain('beginTextHandoff(');
+    }
   });
 });
 
 describe('recovery speak-first nudge', () => {
-  it('has one source: the server, the browser fallback and the harness all call the shared builder', () => {
+  it('has one source: the server and the browser fallback both call the shared builder', () => {
     const app = readFileSync(new URL('../client/main/components/App.tsx', import.meta.url), 'utf8');
     const route = readFileSync(new URL('../server/routes/public/liveSession.routes.ts', import.meta.url), 'utf8');
-    const harness = readFileSync(new URL('./voiceClient.ts', import.meta.url), 'utf8');
     expect(route).toContain('text: buildRecoverySpeakFirstNudge(crisisContact as RecoveryCrisisContact)');
     expect(app).toContain('sendInvisiblePrompt(buildRecoverySpeakFirstNudge(crisisContact), LIVE_RECOVERY_NUDGE_LOG)');
-    expect(harness).toContain('buildRecoverySpeakFirstNudge(sysCfg.crisis_contact');
     // The old wording is gone everywhere, not left behind as a fallback.
     for (const source of [app, route]) {
       expect(source).not.toMatch(/The voice connection just dropped/);

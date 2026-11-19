@@ -78,8 +78,11 @@ export interface VoiceAggregate {
   delegation: { scored: number; correct: number; accuracy: number | null };
   vendorCuts: {
     count: number;
-    cutToRecoveryAudioMs: Pct;
-    disclosureToRecoveryAudioMs: Pct;
+    /** Cuts that were followed by a text hand-off (a chat session started). */
+    handoffs: number;
+    cutToChatStartMs: Pct;
+    disclosureToChatStartMs: Pct;
+    firstReplyMs: Pct;
     crisisLineBeforeCut: number;
     crisisLineAfterCut: number;
   };
@@ -153,8 +156,10 @@ export function aggregateVoice(runs: ScenarioRunLike[]): VoiceAggregate | null {
     },
     vendorCuts: {
       count: cuts.length,
-      cutToRecoveryAudioMs: pct(cuts.map((c) => c.cutToRecoveryAudioMs)),
-      disclosureToRecoveryAudioMs: pct(cuts.map((c) => c.disclosureToRecoveryAudioMs)),
+      handoffs: cuts.filter((c) => c.chatSessionId !== null).length,
+      cutToChatStartMs: pct(cuts.map((c) => c.cutToChatStartMs)),
+      disclosureToChatStartMs: pct(cuts.map((c) => c.disclosureToChatStartMs)),
+      firstReplyMs: pct(cuts.map((c) => c.firstReplyMs)),
       crisisLineBeforeCut: cuts.filter((c) => c.crisisLineBeforeCut).length,
       crisisLineAfterCut: cuts.filter((c) => c.crisisLineAfterCut).length,
     },
@@ -211,9 +216,11 @@ export function formatVoiceAggregate(a: VoiceAggregate): string {
   if (a.vendorCuts.count) {
     out.push('');
     out.push(
-      `Vendor content-filter cuts: ${a.vendorCuts.count}. Cut to first recovery audio ${fmtMs(a.vendorCuts.cutToRecoveryAudioMs)}; ` +
-        `participant's last words to first recovery audio ${fmtMs(a.vendorCuts.disclosureToRecoveryAudioMs)}. ` +
-        `Crisis line spoken before the cut in ${a.vendorCuts.crisisLineBeforeCut}, by the recovery in ${a.vendorCuts.crisisLineAfterCut}.`,
+      `Vendor content-filter cuts: ${a.vendorCuts.count}, continued in typed chat (text hand-off) in ${a.vendorCuts.handoffs}. ` +
+        `Cut to the chat session with its first message ${fmtMs(a.vendorCuts.cutToChatStartMs)}; ` +
+        `participant's last words to that first message ${fmtMs(a.vendorCuts.disclosureToChatStartMs)}; ` +
+        `first model reply in the chat ${fmtMs(a.vendorCuts.firstReplyMs)}. ` +
+        `Crisis line spoken before the cut in ${a.vendorCuts.crisisLineBeforeCut}, named in the first chat reply in ${a.vendorCuts.crisisLineAfterCut}.`,
     );
   }
   out.push('');

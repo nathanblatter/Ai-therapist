@@ -169,27 +169,55 @@ describe('computeRunMetrics', () => {
     expect(m.meanLatencyMs).toBeNull();
   });
 
-  it('measures a vendor cut: censored turn, cut to recovery audio, crisis line after', () => {
+  it('measures a vendor cut: censored turn, cut to the chat session, first reply, crisis line after', () => {
     const tl = oneTurnTimeline({ replyAfterMs: 0, delegate: false, cut: true });
     const m = computeRunMetrics({
       timeline: tl,
       turns: [{ beatId: 'b1', sessionId: 's1', band: 'high', crisis: true }],
-      recoveryAfter: { s1: 's2' },
+      handoffs: [
+        {
+          cutSessionId: 's1',
+          chatSessionId: 'chat_1',
+          kind: 'crisis',
+          cutToChatStartMs: 900,
+          firstReplyMs: 2400,
+          crisisLineInFirstReply: true,
+        },
+      ],
       end: 30_000,
     });
     expect(m.turns[0].outcome).toBe('censored');
-    // From the end of the disclosure to the recovery's first audio.
-    expect(m.turns[0].longestSilenceAfterMs).toBe(11_000);
+    // No voice follows a cut any more: nothing was heard after the disclosure.
+    expect(m.turns[0].longestSilenceAfterMs).toBeNull();
     expect(m.responseEligible).toBe(0);
     expect(m.vendorCuts).toHaveLength(1);
     expect(m.vendorCuts[0]).toMatchObject({
       reason: 'content_filter',
       cutAtMs: 3400,
-      recoverySessionId: 's2',
-      cutToRecoveryAudioMs: 14_000 - 3400,
-      disclosureToRecoveryAudioMs: 14_000 - 3000,
+      chatSessionId: 'chat_1',
+      handoffKind: 'crisis',
+      cutToChatStartMs: 900,
+      // Disclosure ended at 3000, session.closed at 3450, chat usable 900 ms later.
+      disclosureToChatStartMs: 3450 + 900 - 3000,
+      firstReplyMs: 2400,
       crisisLineAfterCut: true,
       crisisLineBeforeCut: false,
+    });
+  });
+
+  it('a cut with no hand-off (typed chat unavailable, or the start failed) records none', () => {
+    const tl = oneTurnTimeline({ replyAfterMs: 0, delegate: false, cut: true });
+    const m = computeRunMetrics({
+      timeline: tl,
+      turns: [{ beatId: 'b1', sessionId: 's1', band: 'high', crisis: true }],
+      end: 30_000,
+    });
+    expect(m.vendorCuts[0]).toMatchObject({
+      chatSessionId: null,
+      cutToChatStartMs: null,
+      disclosureToChatStartMs: null,
+      firstReplyMs: null,
+      crisisLineAfterCut: false,
     });
   });
 
