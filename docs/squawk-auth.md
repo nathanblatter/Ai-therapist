@@ -41,6 +41,25 @@ session; Squawk owns the credentials and the sign-in ceremonies.
    Squawk password account; password and role changes are mirrored; deleting
    deletes there too. Usernames cannot change once linked.
 
+### Signed out on a staff link
+
+A crisis page SMS links to `/admin#session=<id>` or `/admin#participant=<id>`.
+A signed-out browser page load of `/admin` (a GET or HEAD whose `Accept`
+prefers HTML) is redirected `302` to `/login` (`signedOutPageToLogin` in
+`src/server/middleware/auth.ts`); fetch/XHR, curl and every API route still
+get the `401` JSON, and a signed-in account without a staff role still gets
+`403 {"error":"Insufficient permissions"}` (no redirect, so no loop). The
+`Location` has no fragment, so the browser keeps the link's hash on `/login`.
+The login page saves it to this tab's `sessionStorage` before anything else
+(before the Squawk redirect, which loses it), and the admin page puts it back
+on the URL once, before AdminApp reads it
+(`src/client/admin/utils/pendingDeepLink.ts`). Only the exact forms
+`#session=<[A-Za-z0-9_-]{1,128}>` and `#participant=<positive integer>` are
+kept, rebuilt from the `deepLink.ts` parsers; a stored link is used at most
+once and only within 15 minutes, and it is only ever a hash on `/admin`, never
+a URL. This works the same in both modes: the legacy login and the Squawk
+callback both land staff on `/admin`.
+
 With the `SQUAWK_*` variables unset (local dev, tests) everything falls back
 to the legacy `/api/auth/login` against the local hash. With them set, that
 route answers `410` so a stale local hash is never consulted.

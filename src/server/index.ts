@@ -16,7 +16,7 @@ import { opsMetricsMiddleware } from './services/opsMetrics.service.js';
 import { createAdapter as createPostgresAdapter } from '@socket.io/postgres-adapter';
 import { pool } from './config/db.js';
 import { releaseOnEnd } from './config/dbHeldClient.js';
-import { requireRole } from './middleware/auth.js';
+import { adminPageGuard } from './middleware/auth.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { insertMessagesBatch, getSidebandConnectionsByIds, getSessionAccessInfo } from './db/index.js';
 import configRoutes from './routes/public/config.routes.js';
@@ -957,8 +957,10 @@ async function startProdServer() {
     render: (url: string) => Promise<{ html: string }>;
   };
 
-  // Admin panel route (demo accounts see a synthetic-data version — see demo.routes.ts)
-  app.get('/admin', requireRole('therapist', 'caseworker', 'researcher', 'demo'), (_req, res) => {
+  // Admin panel route (demo accounts see a synthetic-data version — see demo.routes.ts).
+  // A signed-out browser page load is sent to /login (adminPageGuard); API
+  // clients keep the 401 JSON.
+  app.get('/admin', ...adminPageGuard, (_req, res) => {
     try {
       const html = applyDemoBranding(
         fs.readFileSync(path.resolve(__dirname, '../../dist/admin-client/admin.html'), 'utf-8'),
@@ -1003,7 +1005,7 @@ async function startDevServer() {
   // demo.routes.ts). Admin is a plain SPA — no SSR pass, just the transformed
   // template with the entry script pointed at its real location (Vite's root
   // is src/client/main, so the relative src in admin.html won't resolve).
-  app.get('/admin', requireRole('therapist', 'caseworker', 'researcher', 'demo'), async (req, res, next) => {
+  app.get('/admin', ...adminPageGuard, async (req, res, next) => {
     try {
       let template = fs.readFileSync(path.resolve(__dirname, '../client/admin/admin.html'), 'utf-8');
       template = template.replace(

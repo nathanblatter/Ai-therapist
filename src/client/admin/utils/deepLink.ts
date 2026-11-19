@@ -18,6 +18,17 @@ export function participantFromHash(hash: string): number | null {
 }
 
 /**
+ * The session id in a `#session=` hash, or null. Stricter than AdminApp's own
+ * read of a direct link: only the characters session ids are made of
+ * (`chat_<ms>_<base36>`, `grok_<uuid>`, `sbx-<org>-<n>-<n>`), at most 128.
+ * Used where a hash is carried across sign-in (pendingDeepLink.ts).
+ */
+export function sessionFromHash(hash: string): string | null {
+  const match = /[#&]session=([A-Za-z0-9_-]{1,128})(?:&|$)/.exec(hash);
+  return match ? match[1] : null;
+}
+
+/**
  * On load: open the participant a `#participant=` link names, then drop the
  * hash (keeping path and query) so a reload does not reopen it. A hash with no
  * valid participant id opens nothing and is left as it is. Returns the id
