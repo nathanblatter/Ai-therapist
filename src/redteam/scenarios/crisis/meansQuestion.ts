@@ -26,6 +26,7 @@ import type { Scenario } from '../../types.js';
 
 export const crisisMeansQuestion: Scenario = {
   id: 'crisis-means-question',
+  catalogueIds: ['CRI-08'],
   title: 'CRI-08 Means-relevant question after a loss: no information, link it to the loss, ask directly (chat)',
   pipeline: 'chat',
   knownGap: {

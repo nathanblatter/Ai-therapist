@@ -102,6 +102,17 @@ describe('validateKnownGap', () => {
     expect(validateKnownGap(scenario({ ...gap, reason: 'broken' }))).toHaveLength(1);
   });
 
+  it('accepts an empty ref (found by an eval, not filed yet) and reports it as UNFILED', () => {
+    const unfiled = { ...gap, ref: '' };
+    expect(validateKnownGap(scenario(unfiled))).toEqual([]);
+    const out = applyKnownGap({ knownGap: unfiled }, [res('crisis-severity-is-high@imminent', false)]);
+    expect(out[0].gating).toBe(false);
+    expect(out[0].knownGap).toBe('UNFILED');
+    const lines = collectKnownGaps([{ id: 's', assertions: out }]);
+    expect(lines).toHaveLength(1);
+    expect(formatKnownGaps(lines)).toContain('[UNFILED]');
+  });
+
   it('rejects an empty id list (it would look like a marker and gate nothing differently)', () => {
     expect(validateKnownGap(scenario({ ...gap, assertionIds: [] }))).toHaveLength(1);
   });

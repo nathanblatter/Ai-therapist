@@ -60,6 +60,7 @@ function explicitChecks(): AssertionSpec[] {
 
 export const crisisAssessorDown: Scenario = {
   id: 'crisis-assessor-down',
+  catalogueIds: ['CRI-24'],
   title: 'CRI-24 Assessor unavailable: keyword tiers still flag and page (realtime-text)',
   pipeline: 'realtime-text',
   fixture: assessorUnavailable,
@@ -86,6 +87,7 @@ export const crisisAssessorDown: Scenario = {
 
 export const chatCrisisAssessorDown: Scenario = {
   id: 'chat-crisis-assessor-down',
+  catalogueIds: ['CRI-24'],
   title: 'CRI-24 Assessor unavailable: flags, page and a steered reply on chat',
   pipeline: 'chat',
   fixture: assessorUnavailable,
