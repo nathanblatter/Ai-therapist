@@ -311,11 +311,83 @@ function newDelegationWatch(fields: Partial<DelegationWatch> = {}): DelegationWa
   };
 }
 
+/**
+ * Append caps (ai-therapist-381). The API limit is 500 tokens per append
+ * ("Each event takes plain-string content of up to 500 tokens", GPT-Live guide,
+ * "Add context during the conversation"); the character caps below are ours.
+ *
+ * LIVE_APPEND_MAX_CHARS is for content we do not control (an admin's typed
+ * steer, a worksheet summary, a recap): 3.2 characters a token, deliberately
+ * pessimistic, because an append over the limit is rejected and nothing of it
+ * reaches the model.
+ *
+ * CLINICAL_STEER_MAX_CHARS is for a clinical steer (the text, then the
+ * keep-speaking line). These are fixed English sentences, held against this cap
+ * by clinicalSteerLength.test.ts. Measured with the o200k_base tokenizer (the
+ * current OpenAI model family's; GPT-Live's own is not published) they run 4.70
+ * to 4.92 characters a token: the longest, the harm-to-others steer, is 1843
+ * characters and 380 tokens. 1850 characters is 3.7 a token, 76% of the limit
+ * at the measured rate. Under the old 1600 the harm-to-others steer lost its
+ * last 243 characters on every delivery: the 911 / 988 line, "Do not end the
+ * session yourself" and "Stay with them". If the vendor rejects a steer longer
+ * than LIVE_APPEND_MAX_CHARS anyway, the sideband sends it again fitted to that
+ * cap (resendRejectedSteer), keeping every safety sentence.
+ */
+export const LIVE_APPEND_MAX_CHARS = 1600;
+export const CLINICAL_STEER_MAX_CHARS = 1850;
+
+/**
+ * A sentence a clinical steer must never lose when it has to be shortened:
+ * emergency numbers, staying with the participant, and who ends the session.
+ */
+const SAFETY_SENTENCE = /\b(?:911|988|741741)\b|\bend the session\b|\bend_session\b|\bstay with them\b/i;
+
+/**
+ * Shorten a clinical steer to `maxChars` at sentence boundaries. The opening
+ * `[Clinical guidance ...]` marker is always kept, then every safety sentence
+ * (SAFETY_SENTENCE), then the other sentences in their original order while
+ * they fit; what is kept stays in its original order. Only if the marker and
+ * the safety sentences alone do not fit is the text cut mid-sentence. Pure; a
+ * fallback that should never run (clinicalSteerLength.test.ts).
+ */
+export function fitClinicalSteer(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const units = text.split(/(?<=[.!?]["']?|\])\s+/).filter((u) => u.length > 0);
+  const keep = units.map(() => false);
+  let used = -1; // joined with single spaces: n units cost their lengths plus n - 1
+  const take = (i: number): void => {
+    if (keep[i] || used + 1 + units[i].length > maxChars) return;
+    keep[i] = true;
+    used += 1 + units[i].length;
+  };
+  take(0);
+  const safety = units.map((u, i) => (i > 0 && SAFETY_SENTENCE.test(u) ? i : -1)).filter((i) => i > 0);
+  for (const i of safety) take(i);
+  if (!keep[0] || safety.some((i) => !keep[i])) return text.slice(0, maxChars);
+  for (let i = 1; i < units.length; i++) take(i);
+  return units.filter((_, i) => keep[i]).join(' ');
+}
+
+/**
+ * Fit a clinical steer into `room`, loudly. Under test an over-long steer
+ * throws, so a reworded or newly added steer cannot ship truncated. In
+ * production it is logged as an error and shortened by fitClinicalSteer.
+ */
+function fitClinicalSteerLoudly(text: string, room: number): string {
+  if (text.length <= room) return text;
+  const message =
+    `[Live] CLINICAL STEER TOO LONG: ${text.length} characters against room for ${room}; ` +
+    `shortened at sentence boundaries, safety sentences kept: ${text.slice(0, 120)}`;
+  if (process.env.NODE_ENV === 'test') throw new Error(message);
+  console.error(message);
+  return fitClinicalSteer(text, room);
+}
+
 /** A clinical steer as delivered to a live voice model: the text, then the keep-speaking line, inside the append cap. */
 export function withKeepSpeaking(text: string): string {
   if (!text.startsWith(CLINICAL_STEER_MARKER) || text.includes(LIVE_STEER_KEEP_SPEAKING)) return text;
-  const room = 1600 - LIVE_STEER_KEEP_SPEAKING.length - 1;
-  return `${text.length > room ? text.slice(0, room) : text} ${LIVE_STEER_KEEP_SPEAKING}`;
+  const room = CLINICAL_STEER_MAX_CHARS - LIVE_STEER_KEEP_SPEAKING.length - 1;
+  return `${fitClinicalSteerLoudly(text, room)} ${LIVE_STEER_KEEP_SPEAKING}`;
 }
 
 /** A transcript fragment as delivered by session.*_transcript.delta. */
@@ -630,6 +702,16 @@ export class SidebandManager {
    * no per-turn completion event to restore on, so this is a fixed window.
    */
   private readonly toolChoiceResetMs = 45000;
+  /**
+   * Clinical steers sent longer than LIVE_APPEND_MAX_CHARS and not yet
+   * acknowledged, by event id: if the vendor rejects one, it is sent again
+   * fitted to that cap (resendRejectedSteer). Entries go on acknowledgement,
+   * on the error, or after a minute.
+   */
+  private oversizeSteers = new Map<
+    string,
+    { sessionId: string; content: string; delegationId: string | null; sentAt: number }
+  >();
 
   /** Register another voice backend (see VoiceSidebandDelegate). Idempotent. */
   registerDelegate(delegate: VoiceSidebandDelegate): void {
@@ -1943,11 +2025,13 @@ export class SidebandManager {
       case 'session.commentary.appended':
         // Acknowledgement only. Explicitly NOT proof that the model consumed the
         // update, spoke it, or that the participant heard anything.
+        if (typeof event.client_event_id === 'string') this.oversizeSteers.delete(event.client_event_id);
         break;
 
       case 'error': {
         const err = event.error as { code?: string; message?: string; client_event_id?: string } | undefined;
         console.error(`[Live] API error for ${sessionId.substring(0, 12)}...:`, err);
+        this.resendRejectedSteer(sessionId, err?.client_event_id);
         // OpenAI's moderation stopped the assistant mid-reply. The docs give
         // two outcomes ("Some moderation events end the session. Others cut
         // off assistant audio for the remainder of its current speech and emit
@@ -2412,15 +2496,28 @@ export class SidebandManager {
    *
    * Content is capped at 500 tokens by the API. The cap is enforced here on
    * characters rather than risking a rejected event — dropping a crisis steer
-   * because it ran three words long is not an acceptable failure mode.
+   * because it ran three words long is not an acceptable failure mode. A
+   * clinical steer has its own, measured cap (CLINICAL_STEER_MAX_CHARS); one
+   * sent longer than the generic cap is remembered until acknowledged, so a
+   * rejection can be answered (resendRejectedSteer).
    */
   async appendInstructions(sessionId: string, content: string, delegationId: string | null = null): Promise<void> {
+    const clinical = content.startsWith(CLINICAL_STEER_MARKER);
+    const sent = truncateForAppend(content, clinical ? CLINICAL_STEER_MAX_CHARS : LIVE_APPEND_MAX_CHARS);
+    const eventId = clientEventId('instr');
     this.sendEvent(sessionId, {
       type: 'session.instructions.append',
-      event_id: clientEventId('instr'),
+      event_id: eventId,
       delegation_id: delegationId,
-      content: truncateForAppend(content),
+      content: sent,
     });
+    if (clinical && sent.length > LIVE_APPEND_MAX_CHARS) {
+      const now = Date.now();
+      for (const [id, entry] of this.oversizeSteers) {
+        if (now - entry.sentAt > 60_000) this.oversizeSteers.delete(id);
+      }
+      this.oversizeSteers.set(eventId, { sessionId, content: sent, delegationId, sentAt: now });
+    }
     // Every clinical steer passes through here (tryInject and injectMessage);
     // the delegation watchdog stands down for a risk steer and waits one
     // period for any other (see delegationFallback). Only once it was sent:
@@ -2430,6 +2527,39 @@ export class SidebandManager {
     const kind = clinicalSteerKind(content);
     if (steered && kind === 'risk') steered.lastRiskSteerAt = Date.now();
     else if (steered && kind) steered.lastOtherSteerAt = Date.now();
+  }
+
+  /**
+   * The vendor answered a clinical steer longer than LIVE_APPEND_MAX_CHARS with
+   * an error: assume it was over the token limit (nothing of a rejected append
+   * reaches the model) and send it once more, fitted to the generic cap at
+   * sentence boundaries with every safety sentence kept (fitClinicalSteer).
+   * Logged loudly: it means CLINICAL_STEER_MAX_CHARS is too high. Never throws.
+   */
+  private resendRejectedSteer(sessionId: string, clientEventIdOfError: string | undefined): void {
+    if (!clientEventIdOfError) return;
+    const rejected = this.oversizeSteers.get(clientEventIdOfError);
+    if (!rejected || rejected.sessionId !== sessionId) return;
+    this.oversizeSteers.delete(clientEventIdOfError);
+    const tail = ` ${LIVE_STEER_KEEP_SPEAKING}`;
+    const body = rejected.content.endsWith(tail) ? rejected.content.slice(0, -tail.length) : rejected.content;
+    const fitted = rejected.content.endsWith(tail)
+      ? `${fitClinicalSteer(body, LIVE_APPEND_MAX_CHARS - tail.length)}${tail}`
+      : fitClinicalSteer(body, LIVE_APPEND_MAX_CHARS);
+    console.error(
+      `[Live] CLINICAL STEER REJECTED at ${rejected.content.length} characters for ${sessionId.substring(0, 12)}...; ` +
+        `sending it again at ${fitted.length} (safety sentences kept). CLINICAL_STEER_MAX_CHARS is too high.`,
+    );
+    try {
+      this.sendEvent(sessionId, {
+        type: 'session.instructions.append',
+        event_id: clientEventId('instr'),
+        delegation_id: rejected.delegationId,
+        content: fitted,
+      });
+    } catch (err) {
+      console.error(`[Live] Resending the rejected steer failed for ${sessionId.substring(0, 12)}...:`, err);
+    }
   }
 
   /** Append quiet factual context the model can use but should not announce. */
@@ -3283,11 +3413,10 @@ export class SidebandManager {
  * slightly under is a few truncated words, while the cost of being over is a
  * rejected event — and these events carry crisis steering.
  */
-function truncateForAppend(content: string): string {
-  const MAX_CHARS = 1600; // ~500 tokens at a deliberately pessimistic 3.2 chars/token
-  if (content.length <= MAX_CHARS) return content;
-  console.warn(`[Live] Append content truncated from ${content.length} to ${MAX_CHARS} chars.`);
-  return content.slice(0, MAX_CHARS);
+function truncateForAppend(content: string, maxChars: number = LIVE_APPEND_MAX_CHARS): string {
+  if (content.length <= maxChars) return content;
+  console.warn(`[Live] Append content truncated from ${content.length} to ${maxChars} chars.`);
+  return content.slice(0, maxChars);
 }
 
 export const sidebandManager = new SidebandManager();

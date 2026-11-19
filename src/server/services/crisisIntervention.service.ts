@@ -436,15 +436,16 @@ export async function deliverPendingSteer(sessionId: string): Promise<boolean> {
 
 type Sideband = typeof import('./sidebandManager.service.js').sidebandManager;
 
-/** The append cap the sideband enforces (withKeepSpeaking / truncateForAppend). */
-const LIVE_APPEND_MAX_CHARS = 1600;
+/** The cap the sideband enforces on a clinical steer (CLINICAL_STEER_MAX_CHARS in
+ *  sidebandManager; clinicalSteerLength.test.ts holds the two equal). */
+export const LIVE_STEER_MAX_CHARS = 1850;
 /** LIVE_STEER_KEEP_SPEAKING and its space, added after every clinical steer
  *  (sidebandManager.steerKind.test.ts holds this against the real text). */
 export const KEEP_SPEAKING_RESERVE = 171;
 
 /** Do this steer and the heads-up fit in one append without the sideband truncating either? */
 export function fitsWithHeadsUp(guidance: string): boolean {
-  return guidance.length + 1 + VOICE_HEADS_UP_GUIDANCE.length <= LIVE_APPEND_MAX_CHARS - KEEP_SPEAKING_RESERVE;
+  return guidance.length + 1 + VOICE_HEADS_UP_GUIDANCE.length <= LIVE_STEER_MAX_CHARS - KEEP_SPEAKING_RESERVE;
 }
 
 /** Is the heads-up due on this voice turn? Never throws: a failure here must not cost the steer. */
