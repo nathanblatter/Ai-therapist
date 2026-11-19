@@ -35,12 +35,12 @@ export default function StudyStatusScreen({ status }: StudyStatusScreenProps) {
     <>
       <div className="fixed inset-0 bg-black bg-opacity-50 z-[60]" aria-hidden="true" />
       <div
-        className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+        className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4"
         role="dialog"
         aria-modal="true"
         aria-labelledby="study-status-title"
       >
-        <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+        <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl max-w-md w-full p-6 max-h-[92dvh] sm:max-h-[90vh] sheet-safe-bottom overflow-y-auto">
           <div className="flex items-center gap-3 mb-4">
             <div className="bg-amber-50 rounded-full p-3">
               <PauseCircle size={22} className="text-amber-600" aria-hidden="true" />
@@ -60,7 +60,7 @@ export default function StudyStatusScreen({ status }: StudyStatusScreenProps) {
               <li className="flex items-center gap-2">
                 <Phone size={14} className="text-red-500 flex-shrink-0" aria-hidden="true" />
                 <span>
-                  <a href="tel:988" className="font-semibold underline">
+                  <a href="tel:988" className="font-semibold underline py-4 px-3 -mx-3">
                     988
                   </a>{' '}
                   — Suicide &amp; Crisis Lifeline (call or text)
@@ -70,7 +70,7 @@ export default function StudyStatusScreen({ status }: StudyStatusScreenProps) {
                 <MessageSquare size={14} className="text-red-500 flex-shrink-0" aria-hidden="true" />
                 <span>
                   Crisis Text Line — text HOME to{' '}
-                  <a href="sms:741741" className="font-semibold underline">
+                  <a href="sms:741741" className="font-semibold underline py-4 px-3 -mx-3">
                     741741
                   </a>
                 </span>
@@ -79,7 +79,7 @@ export default function StudyStatusScreen({ status }: StudyStatusScreenProps) {
                 <Phone size={14} className="text-red-500 flex-shrink-0" aria-hidden="true" />
                 <span>
                   BYU CAPS after-hours crisis line via BYU Police:{' '}
-                  <a href="tel:8014222222" className="font-semibold underline">
+                  <a href="tel:8014222222" className="font-semibold underline py-4 px-3 -mx-3">
                     801-422-2222
                   </a>
                 </span>
@@ -103,7 +103,7 @@ export default function StudyStatusScreen({ status }: StudyStatusScreenProps) {
                 <Mail size={14} className="text-gray-400 flex-shrink-0" aria-hidden="true" />
                 <span>
                   James Gaskin, Principal Investigator —{' '}
-                  <a href="mailto:james.gaskin@byu.edu" className="font-semibold underline">
+                  <a href="mailto:james.gaskin@byu.edu" className="font-semibold underline py-4 px-3 -mx-3">
                     james.gaskin@byu.edu
                   </a>
                 </span>
@@ -112,7 +112,7 @@ export default function StudyStatusScreen({ status }: StudyStatusScreenProps) {
                 <Mail size={14} className="text-gray-400 flex-shrink-0" aria-hidden="true" />
                 <span>
                   Nathan Blatter —{' '}
-                  <a href="mailto:nzb22@byu.edu" className="font-semibold underline">
+                  <a href="mailto:nzb22@byu.edu" className="font-semibold underline py-4 px-3 -mx-3">
                     nzb22@byu.edu
                   </a>
                 </span>
@@ -122,11 +122,11 @@ export default function StudyStatusScreen({ status }: StudyStatusScreenProps) {
 
           <p className="text-xs text-gray-500">
             If you are in immediate danger, call{' '}
-            <a href="tel:911" className="font-semibold underline">
+            <a href="tel:911" className="font-semibold underline py-4 px-3 -mx-3">
               911
             </a>
             . During the day, BYU Counseling and Psychological Services is at{' '}
-            <a href="tel:8014223035" className="font-semibold underline">
+            <a href="tel:8014223035" className="font-semibold underline py-4 px-3 -mx-3">
               801-422-3035
             </a>
             .

@@ -138,7 +138,7 @@ export default function ConsentScreen({
     <>
       <div className="fixed inset-0 bg-black bg-opacity-50 z-40" aria-hidden="true" />
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4"
         role="dialog"
         aria-modal="true"
         aria-labelledby="consent-heading"
@@ -146,7 +146,7 @@ export default function ConsentScreen({
         <div
           ref={panelRef}
           tabIndex={-1}
-          className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 focus:outline-none"
+          className="bg-white rounded-t-2xl sm:rounded-lg shadow-xl max-w-lg w-full max-h-[92dvh] sm:max-h-[90vh] sheet-safe-bottom overflow-y-auto p-6 focus:outline-none"
         >
           {reconsentRequired && (
             <div className="mb-4 p-3 rounded-md bg-amber-50 border border-amber-200 text-sm text-amber-800">
@@ -187,7 +187,7 @@ export default function ConsentScreen({
             <button
               type="button"
               onClick={onCancel}
-              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+              className="px-4 py-2 min-h-[44px] text-sm text-gray-600 hover:text-gray-800"
               disabled={submitting}
             >
               Cancel
@@ -196,7 +196,7 @@ export default function ConsentScreen({
               type="button"
               onClick={handleAccept}
               disabled={!acknowledged || submitting}
-              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-2 min-h-[44px] text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {submitting ? 'Recording...' : 'I agree, start session'}
             </button>

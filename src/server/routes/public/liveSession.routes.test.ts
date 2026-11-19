@@ -44,7 +44,7 @@ vi.mock('../../utils/sessionOwnership.js', () => ({ recordSessionOwnership: vi.f
 vi.mock('../../utils/promptContext.js', () => ({
   sanitizeCheckin: () => null,
   buildCheckinBlock: () => '',
-  buildMemoryBlock: async () => '',
+  buildParticipantContextBlock: async () => '',
   buildToolGuidanceBlock: () => '',
   buildLeadConversationBlock: () => '',
 }));

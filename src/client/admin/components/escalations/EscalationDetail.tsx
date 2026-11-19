@@ -98,7 +98,7 @@ export default function EscalationDetail({ escalationId, userRole, currentUserId
   const canReopen = isCareTeam && escalation?.status === 'resolved';
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <button
         type="button"
         onClick={onBack}

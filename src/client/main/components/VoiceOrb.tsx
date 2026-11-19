@@ -112,7 +112,7 @@ export default function VoiceOrb({ localStream, remoteStream }: VoiceOrbProps) {
   };
 
   return (
-    <div className="flex items-center justify-center gap-3 py-2" role="status" aria-live="polite">
+    <div className="flex items-center justify-center gap-3 py-1 sm:py-2 px-4" role="status" aria-live="polite">
       <div className="w-10 h-10 flex items-center justify-center" aria-hidden="true">
         <div
           ref={orbRef}
@@ -122,7 +122,7 @@ export default function VoiceOrb({ localStream, remoteStream }: VoiceOrbProps) {
       <span className="text-sm text-ink-muted">{STATE_LABEL[orbState]}</span>
       <button
         onClick={toggleAmbience}
-        className="p-2 rounded-full text-gray-500 hover:bg-gray-100 transition-colors"
+        className="p-2 rounded-full text-gray-500 hover:bg-gray-100 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
         title={ambienceOn ? 'Turn off background ambience' : 'Play soft background ambience'}
         aria-label={ambienceOn ? 'Mute background ambience' : 'Play soft background ambience'}
         aria-pressed={ambienceOn}

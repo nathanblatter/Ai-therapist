@@ -76,7 +76,7 @@ export default function PreSessionCheckIn({ isOpen, onCancel, onStart }: PreSess
         aria-hidden="true"
       />
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4"
         role="dialog"
         aria-modal="true"
         aria-labelledby="checkin-modal-title"
@@ -84,7 +84,7 @@ export default function PreSessionCheckIn({ isOpen, onCancel, onStart }: PreSess
         <div
           ref={panelRef}
           tabIndex={-1}
-          className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-fadeIn focus:outline-none"
+          className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-lg max-h-[92dvh] sm:max-h-[90vh] sheet-safe-bottom overflow-y-auto animate-fadeIn focus:outline-none"
         >
           <header className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
             <h2 id="checkin-modal-title" className="text-lg font-semibold text-gray-800">
@@ -163,12 +163,15 @@ export default function PreSessionCheckIn({ isOpen, onCancel, onStart }: PreSess
           </div>
 
           <footer className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center">
-            <button onClick={() => onStart(null)} className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2">
+            <button
+              onClick={() => onStart(null)}
+              className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2 min-h-[44px]"
+            >
               Skip
             </button>
             <button
               onClick={handleStart}
-              className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors"
+              className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-5 py-2.5 min-h-[44px] rounded-lg transition-colors"
             >
               Start session
             </button>
