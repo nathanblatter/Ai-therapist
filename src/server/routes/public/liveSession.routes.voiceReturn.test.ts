@@ -78,7 +78,11 @@ vi.mock('../../services/toolRegistry.service.js', () => ({
   toolRegistry: { getEnabledToolDefinitions: async () => [] },
 }));
 vi.mock('../../utils/harness.js', () => ({ isNonStudyUser: () => false }));
-vi.mock('../../utils/safetyIdentifier.js', () => ({ isIdentifierBlockedError: () => false }));
+// The real identifier derivation (ai-therapist-306); only the block detector is stubbed.
+vi.mock('../../utils/safetyIdentifier.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../utils/safetyIdentifier.js')>()),
+  isIdentifierBlockedError: () => false,
+}));
 vi.mock('../../services/crisisAlert.service.js', () => ({ reportOpenAIQuotaExhausted: mocks.reportQuota }));
 
 const { default: liveSessionRoutes, PROVIDER_UNAVAILABLE_BODY } = await import('./liveSession.routes.js');

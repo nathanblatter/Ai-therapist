@@ -21,7 +21,7 @@
 
 import { Router, type Request, type Response } from 'express';
 import { randomUUID } from 'node:crypto';
-import { hashToken } from '../../utils/crypto.js';
+import { safetyIdentifierForParticipantCookie, safetyIdentifierForUser } from '../../utils/safetyIdentifier.js';
 import { getOpenAIKey } from '../../config/secrets.js';
 import {
   getActiveSessionForUser,
@@ -122,7 +122,7 @@ function readParticipantCookie(req: Request): string | null {
 
 /** Stable, non-PII per-participant identifier for OpenAI abuse enforcement. */
 function getSafetyIdentifier(req: Request, res: Response, userId: number | string | null): string {
-  if (userId) return hashToken(`user:${userId}`);
+  if (userId) return safetyIdentifierForUser(userId);
   let pid = readParticipantCookie(req);
   if (!pid) {
     pid = randomUUID();
@@ -134,7 +134,7 @@ function getSafetyIdentifier(req: Request, res: Response, userId: number | strin
       path: '/',
     });
   }
-  return hashToken(`participant:${pid}`);
+  return safetyIdentifierForParticipantCookie(pid);
 }
 
 export default function liveSessionRoutes(): Router {

@@ -385,26 +385,44 @@ the row:
 
 ```json
 "redaction_check": {
+  "status": "checked" | "errored",
   "p_leak": 0.83, "flagged": true,
   "backend": "decisions" | "responses", "model": "gpt-6-luna",
   "checked_at": "2026-10-02T...", "reviewed": true, "error": "..."
 }
 ```
 
+- Three states (`src/server/db/leakCheckSql.ts` is the one SQL definition):
+  never checked (no `redaction_check` key), **checked** (`status: "checked"`,
+  the model answered), **errored** (`status: "errored"`, `flagged: null`,
+  `p_leak: -1`, `error` set: the check did not produce an answer). Rows
+  written before 2026-11-19 have no `status`; one that carries `error` (with
+  `flagged: false`, as the ai-therapist-284 outage rows do) counts as errored.
 - `flagged` = `p_leak >= system_config.redaction_verifier.threshold` (default 0.5).
 - `reviewed` is set when a researcher corrects or approves the row in the
-  Redaction Verification tool; flagged-and-unreviewed rows are listed first
-  there and counted in its header.
+  Redaction Verification tool. The tool lists flagged-and-unreviewed rows
+  first, errored-and-unreviewed rows next, then a random sample, and its
+  header counts the two backlogs separately (`flagged_unreviewed`,
+  `errored_unreviewed` from `GET /redact/api/messages`).
+- What a flagged or errored, unreviewed row is kept out of
+  (ai-therapist-288): researcher semantic search (`redactionCompleteSql`).
+  That is the only leak-check gate. The research dataset export
+  (`transcripts.csv`), the researcher CSV export and the content wipe do not
+  read `redaction_check` (the wipe waits on `redaction_error`, the redaction
+  run's own failure marker, not on the leak check).
 - Backend `auto` (default) uses the OpenAI Decisions API (`POST /v1/decisions`,
   one `predicate` question in `questions[]`; `p_leak` is the returned
   `probability`) and falls back to the Responses API with a strict json_schema
   only when the endpoint is not enabled for the org (404 / "not enabled"). Only
   redacted text is sent; the Responses fallback sets `store:false` (Decisions
   has no such parameter); usage is recorded under purpose `redaction`.
-- Fail-soft: any other verifier error (a 400, a refusal, a timeout) writes
-  `{"p_leak": -1, "flagged": false, "error": "..."}` and does not block
-  redaction. Such a row is unverified and is not prioritised for review; find
-  them with `metadata->'redaction_check' ? 'error'`.
+- Fail-soft for the pipeline only: any other verifier error (a 400, a
+  refusal, a timeout, no OpenAI client) records the row as errored and does
+  not block redaction, naming or the wipe. To list errored rows, with an
+  estimated cost of re-checking them, run
+  `npx tsx src/database/scripts/recheckErroredLeakChecks.ts` (list only by
+  default; `--requeue` re-runs the verifier over the unreviewed ones, one
+  OpenAI call each).
 - Config row: `system_config.redaction_verifier` =
   `{"enabled": true, "backend": "auto"|"decisions"|"responses", "threshold": 0.5}`;
   absent row = defaults. No migration needed.

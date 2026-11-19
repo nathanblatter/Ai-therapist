@@ -50,8 +50,10 @@ export const outsideEnvelope: Scenario = {
   knownGap: {
     reason:
       'Neither reply says the research team decides eligibility: one points only to "the app\'s terms", the other to ' +
-      "an enrolment email or the app's terms; the old prompt had no eligibility line. PR #39 (migration 125) " +
-      'targets this; applied 2026-11-18, not yet re-measured.',
+      "an enrolment email or the app's terms; the old prompt had no eligibility line. " +
+      'PR #39 (migration 125, applied to stage 2026-11-18) targets this. Not re-measured since: the pass after 125 ' +
+      'covered the full suite only and this scenario is in extended. Remove the marker after 4 clean runs of the ' +
+      'listed assertions on the migrated prompt.',
     ref: 'ai-therapist-347',
     assertionIds: ['refers-to-study-team@abroad', 'refers-to-study-team@graduated'],
   },

@@ -2,6 +2,12 @@
 import { pool } from '../config/db.js';
 import { REDACTABLE_ROWS_SQL } from './redactionScope.js';
 import { IRB_STUDY_ORG_ID_SQL } from './organizations.queries.js';
+import {
+  leakCheckErroredUnreviewedSql,
+  leakCheckFlaggedSql,
+  leakCheckFlaggedUnreviewedSql,
+  leakCheckNeedsReviewSql,
+} from './leakCheckSql.js';
 
 /**
  * Organization scope for the review queue (ai-therapist-272): the message's
@@ -19,14 +25,13 @@ function sessionOrgScopeSql(orgParam: string): string {
         OR (ts.user_id IS NULL AND ${orgParam} = ${IRB_STUDY_ORG_ID_SQL})))`;
 }
 
-/** Rows the leak-check flagged and no researcher has corrected or approved yet. */
-const FLAGGED_UNREVIEWED_SQL = `(metadata->'redaction_check'->>'flagged') = 'true' AND COALESCE(metadata->'redaction_check'->>'reviewed', 'false') <> 'true'`;
-
 /**
- * The review queue: leak-flagged messages first (ai-therapist-262), then a
- * random sample. Scoped with the shared redaction predicate so tool_event_%
- * rows — participant free text from thought records and fear ladders — are
- * eligible for verification too, and to the caller's organization (272).
+ * The review queue: leak-flagged messages first (ai-therapist-262), then
+ * messages whose leak check errored (ai-therapist-288: never verified, so a
+ * researcher must look), then a random sample. Reviewed rows drop back into
+ * the sample. Scoped with the shared redaction predicate so tool_event_% rows
+ * (participant free text from thought records and fear ladders) are eligible
+ * for verification too, and to the caller's organization (272).
  */
 export async function getRandomRedactedMessages(orgId: number): Promise<Record<string, unknown>[]> {
   const result = await pool.query(
@@ -35,22 +40,38 @@ export async function getRandomRedactedMessages(orgId: number): Promise<Record<s
     FROM messages
     WHERE content_redacted IS NOT NULL AND ${REDACTABLE_ROWS_SQL}
       AND ${sessionOrgScopeSql('$1')}
-    ORDER BY (${FLAGGED_UNREVIEWED_SQL}) DESC, RANDOM()
+    ORDER BY ${leakCheckFlaggedUnreviewedSql()} DESC, ${leakCheckErroredUnreviewedSql()} DESC, RANDOM()
     LIMIT 20`,
     [orgId],
   );
   return result.rows;
 }
 
-/** How many leak-flagged messages in the caller's org are still waiting for a researcher. */
-export async function countFlaggedUnreviewed(orgId: number): Promise<number> {
-  const result = await pool.query<{ n: string }>(
-    `SELECT COUNT(*)::text AS n FROM messages
-     WHERE ${FLAGGED_UNREVIEWED_SQL} AND ${REDACTABLE_ROWS_SQL}
-       AND ${sessionOrgScopeSql('$1')}`,
+export interface LeakCheckBacklog {
+  /** The check ran and says an identifier may remain; nobody has reviewed it. */
+  flaggedUnreviewed: number;
+  /** The check could not run (an API error); nobody has reviewed it. */
+  erroredUnreviewed: number;
+}
+
+/**
+ * Leak-check rows in the caller's org still waiting for a researcher, by
+ * state. The two counts are disjoint (a row that somehow carries both is
+ * counted as flagged) and both mean "needs review".
+ */
+export async function countLeakCheckBacklog(orgId: number): Promise<LeakCheckBacklog> {
+  const result = await pool.query<{ flagged: string; errored: string }>(
+    `SELECT COUNT(*) FILTER (WHERE ${leakCheckFlaggedSql()})::text AS flagged,
+            COUNT(*) FILTER (WHERE NOT ${leakCheckFlaggedSql()})::text AS errored
+       FROM messages
+      WHERE ${leakCheckNeedsReviewSql()} AND content_redacted IS NOT NULL AND ${REDACTABLE_ROWS_SQL}
+        AND ${sessionOrgScopeSql('$1')}`,
     [orgId],
   );
-  return Number(result.rows[0]?.n ?? 0);
+  return {
+    flaggedUnreviewed: Number(result.rows[0]?.flagged ?? 0),
+    erroredUnreviewed: Number(result.rows[0]?.errored ?? 0),
+  };
 }
 
 /** Mark a message's leak-check as human-reviewed (no-op when never checked). */

@@ -2,7 +2,7 @@
 // the theme tokens (--t-orb-a/--t-orb-b), levels from Web Audio analysers on
 // the mic and assistant streams. Includes the optional ambience toggle.
 import { useEffect, useRef, useState } from 'react';
-import { Volume2, VolumeX } from 'react-feather';
+import { Music } from 'react-feather';
 import {
   startSoundscape,
   getAmbiencePreference,
@@ -122,12 +122,18 @@ export default function VoiceOrb({ localStream, remoteStream }: VoiceOrbProps) {
       <span className="text-sm text-ink-muted">{STATE_LABEL[orbState]}</span>
       <button
         onClick={toggleAmbience}
-        className="p-2 rounded-full text-gray-500 hover:bg-gray-100 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+        className={`p-2 rounded-full hover:bg-gray-100 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center ${
+          ambienceOn ? 'bg-gray-100 text-ink' : 'text-gray-500'
+        }`}
         title={ambienceOn ? 'Turn off background ambience' : 'Play soft background ambience'}
         aria-label={ambienceOn ? 'Mute background ambience' : 'Play soft background ambience'}
         aria-pressed={ambienceOn}
       >
-        {ambienceOn ? <Volume2 size={16} /> : <VolumeX size={16} />}
+        {/* A music note, not a speaker: the speaker icons belong to the button that
+            mutes the assistant's voice (AgentVoiceMute.tsx), and a crossed-out
+            speaker here, shown whenever ambience is off, read as "the
+            assistant is muted". */}
+        <Music size={16} aria-hidden="true" className={ambienceOn ? '' : 'opacity-60'} />
       </button>
     </div>
   );

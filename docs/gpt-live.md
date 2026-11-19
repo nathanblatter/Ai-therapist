@@ -244,6 +244,32 @@ Authenticated with the project API key plus `OpenAI-Safety-Identifier`. It is
 how the backend executes tools, persists transcripts, meters usage, and steers
 the conversation.
 
+### OpenAI safety identifier (ai-therapist-168, salted since ai-therapist-306)
+
+OpenAI scopes abuse enforcement, including a permanent block, to the safety
+identifier a request carries. Every identifier the app sends is derived in one
+place, `src/server/utils/safetyIdentifier.ts`:
+
+| Call | How it gets the identifier |
+|---|---|
+| GPT-Live mint (`POST /v1/live/sessions`, `liveSession.routes.ts`) | `safetyIdentifierForUser`, or `safetyIdentifierForParticipantCookie` for an anonymous browser |
+| Sideband attach (above), the sideband's mid-session summary | `safetyIdentifierForSession` |
+| Chat reply (`chatTherapy.service.ts`) | `safetyIdentifierForSession` |
+| Crisis assessor (`crisisDetection.service.ts`) | `safetyIdentifierForSession` |
+
+`safetyIdentifierForSession` resolves the session's user, so the voice mint and
+the text calls for one participant carry the same value. The moderation screen
+(`moderation.service.ts`) sends no identifier.
+
+The value is HMAC-SHA256 keyed with `OPENAI_SAFETY_IDENTIFIER_SALT`, a secret
+set once per environment (`.env.example`). Without the salt it is a plain
+sha256 of `user:<id>`: identical for user 7 on stage, on prod and in every test
+database, and computable by anyone who knows a user id. With the variable
+unset the app keeps that derivation and logs one warning at startup in
+production. Setting the salt, or changing it, changes every participant's
+identifier and resets OpenAI's abuse history for all of them, so it is set
+once, before Phase 2 enrolment, not during the study.
+
 The manager's public surface (`tryInject` / `isConnected` / `disconnect` /
 `getActiveConnections` / `reattachActiveSessions` / `injectMessage` /
 `updateSession` / `interrupt` / `createResponse` / `triggerTool`) was preserved
@@ -278,10 +304,43 @@ acknowledgements, and `error`.
 | `session.thinking.append` | Quiet context the model may use but should not announce | Re-grounding summaries |
 | `session.commentary.append` | A verified result the model should say aloud (it may paraphrase) | Exposed on the manager; **no callers yet** |
 
-All three are capped at **500 tokens** by the API. The cap is enforced
-client-side on characters (1600, at a deliberately pessimistic 3.2 chars/token)
-rather than risking a rejected event — dropping a crisis steer because it ran
-three words long is not an acceptable failure mode.
+All three are capped at **500 tokens** by the API ("Each event takes
+plain-string content of up to 500 tokens", Managing GPT-Live sessions, "Add
+context during the conversation"). The cap is enforced client-side on
+characters rather than risking a rejected event — dropping a crisis steer
+because it ran three words long is not an acceptable failure mode:
+
+- **1600 characters** (a deliberately pessimistic 3.2 chars/token) for content
+  we do not control: an admin's typed steer, a worksheet summary, a recap.
+  Longer content is cut at 1600 with a warning.
+- **1850 characters** for a clinical steer (anything beginning
+  `[Clinical guidance`), the steer plus the keep-speaking line
+  (ai-therapist-381). These are fixed English sentences: measured with the
+  o200k_base tokenizer (GPT-Live's own is not published) they run 4.70 to
+  4.92 chars/token, and the longest, the harm-to-others steer, is 1843
+  characters and 380 tokens. 1850 is 3.7 chars/token. Under the old 1600 that
+  steer lost its last 243 characters on every delivery, among them the 911 /
+  988 line, "Do not end the session yourself" and "Stay with them", and nothing
+  logged it. `clinicalSteerLength.test.ts` enumerates every clinical steer and
+  every combination the code sends (the risk steer with the voice heads-up,
+  the minor safeguard with its speak-now line, every score and every time
+  notice) and fails if any would be cut; under test an over-long steer throws.
+  In production it is logged as `CLINICAL STEER TOO LONG` and shortened at
+  sentence boundaries, keeping the marker and every sentence that names 911,
+  988 or 741741, staying with them, or ending the session
+  (`fitClinicalSteer`; if those do not all fit, as many as fit, earliest
+  first).
+- **Not yet verified live.** If the vendor nevertheless rejects a clinical
+  steer longer than 1600 characters (an `error` carrying its event id), the
+  sideband sends it once more fitted to 1600 the same way and logs
+  `CLINICAL STEER REJECTED (<code>)`, which would mean 1850 is too high. An
+  error with code `context_injection_incomplete` is not treated as a
+  rejection: the API returns it for every append still pending when the
+  session closes (see "A delegation must not leave the participant waiting"
+  below). The backstop covers only an
+  explicit error: if the vendor silently dropped or cut an over-long append,
+  nothing would notice, because a `*.appended` acknowledgement can legitimately
+  stay pending.
 
 The matching `*.appended` events are **acknowledgements only**. They are
 explicitly not proof that the model consumed the update, spoke it, or that the
@@ -599,8 +658,10 @@ decides when; the model phrases it. It uses the existing steer, no new
 channel: the sentence is appended to that turn's risk steer
 (`risk_steering` row gets `voiceHeadsUp: 'attached'`); when no risk steer goes
 out on that turn (the shared 3-minute steer cooldown, for example after an
-earlier low steer) or the two would not fit in one 1600-character append
-(the high-severity steer, and the third-party and harm-to-others steers), it goes as its own clinical
+earlier low steer) or the two would not fit in one clinical-steer append
+(the third-party and harm-to-others steers; the standard medium and high steers
+carry it at every score since ai-therapist-381, so a first high turn gets one
+instruction, not two), it goes as its own clinical
 steer (`risk_steering` row with `trigger: 'voice_heads_up'`). Either way the
 keep-speaking line is added as for every clinical steer.
 
@@ -1030,6 +1091,70 @@ turn(s) persisted immediately before it (no assistant turn between, within
 `crisisPipeline.service.ts`. The age check reads the same joined text. After:
 8 of 8 explicit-intent and attempt disclosures scored high. The 900 ms gap
 itself is unchanged.
+
+### Muting the assistant's voice (speaker button, 2026-11-19)
+
+A voice session has a speaker button next to the mic button
+(`SessionControls.tsx`, `AgentVoiceMute.tsx`; rules in `lib/speakerMute.ts`).
+It silences the assistant **on the participant's device only**. It is a
+toggle button (`aria-pressed`, label "Mute the assistant's voice", 48 px).
+
+Where the mute is applied, and why the recording is safe:
+
+- **GPT-Live:** `audio.muted` on the `<audio>` element that plays the remote
+  WebRTC track. The recording tee (`startMixedTee`) reads the remote
+  `MediaStream` itself, not the element, so `mixed.wav` keeps the assistant's
+  voice while muted. The remote track is never disabled and the tee's source
+  is never touched. `muted`, not `volume`: iOS Safari ignores `volume` on media
+  elements. The element keeps playing while muted, so unmuting needs no new
+  `play()` and no new user gesture (if the element was paused because autoplay
+  had been refused, the unmute tap also retries `play()`).
+- **Grok:** an output `GainNode` between the playback chain and
+  `ctx.destination`, after the `MediaStreamAudioDestinationNode` that feeds the
+  orb and the tee (`createPlaybackChain` in `grokVoiceClient.ts`). Playback
+  already runs through Web Audio there, so a gain works on iOS too, and the
+  context keeps running at gain 0.
+- Nothing is sent to the model, and the server-side transcript is unchanged.
+  Echo cancellation: with the voice muted there is nothing to echo, so it can
+  only get easier; the one theoretical cost is the canceller re-adapting for a
+  moment after an unmute.
+
+So the session does not seem frozen while muted: the button turns amber with a
+crossed speaker, a status line under the orb says so and offers "Tap to hear
+the assistant", the orb still pulses with the assistant's audio (it reads the
+stream, not the speakers), and the captions (the chat log, which is always on
+in voice) keep showing what the assistant says.
+
+Reset rules: every session the participant starts begins unmuted, including a
+return to voice from a text hand-off. A text hand-off chat has no voice, so the
+control is gone there. The one exception is a recovery voice session after a
+vendor cut (only used where typed chat is off): it continues the same
+conversation without the participant touching anything, so it keeps the mute
+they had at the cut (`speakerMutedAtStart`).
+
+**Crisis rule: nothing unmutes on the participant's behalf.** A participant who
+muted may have done so because someone came into the room (the base prompt
+already treats a second voice as a privacy concern), and saying crisis content
+out loud then could expose them; they are also, by definition, looking at the
+screen. So `session:crisis-emergency` and the crisis messages leave the mute as
+it is; the resource card opens exactly as before, with a pinned "Tap to hear
+the assistant" prompt at its top while muted. The browser's own spoken lines
+at a vendor cut (the recovery line, the hand-off bridge and the "could not
+continue" line, `startInterimSpeech`) are skipped when the voice was muted at
+the cut (`mayBrowserSpeakAtCut`). The hold screen, the numbers and the hand-off
+are not delayed or changed.
+
+Study record: one `speaker_timeline` client event per voice session, sent at
+teardown (and by beacon on page hide), numbers only, shaped like the
+`mic_timeline` event: `toggles` as `[ms since the session's audio started, 1
+audible / 0 muted]` (first entry at 0, at most 60), `truncated`, `mutedMs`,
+`totalMs`, and `crisisSignalsWhileMuted`. Every voice session reports one, so
+"never muted" is a row with `mutedMs: 0`, not a missing row.
+
+Checks: `lib/speakerMute.test.ts` (state, reset and crisis rules, the event,
+and the recording tap still fed while muted) and
+`npx tsx scripts/speaker-mute-check.ts` (headless Chromium: silence at the Grok
+output and signal at the tee for both paths).
 
 ---
 

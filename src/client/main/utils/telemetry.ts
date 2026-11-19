@@ -12,6 +12,9 @@
 
 export type ClientEventKind =
   | 'js_error'
+  // End of a voice session: when the participant had the assistant's voice
+  // muted on their device (numbers only; lib/speakerMute.ts).
+  | 'speaker_timeline'
   | 'unhandled_rejection'
   | 'webrtc_failed'
   | 'webrtc_disconnected'

@@ -109,6 +109,7 @@ import {
 
 import { createLogger } from './utils/logger.js';
 import { installProcessPolicy } from './utils/processPolicy.js';
+import { warnIfSafetyIdentifierUnsalted } from './utils/safetyIdentifier.js';
 
 const log = createLogger('server');
 // Unhandled rejections are logged, not fatal; see utils/processPolicy.ts.
@@ -349,6 +350,9 @@ app.use(bugReportRoutes());
 if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
   throw new Error('SESSION_SECRET must be set in production');
 }
+// OpenAI safety identifiers fall back to the unsalted derivation without
+// OPENAI_SAFETY_IDENTIFIER_SALT (ai-therapist-306): warn once, never refuse to boot.
+warnIfSafetyIdentifierUnsalted();
 const PgSession = connectPgSimple(session);
 const sessionMiddleware = session({
   store: new PgSession({
