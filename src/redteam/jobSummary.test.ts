@@ -4,7 +4,8 @@
 import { describe, expect, it } from 'vitest';
 import { CostTracker } from './config.js';
 import { buildSummaryJson, type RunSummary } from './report.js';
-import { formatCost, formatJobSummary, verdict, type SummaryFile } from './jobSummary.js';
+import { formatCost, formatJobSummary, formatSampling, verdict, type SummaryFile } from './jobSummary.js';
+import { nightlySample } from './sampling.js';
 import type { ScenarioResult } from './types.js';
 
 function result(id: string, build: (c: CostTracker) => void, extra: Partial<ScenarioResult> = {}): ScenarioResult {
@@ -94,5 +95,27 @@ describe('verdict and generated variants', () => {
     };
     expect(verdict({ scenarios: [...base.scenarios!, { ...miss, generated: { gating: false } }] }).red).toBe(false);
     expect(verdict({ scenarios: [...base.scenarios!, { ...miss, generated: { gating: true } }] }).red).toBe(true);
+  });
+});
+
+describe('job summary sampled-run note', () => {
+  it('states N of M, the night, catch-up and when the rest are next due', () => {
+    const ids = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+    const sampling = nightlySample(ids, new Set(['a']), '2026-11-18', {}, [1, 1, 1, 1, 1, 1, 2]);
+    const json = buildSummaryJson({ ...run, sampling }) as SummaryFile;
+    expect(json.sampling?.date).toBe('2026-11-18');
+    const md = formatJobSummary({ summary: json, title: 'Red-team nightly' });
+    expect(md).toContain('### Sampled run');
+    expect(md).toContain(
+      `**Sampled**: ${sampling.run.length} of 8 scenarios ran (Wednesday 2026-11-18, 2026-W47, nightly cap 1)`,
+    );
+    expect(md).toContain('at least once per Monday-to-Sunday UTC week');
+    expect(md).toContain(`Not run tonight (${8 - sampling.run.length}): next due`);
+    for (const date of Object.values(sampling.nextDue)) expect(md).toContain(date);
+  });
+
+  it('an unsampled run has no sampled-run note', () => {
+    expect(formatJobSummary({ summary: buildSummaryJson(run) as SummaryFile })).not.toContain('Sampled');
+    expect(formatSampling({})).toEqual([]);
   });
 });
