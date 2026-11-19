@@ -908,7 +908,9 @@ describe('runCrisisPipeline — a database timeout fails toward paging (ai-thera
     await retry.write();
     const [first, again] = flagSessionCrisisMock.mock.calls;
     expect(again.slice(0, 8)).toEqual(first.slice(0, 8));
-    expect(again[8]).toEqual({ retry: true });
+    // ai-therapist-373: the retry carries the first attempt's time, so a staff
+    // unflag after it wins.
+    expect(again[8]).toEqual({ retry: true, attemptedAt: expect.any(Date) });
   });
 
   it('a medium flag write that fails is not retried (a late medium write could lower a newer high)', async () => {

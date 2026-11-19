@@ -1,6 +1,7 @@
 // Data-access for therapy sessions and their configuration: lifecycle CRUD,
 // ownership/status read checks, and the session_configurations upsert/read.
 import { pool } from '../config/db.js';
+import { forgetSessionTurns } from '../utils/recentTurns.js';
 
 export interface SessionRow {
   session_id: string;
@@ -166,6 +167,9 @@ export async function updateSessionStatus(
   status: string,
   endedBy: string | null = null,
 ): Promise<SessionRow> {
+  // The crisis pipeline's in-memory copy of the session's turns goes with it
+  // (after a short grace for a last turn still being scored; ai-therapist-373).
+  if (status === 'ended') forgetSessionTurns(sessionId);
   const currentSession = await getSession(sessionId);
   if (!currentSession) {
     throw new Error('Session not found');

@@ -1088,11 +1088,14 @@ function describeSessionRiskContext(ctx: SessionRiskContext): string | null {
  */
 function strongContextSignalScore(content: string, ctx: SessionRiskContext): number {
   if (!contextIsMediumOrAbove(ctx)) return 0;
+  return hasStandingStrongSignal(content) ? CRISIS_KEYWORDS.high.score : 0;
+}
+
+/** The message carries a strong signal of intent, goodbye or means that is
+ *  neither negated nor retracted. */
+function hasStandingStrongSignal(content: string): boolean {
   const text = normalizeForScreen(content);
-  const standing = matchContextSignals(text).some(
-    (s) => s.strong && !signalIsNegated(text, s) && !signalIsRetracted(text, s),
-  );
-  return standing ? CRISIS_KEYWORDS.high.score : 0;
+  return matchContextSignals(text).some((s) => s.strong && !signalIsNegated(text, s) && !signalIsRetracted(text, s));
 }
 
 /**
@@ -1972,6 +1975,71 @@ interface MessageInput {
    *  rather than a chat or voice turn. Recorded on the risk row and told to
    *  the assessor; scoring is otherwise identical to a first message. */
   source?: 'checkin';
+  /**
+   * Where the conversation history came from when it was NOT the stored
+   * messages (ai-therapist-373): 'memory' (this process's copy, complete),
+   * 'memory_partial' (this process did not see the session start) or 'none'.
+   * Recorded on the risk row; the last two apply the context-blind rule
+   * (CONTEXT_BLIND_SOURCES). Absent: the stored history.
+   */
+  history_source?: 'memory' | 'memory_partial' | 'none';
+}
+
+/**
+ * History sources that may be missing the turns a reading depends on
+ * (ai-therapist-373). With neither the database nor a complete copy in memory,
+ * a split sentence cannot be joined and a reply cannot be matched to the
+ * question it answers. See applyContextBlindFloor.
+ */
+const CONTEXT_BLIND_SOURCES: ReadonlySet<string> = new Set(['memory_partial', 'none']);
+
+/** Assessor labels that a turn's own words settle without any history: a
+ *  negation, a quotation or media reference, someone else's situation, and
+ *  thoughts of harming another person (scored by their own rule). The same
+ *  exemptions as the passive-ideation floor, plus harm to others. */
+const CONTEXT_BLIND_EXEMPT_CONTEXTS: ReadonlySet<string> = new Set([...FLOOR_EXEMPT_CONTEXTS, 'harm_to_others']);
+
+/** Moderation self-harm score at which a keyword-free turn wakes the assessor
+ *  (the moderation wake); the same level counts as the turn's own risk signal
+ *  for the context-blind rule. */
+const MODERATION_WAKE_SCORE = 40;
+
+/**
+ * The context-blind rule (ai-therapist-373). A turn scored with no history it
+ * can rely on (the database did not answer in time AND this process does not
+ * hold the whole session) whose OWN words carry a risk signal is not left
+ * below the page line: it is raised to the bottom of the high band, so it
+ * flags and pages. The signal must be in the turn itself:
+ *   - a medium- or high-tier crisis keyword (50 or more), or
+ *   - a strong context signal of intent, goodbye or means, neither negated nor
+ *     retracted ("I'm going to do it tonight", "this is the last time we'll
+ *     talk"), or
+ *   - a moderation self-harm score at the moderation-wake level (40) or more,
+ * and the assessor must not have settled the turn on its own words as a
+ * negation, a reference, someone else's situation or harm to others.
+ * Ordinary messages carry none of these and are never raised, so an outage
+ * does not page on every turn. Not covered, knowingly: a turn with no signal
+ * of its own ("yes", "myself") in a session this process did not see start;
+ * nothing in memory says what it answers or completes.
+ * Pure; exported for tests.
+ */
+export function applyContextBlindFloor(input: {
+  historySource: string | undefined;
+  riskScore: number;
+  keywordScore: number;
+  content: string;
+  moderationScore: number;
+  llmContext: string | null | undefined;
+}): { riskScore: number; floored: boolean } {
+  const unchanged = { riskScore: input.riskScore, floored: false };
+  if (!input.historySource || !CONTEXT_BLIND_SOURCES.has(input.historySource)) return unchanged;
+  if (input.riskScore >= RISK_BANDS.high) return unchanged;
+  if (input.llmContext && CONTEXT_BLIND_EXEMPT_CONTEXTS.has(input.llmContext)) return unchanged;
+  const ownSignal =
+    input.keywordScore >= PASSIVE_IDEATION_SCORE ||
+    hasStandingStrongSignal(input.content) ||
+    input.moderationScore >= MODERATION_WAKE_SCORE;
+  return ownSignal ? { riskScore: RISK_BANDS.high, floored: true } : unchanged;
 }
 
 interface RiskAnalysisResult {
@@ -2082,7 +2150,15 @@ export async function analyzeMessageRisk(
     const short = message.session_id.substring(0, 12);
     // A keyword turn is assessed: its model setting and safety identifier are
     // read alongside (prepareAssessorCall), not after these reads.
-    const assessorSetup = keywordAnalysis.keywordScore > 0 ? prepareAssessorCall(message.session_id) : undefined;
+    // So is a keyword-free turn that is certain to be assessed: one carrying a
+    // context signal, or one answering a safety question (ai-therapist-373: a
+    // "yes" waited one more read deadline than a keyword turn before its page).
+    const contextSignals = keywordAnalysis.keywordScore === 0 ? detectContextSignals(message.content) : [];
+    const certainToBeAssessed =
+      keywordAnalysis.keywordScore > 0 ||
+      contextSignals.length > 0 ||
+      (message.source !== 'checkin' && repliesToSafetyQuestion(conversationHistory));
+    const assessorSetup = certainToBeAssessed ? prepareAssessorCall(message.session_id) : undefined;
     const [trajectory, sessionContext] = await Promise.all([
       readWithin(
         trackEmotionalTrajectory(message.session_id, message.stitched_message_ids ?? []),
@@ -2097,7 +2173,6 @@ export async function analyzeMessageRisk(
         (err) => log.error({ err }, `[risk] session risk context for ${short}... is slow; assessing the turn anyway`),
       ),
     ]);
-    const contextSignals = keywordAnalysis.keywordScore === 0 ? detectContextSignals(message.content) : [];
 
     const moderationResult = await moderationPromise;
     const moderation = moderationResult?.screen.scores ?? null;
@@ -2313,6 +2388,22 @@ export async function analyzeMessageRisk(
         riskScore = lifted;
       }
       factors = [...factors, `trajectory: ${trajectory.trend}`];
+    }
+
+    // No history the turn can be read against, and the turn's own words carry
+    // risk: fail toward paging (ai-therapist-373; applyContextBlindFloor).
+    // Before the caps below, which judge the turn's own words and still hold.
+    const contextBlind = applyContextBlindFloor({
+      historySource: message.history_source,
+      riskScore,
+      keywordScore: keywordAnalysis.keywordScore,
+      content: message.content,
+      moderationScore,
+      llmContext: llm?.context,
+    });
+    if (contextBlind.floored) {
+      riskScore = contextBlind.riskScore;
+      factors = [...factors, 'risk words scored without the conversation (history unreadable)'];
     }
 
     // A step toward help does not page by itself. "I'm going to do it, I'll
@@ -2532,6 +2623,8 @@ export async function analyzeMessageRisk(
                 }
               : {}),
             ...(message.source ? { source: message.source } : {}),
+            ...(message.history_source ? { history_source: message.history_source } : {}),
+            ...(contextBlind.floored ? { context_blind_floor: RISK_BANDS.high } : {}),
             ...(helpStepCapped ? { help_step_cap: true } : {}),
             ...(hyperboleCapped ? { conditional_joke_cap: true } : {}),
             // Why a turn of a risk-bearing session was NOT context-assessed.
@@ -2596,12 +2689,50 @@ export async function flagSessionCrisis(
    *  failed (ai-therapist-369). Seconds or minutes may have passed, and a
    *  later turn may have flagged the session at a higher score meanwhile: the
    *  session row keeps the higher score (its crisis event still records this
-   *  turn's own). Only used for HIGH flags, which no flag can outrank. */
-  options: { retry?: boolean } = {},
-): Promise<void> {
+   *  turn's own). Only used for HIGH flags, which no flag can outrank.
+   *  `attemptedAt` (with `retry`): when the first write was attempted. A staff
+   *  unflag after that moment wins: the retry writes nothing
+   *  (ai-therapist-373). With a message id, a 'flagged' crisis event already
+   *  stored for the same message also means nothing is written. */
+  options: { retry?: boolean; attemptedAt?: Date } = {},
+): Promise<'written' | 'skipped_unflagged' | 'skipped_duplicate'> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    if (options.retry) {
+      // The same turn was flagged by another write meanwhile (a re-sent
+      // transcript batch re-scoring it): one turn, one crisis event, one
+      // adverse-event draft.
+      if (messageId != null) {
+        const already = await client.query(
+          `SELECT 1 FROM crisis_events
+            WHERE session_id = $1 AND event_type = 'flagged' AND message_id = $2
+            LIMIT 1`,
+          [sessionId, messageId],
+        );
+        if ((already.rowCount ?? already.rows?.length ?? 0) > 0) {
+          await client.query('ROLLBACK');
+          return 'skipped_duplicate';
+        }
+      }
+      // A member of staff cleared the flag after this turn's first attempt:
+      // the retry must not put it back. The comparison is on the app's clock
+      // (the attempt) against the database's (the unflag); a skew of seconds
+      // only matters for an unflag inside that skew.
+      if (options.attemptedAt) {
+        const unflagged = await client.query(
+          `SELECT 1 FROM therapy_sessions
+            WHERE session_id = $1 AND crisis_unflagged_at IS NOT NULL AND crisis_unflagged_at > $2::timestamptz
+            FOR UPDATE`,
+          [sessionId, options.attemptedAt.toISOString()],
+        );
+        if ((unflagged.rowCount ?? unflagged.rows?.length ?? 0) > 0) {
+          await client.query('ROLLBACK');
+          return 'skipped_unflagged';
+        }
+      }
+    }
 
     // Update therapy_sessions
     await client.query(
@@ -2681,6 +2812,7 @@ export async function flagSessionCrisis(
       })
       .catch((err) => console.error('AE auto-draft failed:', err));
   }
+  return 'written';
 }
 
 /**

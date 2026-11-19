@@ -16,6 +16,7 @@ import {
 import { getSystemPrompt } from '../../utils/sessionHelpers.js';
 import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
 import { rememberSessionAccount } from '../../utils/sessionAccounts.js';
+import { rememberSessionStart, rememberTurn } from '../../utils/recentTurns.js';
 import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
 
 import { createLogger } from '../../utils/logger.js';
@@ -110,6 +111,9 @@ export default function logsRoutes(): Router {
           // Created for this requester: its account is known from here on
           // (the crisis pipeline's demo check needs no read, ai-therapist-369).
           rememberSessionAccount(sessionId, req.session?.userRole);
+          // Started here: this process's copy of its turns is complete
+          // (ai-therapist-373).
+          rememberSessionStart(sessionId);
           log.info(`Created session ${sessionId.substring(0, 12)}... with user_id: ${userId}`);
 
           try {
@@ -128,6 +132,18 @@ export default function logsRoutes(): Router {
             // Configuration is not critical for message logging — continue.
           }
         }
+      }
+
+      // Every conversational record is kept in memory before it is stored,
+      // for the crisis pipeline's context when the database cannot give it
+      // (ai-therapist-373). Keyed by what the browser sent, so a batch it
+      // re-sends after a 5xx is not kept twice.
+      for (const msg of messages) {
+        rememberTurn(msg.session_id, msg.role, msg.content, {
+          at: msg.created_at instanceof Date ? msg.created_at.getTime() : undefined,
+          messageType: msg.message_type,
+          key: `batch\u0000${msg.role}\u0000${unsavedKey(msg)}`,
+        });
       }
 
       let insertedMessages: Awaited<ReturnType<typeof insertMessagesBatch>>;

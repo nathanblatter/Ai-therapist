@@ -42,7 +42,8 @@ import {
 } from '../../utils/promptContext.js';
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
 import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
-import { rememberSessionAccount } from '../../utils/sessionAccounts.js';
+import { rememberSessionAccount, rememberSessionParticipant } from '../../utils/sessionAccounts.js';
+import { rememberSessionStart, rememberTurn } from '../../utils/recentTurns.js';
 import { requireConsent } from '../../middleware/consent.js';
 import { requireOutsideQuietHours } from '../../middleware/quietHours.js';
 import { requireActiveStudyStatus } from '../../middleware/studyStatus.js';
@@ -53,7 +54,8 @@ import type { PreparedHandoff } from '../../services/textHandoff.service.js';
 import type { RecoveryCrisisContact } from '../../../shared/recoveryPrompt.js';
 
 import { createLogger } from '../../utils/logger.js';
-import { DATABASE_RETRY_MESSAGE, isDatabaseUnavailableError } from '../../utils/dbErrors.js';
+import { isDatabaseUnavailableError } from '../../utils/dbErrors.js';
+import { databaseRetryMessage } from '../../utils/databaseRetryMessage.js';
 
 const log = createLogger('chatRoutes');
 
@@ -115,6 +117,9 @@ export default function chatRoutes(): Router {
     // incident, then its own first words in writing.
     if (prepared.guidance) injectGuidance(sessionId, prepared.guidance);
     seedAssistantOpening(sessionId, prepared.firstMessage);
+    // It usually asks whether the participant is safe: the crisis pipeline
+    // must know the next turn answers it, database or not (ai-therapist-373).
+    rememberTurn(sessionId, 'assistant', prepared.firstMessage);
     await insertMessagesBatch([
       {
         session_id: sessionId,
@@ -192,6 +197,9 @@ export default function chatRoutes(): Router {
       // above the screen), they are screened anyway, from the catch below.
       let sessionId: string | null = null;
       let checkinScreenStarted = false;
+      // ai-therapist-373: whether the session row was written, for the page a
+      // failed start's check-in screen may send (see the catch below).
+      let sessionStored = false;
 
       try {
         // Enforce session limits (mirrors the /token endpoint). MUST use the
@@ -246,6 +254,11 @@ export default function chatRoutes(): Router {
         // The crisis pipeline's demo check, known from now on without a read
         // (ai-therapist-369).
         rememberSessionAccount(sessionId, req.session?.userRole);
+        // The participant, for the paging layer's fold rule without a read,
+        // and the start (with the check-in's words) for the crisis pipeline's
+        // in-memory context (ai-therapist-373).
+        rememberSessionParticipant(sessionId, numericUserId);
+        rememberSessionStart(sessionId, sanitizeCheckin(req.body?.checkin));
 
         // Base prompt + returning-participant memory (opt-in) + today's check-in.
         // The proactive-offering A/B condition (ai-therapist-74) is resolved ONCE
@@ -306,6 +319,7 @@ export default function chatRoutes(): Router {
           // excluded from every real analytics/export surface.
           isDemo: isNonStudyUser(userRole, username) || req.session?.isSandbox === true,
         });
+        sessionStored = true;
 
         // Persist the resolved research condition + assembled instructions to
         // session_configurations, same as the voice path — this row is the
@@ -422,6 +436,7 @@ export default function chatRoutes(): Router {
             });
             const { seedAssistantOpening, injectGuidance } = await import('../../services/chatTherapy.service.js');
             seedAssistantOpening(sessionId, opening);
+            rememberTurn(sessionId, 'assistant', opening);
             // Session steering, same mechanism as the continuation recap below
             // (not a change to the stored system prompt): the prompt's "once, at
             // the start" disclaimer rule has already been satisfied by the
@@ -515,6 +530,13 @@ export default function chatRoutes(): Router {
         if (checkinText && !checkinScreenStarted && req.session?.userRole !== 'demo') {
           const screenedSession = sessionId ?? `chat_${Date.now()}_${Math.random().toString(36).substring(7)}`;
           rememberSessionAccount(screenedSession, req.session?.userRole);
+          // ai-therapist-373: a page from this screen is keyed by the
+          // participant the request names (so the participant's retry folds
+          // into it instead of paging again) and, when the session row was
+          // never written, links to the participant rather than to a session
+          // that does not exist. An anonymous browser has no participant to
+          // key by: its page stays keyed and linked by the session.
+          rememberSessionParticipant(screenedSession, numericUserId, { stored: sessionStored });
           log.warn(
             `[ChatStart] start failed before the check-in screen; screening it for ${screenedSession.substring(0, 12)}... ` +
               `(user ${numericUserId ?? 'anonymous'})`,
@@ -524,7 +546,7 @@ export default function chatRoutes(): Router {
             .catch((err) => log.error({ err }, '[ChatStart] check-in screen after a failed start failed'));
         }
         if (isDatabaseUnavailableError(error)) {
-          return res.status(503).json({ error: 'database_unavailable', message: DATABASE_RETRY_MESSAGE });
+          return res.status(503).json({ error: 'database_unavailable', message: databaseRetryMessage() });
         }
         res.status(500).json({
           error: 'Failed to start chat session',
@@ -585,11 +607,15 @@ export default function chatRoutes(): Router {
       // message_id and a model failure no longer loses the participant's words
       // (they used to be inserted only after a successful model call).
       let userMsg: Awaited<ReturnType<typeof insertMessagesBatch>>[number];
+      // Kept in memory first, so the crisis pipeline has this turn and the
+      // ones before it whatever the database does (ai-therapist-373).
+      const remembered = rememberTurn(sessionId, 'user', message);
       try {
         [userMsg] = await insertMessagesBatch([
           { session_id: sessionId, role: 'user', message_type: 'text', content: message, content_redacted: null },
         ]);
         savedTurnId = userMsg.message_id;
+        if (remembered) remembered.messageId = userMsg.message_id;
       } catch (insertErr) {
         // Same rule as the voice path (sidebandManager onUserTurn): a database
         // that cannot store the turn must not also silence crisis detection
@@ -808,8 +834,10 @@ export default function chatRoutes(): Router {
         ? await sendMessage(sessionId, message, { narrowCrisisTurn: true })
         : await sendMessage(sessionId, message);
 
-      // Persist the assistant turn; content_redacted is filled in once per
-      // session at session end (see sessionRedaction.service), not per message.
+      // In memory first (a safety question the next turn may answer), then
+      // persisted; content_redacted is filled in once per session at session
+      // end (see sessionRedaction.service), not per message.
+      rememberTurn(sessionId, 'assistant', aiResponse);
       await insertMessagesBatch([
         { session_id: sessionId, role: 'assistant', message_type: 'text', content: aiResponse, content_redacted: null },
       ]);
@@ -896,7 +924,7 @@ export default function chatRoutes(): Router {
       // The database did not answer in time (ai-therapist-366): a retryable
       // state with its own message, not a generic failure.
       if (isDatabaseUnavailableError(error)) {
-        return res.status(503).json({ error: 'database_unavailable', message: DATABASE_RETRY_MESSAGE });
+        return res.status(503).json({ error: 'database_unavailable', message: databaseRetryMessage() });
       }
 
       res.status(500).json({

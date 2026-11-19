@@ -155,7 +155,7 @@ vi.mock('../utils/sessionHelpers.js', () => ({
   resolveVendorCeilingMinutes: vi.fn(async () => 60),
 }));
 
-const { runCrisisPipeline } = await import('./crisisPipeline.service.js');
+const { runCrisisPipeline, _resetEarlyPageStateForTests } = await import('./crisisPipeline.service.js');
 const paging = await import('./crisisPaging.service.js');
 
 const SESSION = 'chat_ladder_1';
@@ -193,6 +193,9 @@ const pagingRows = () =>
 
 beforeEach(() => {
   paging._resetPagingStateForTests();
+  // Message ids restart at 1 in every test: forget the turns flagged in the
+  // last one (ai-therapist-373 remembers each flagged turn for 5 minutes).
+  _resetEarlyPageStateForTests();
   db.state = { crisis_flagged: false, crisis_severity: null, crisis_risk_score: null };
   db.actions.length = 0;
   db.flags.length = 0;

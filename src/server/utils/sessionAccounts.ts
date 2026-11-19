@@ -37,7 +37,44 @@ export function knownDemoAccountSession(sessionId: string): boolean | null {
   return knownDemoSessions.get(sessionId) ?? null;
 }
 
+// The participant behind a session, from the request that started it
+// (ai-therapist-373). The paging layer keys its fold rule by participant and
+// reads the participant from the session row; a session whose row was never
+// written (a chat start that failed after minting its id, whose check-in is
+// still screened) has no row to read, so its page was keyed by a session id
+// nobody else uses, its retry was not folded into it (two pages), and its
+// link opened a session that does not exist.
+const knownParticipants = new Map<string, { userId: number; stored: boolean }>();
+
+/**
+ * Record the signed-in participant of a session as it starts. `stored`:
+ * false when the session row was never written (the start failed first).
+ * Anonymous browsers (no user id) are not recorded. Never throws.
+ */
+export function rememberSessionParticipant(
+  sessionId: string,
+  userId: number | null | undefined,
+  opts: { stored?: boolean } = {},
+): void {
+  if (!sessionId || typeof userId !== 'number' || !Number.isInteger(userId)) return;
+  knownParticipants.delete(sessionId);
+  knownParticipants.set(sessionId, { userId, stored: opts.stored !== false });
+  if (knownParticipants.size > KNOWN_ACCOUNTS_MAX) {
+    for (const id of knownParticipants.keys()) {
+      if (knownParticipants.size <= KNOWN_ACCOUNTS_MAX / 2) break;
+      knownParticipants.delete(id);
+    }
+  }
+}
+
+/** The participant remembered at session start, or null when this process
+ *  does not know (`stored` false: the session row does not exist). */
+export function knownSessionParticipant(sessionId: string): { userId: number; stored: boolean } | null {
+  return knownParticipants.get(sessionId) ?? null;
+}
+
 /** Test hook. */
 export function _forgetSessionAccountsForTests(): void {
   knownDemoSessions.clear();
+  knownParticipants.clear();
 }
