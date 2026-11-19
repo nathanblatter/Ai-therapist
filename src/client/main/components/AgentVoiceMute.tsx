@@ -90,12 +90,14 @@ export function CrisisListenPrompt({ onUnmute }: { onUnmute: () => void }) {
   );
 }
 
+// Hover dims rather than switching to amber-800: the dark theme flips the
+// amber ramp, so hover:bg-amber-800 put white text on pale yellow there.
 function ListenButton({ onUnmute, wide = false }: { onUnmute: () => void; wide?: boolean }) {
   return (
     <button
       type="button"
       onClick={onUnmute}
-      className={`${wide ? 'w-full' : ''} min-h-[44px] inline-flex items-center justify-center gap-2 rounded-full bg-amber-700 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-offset-2 focus-visible:ring-brand`}
+      className={`${wide ? 'w-full' : ''} min-h-[44px] inline-flex items-center justify-center gap-2 rounded-full bg-amber-700 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 focus:outline-none focus-visible:ring-4 focus-visible:ring-offset-2 focus-visible:ring-brand`}
     >
       <Volume2 size={16} aria-hidden="true" />
       {SPEAKER_MUTE_COPY.listenPrompt}
