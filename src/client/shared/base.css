@@ -132,6 +132,20 @@ body {
   animation: slideIn 0.3s ease-out;
 }
 
+/* Voice tool overlay awaiting the server's confirmation (PendingToolNotice).
+   Held invisible for 400 ms so the usual sub-second wait does not flash. */
+@keyframes pendingNoticeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.pending-notice-in {
+  animation: pendingNoticeIn 0.2s ease-out 0.4s both;
+}
+
 /* ---- Voice orb (themed via --t-orb-a / --t-orb-b) ---- */
 @keyframes orbBreathe {
   0%,

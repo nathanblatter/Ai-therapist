@@ -108,6 +108,30 @@ export default function sessionsRoutes(): Router {
     res.sendStatus(204);
   });
 
+  // GET /api/sessions/:sessionId/tool-outcome/:callId - how a voice tool call
+  // ended, for its overlay (shared/toolOverlayPolicy.ts). The server pushes the
+  // same outcome on the session socket; the browser asks here only when that
+  // message has not arrived (the participant socket is unreliable through the
+  // tunnel, ai-therapist-18, and is down during a reconnect). Owner-gated.
+  // `outcome: null` means none is known yet: the call is still running, or
+  // this process never ran it.
+  router.get('/api/sessions/:sessionId/tool-outcome/:callId', async (req, res) => {
+    const { sessionId, callId } = req.params;
+    try {
+      const session = await getSessionAccessInfo(sessionId);
+      if (!session) return res.status(404).json({ error: 'Session not found' });
+      if (!canAccessSession(req, session, sessionId)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+      const { getVoiceToolOutcome } = await import('../../services/toolOverlays.js');
+      res.set('Cache-Control', 'no-store');
+      res.json({ outcome: getVoiceToolOutcome(sessionId, callId) });
+    } catch (err) {
+      log.error({ err }, 'Failed to read tool outcome');
+      res.status(500).json({ error: 'Failed to read tool outcome' });
+    }
+  });
+
   // POST /api/sessions/:sessionId/scale-response - store a completed screener
   // (PHQ-2/GAD-2) submitted from the administer_scale overlay. Owner-gated.
   // Refused after withdrawal (ai-therapist-322).
@@ -131,6 +155,15 @@ export default function sessionsRoutes(): Router {
       if (!session) return res.status(404).json({ error: 'Session not found' });
       if (!canAccessSession(req, session, sessionId)) {
         return res.status(403).json({ error: 'Access denied' });
+      }
+
+      // Screeners switched off by the research team (features.disabled_tools,
+      // the administer_scale kill switch): the tool refuses to administer one,
+      // so no response is stored either. Before 2026-11-19 a form the voice
+      // browser opened anyway was stored here as a new administration.
+      const features = ((await getSystemConfig()).features ?? {}) as { disabled_tools?: unknown };
+      if (Array.isArray(features.disabled_tools) && features.disabled_tools.includes('administer_scale')) {
+        return res.status(409).json({ error: 'scale_unavailable', scale: def.id });
       }
 
       // Weekly cadence gate (IRB consent form: each screener "no more than

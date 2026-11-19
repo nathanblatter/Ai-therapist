@@ -1,5 +1,5 @@
-// Wave-2 tool UI surfaces, launched from AI function calls on the WebRTC data
-// channel (same pattern as ExerciseOverlay): crisis resource card, CBT thought
+// Wave-2 tool UI surfaces, launched from AI function calls (on voice, once the
+// server reports the outcome: lib/voiceOverlayGate.ts): crisis resource card, CBT thought
 // record, private journal, session recap, safety plan card, and PHQ-2/GAD-2
 // screener form. One overlay at a time, dispatched by `kind`.
 import { useState, useEffect, useRef } from 'react';
