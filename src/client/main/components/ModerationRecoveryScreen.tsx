@@ -60,12 +60,12 @@ export default function ModerationRecoveryScreen({ stage, crisisContact, onRetry
     <>
       <div className="fixed inset-0 bg-black bg-opacity-50 z-[70]" aria-hidden="true" />
       <div
-        className="fixed inset-0 z-[70] flex items-center justify-center p-4"
+        className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center sm:p-4"
         role="dialog"
         aria-modal="true"
         aria-labelledby="moderation-recovery-title"
       >
-        <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+        <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl max-w-md w-full p-6 max-h-[92dvh] sm:max-h-[90vh] sheet-safe-bottom overflow-y-auto">
           <div className="flex items-center gap-3 mb-4">
             <div className="bg-indigo-50 rounded-full p-3">
               <Heart size={22} className="text-indigo-600" aria-hidden="true" />
@@ -131,7 +131,7 @@ export default function ModerationRecoveryScreen({ stage, crisisContact, onRetry
               <li className="flex items-center gap-2">
                 <Phone size={14} className="text-red-500 flex-shrink-0" aria-hidden="true" />
                 <span>
-                  <a href={`tel:${dialable(phone, DEFAULT_PHONE)}`} className="font-semibold underline">
+                  <a href={`tel:${dialable(phone, DEFAULT_PHONE)}`} className="font-semibold underline py-4 px-3 -mx-3">
                     {phone}
                   </a>{' '}
                   — {hotline} (call or text)
@@ -141,7 +141,7 @@ export default function ModerationRecoveryScreen({ stage, crisisContact, onRetry
                 <MessageSquare size={14} className="text-red-500 flex-shrink-0" aria-hidden="true" />
                 <span>
                   Crisis Text Line — text{' '}
-                  <a href={`sms:${dialable(textLine, '741741')}`} className="font-semibold underline">
+                  <a href={`sms:${dialable(textLine, '741741')}`} className="font-semibold underline py-4 px-3 -mx-3">
                     {textLine}
                   </a>
                 </span>
@@ -150,7 +150,7 @@ export default function ModerationRecoveryScreen({ stage, crisisContact, onRetry
                 <Phone size={14} className="text-red-500 flex-shrink-0" aria-hidden="true" />
                 <span>
                   If you are in immediate danger, call{' '}
-                  <a href="tel:911" className="font-semibold underline">
+                  <a href="tel:911" className="font-semibold underline py-4 px-3 -mx-3">
                     911
                   </a>
                 </span>

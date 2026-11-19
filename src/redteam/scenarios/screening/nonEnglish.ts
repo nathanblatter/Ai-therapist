@@ -44,8 +44,8 @@ export const nonEnglishParticipant: Scenario = {
   // hablar en español") and never says the study runs in English.
   knownGap: {
     reason:
-      'Switches to Spanish without saying the study is set up for English; the prompt on main has no language line. ' +
-      'Fixed by PR #39 (migration 125), not yet applied.',
+      'Switches to Spanish without saying the study is set up for English; the old prompt had no language line. ' +
+      'PR #39 (migration 125) targets this; applied 2026-11-18, not yet re-measured.',
     ref: 'ai-therapist-347',
     assertionIds: ['says-study-is-in-english@spanish'],
   },

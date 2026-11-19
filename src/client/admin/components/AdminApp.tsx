@@ -413,7 +413,7 @@ export default function AdminApp() {
     .filter((group) => group.items.length > 0);
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50">
+    <div className="flex flex-col h-dvh bg-gray-50">
       <AdminHeader
         onMenuClick={() => setIsSidebarOpen(true)}
         onMfaClick={() => setCurrentView('mfa')}
@@ -437,17 +437,17 @@ export default function AdminApp() {
             isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
         >
-          <div className="flex items-center justify-between p-4 md:hidden">
+          <div className="flex items-center justify-between p-4 pt-[max(1rem,env(safe-area-inset-top))] md:hidden">
             <span className="font-semibold text-gray-700">Menu</span>
             <button
               onClick={() => setIsSidebarOpen(false)}
-              className="p-2 -mr-2 text-gray-500 hover:text-gray-800"
+              className="p-2 -mr-2 min-h-[44px] min-w-[44px] flex items-center justify-center text-gray-500 hover:text-gray-800"
               aria-label="Close menu"
             >
               <X size={20} />
             </button>
           </div>
-          <nav className="p-4 pt-0 md:pt-4 overflow-y-auto h-full">
+          <nav className="p-4 pt-0 md:pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] overflow-y-auto h-full">
             {visibleGroups.map((group) => (
               <div key={group.label} className="mb-4">
                 <p className="px-4 pb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">{group.label}</p>
@@ -461,7 +461,7 @@ export default function AdminApp() {
                           setCurrentView(item.id);
                           setIsSidebarOpen(false);
                         }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition ${
+                        className={`w-full flex items-center gap-3 px-4 py-2.5 min-h-[44px] rounded-lg transition ${
                           currentView === item.id ? 'bg-royal text-white' : 'text-gray-700 hover:bg-gray-100'
                         }`}
                       >
@@ -497,7 +497,7 @@ export default function AdminApp() {
                 href="/"
                 target="_blank"
                 rel="noopener"
-                className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-gray-700 hover:bg-gray-100"
+                className="w-full flex items-center gap-3 px-4 py-2.5 min-h-[44px] rounded-lg transition text-gray-700 hover:bg-gray-100"
               >
                 <ExternalLink size={20} />
                 <span className="font-medium">Participant App</span>
@@ -537,14 +537,18 @@ export default function AdminApp() {
           <ErrorBoundary resetKey={currentView ?? 'loading'}>
             <Suspense fallback={<ViewLoading />}>
               {currentView === null && <ViewLoading />}
-              {currentView === 'triage' && <CaseworkerDashboard onSelectClient={openParticipantProfile} />}
+              {currentView === 'triage' && (
+                <div className="p-4 md:p-6">
+                  <CaseworkerDashboard onSelectClient={openParticipantProfile} />
+                </div>
+              )}
               {currentView === 'work-queue' && (
-                <div>
+                <div className="p-4 md:p-6">
                   <WorkQueue
                     role={userRole === 'caseworker' ? 'caseworker' : 'therapist'}
                     onSelectClient={openParticipantProfile}
                   />
-                  <div className="px-6 pb-6">
+                  <div className="pt-6">
                     <NotificationPreferences />
                   </div>
                 </div>

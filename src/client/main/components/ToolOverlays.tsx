@@ -81,7 +81,7 @@ export function Shell({
     <>
       <div className="fixed inset-0 bg-black bg-opacity-50 z-40" aria-hidden="true" />
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4"
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -89,7 +89,7 @@ export function Shell({
         <div
           ref={panelRef}
           tabIndex={-1}
-          className={`bg-white rounded-2xl shadow-2xl w-full ${wide ? 'max-w-xl' : 'max-w-md'} max-h-[90vh] overflow-y-auto animate-fadeIn focus:outline-none`}
+          className={`bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full ${wide ? 'max-w-xl' : 'max-w-md'} max-h-[92dvh] sm:max-h-[90vh] sheet-safe-bottom overflow-y-auto animate-fadeIn focus:outline-none`}
         >
           <header className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
             <h2 className="text-lg font-semibold text-gray-800">{title}</h2>
@@ -159,27 +159,33 @@ function ResourceCard({ resourceType, onClose }: { resourceType: string; onClose
           <div key={r.key} className="border border-gray-200 rounded-xl p-4">
             <p className="font-medium text-gray-900">{r.name}</p>
             <p className="text-xs text-gray-500 mb-3">{r.note}</p>
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
               {r.phone && (
                 <a
                   href={`tel:${r.phone.replace(/[^0-9+]/g, '')}`}
-                  className="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2.5 rounded-lg"
+                  className="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2.5 min-h-[44px] rounded-lg"
                 >
-                  <Phone size={15} /> Call {r.phone}
+                  <Phone size={15} className="shrink-0" /> Call {r.phone}
                 </a>
               )}
               {r.sms && (
                 <a
                   href={`sms:${r.sms.number}${r.sms.body ? `?&body=${r.sms.body}` : ''}`}
-                  className="flex-1 flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-800 text-sm font-medium px-4 py-2.5 rounded-lg"
+                  className="flex-1 flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-800 text-sm font-medium px-4 py-2.5 min-h-[44px] rounded-lg"
                 >
-                  <MessageSquare size={15} /> Text {r.sms.body || r.sms.number}
+                  <MessageSquare size={15} className="shrink-0" /> Text {r.sms.body || r.sms.number}
                 </a>
               )}
             </div>
           </div>
         ))}
-        <p className="text-xs text-gray-400 text-center pt-1">In immediate danger? Call 911.</p>
+        <p className="text-xs text-gray-400 text-center pt-1">
+          In immediate danger? Call{' '}
+          <a href="tel:911" className="underline py-4 px-3 -mx-3">
+            911
+          </a>
+          .
+        </p>
       </div>
     </Shell>
   );
@@ -240,14 +246,14 @@ function ThoughtRecord({
         <div className="flex justify-between">
           <button
             onClick={() => (step === 0 ? onClose() : setStep(step - 1))}
-            className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2"
+            className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2 min-h-[44px]"
           >
             {step === 0 ? 'Cancel' : 'Back'}
           </button>
           <button
             onClick={() => (isLast ? onComplete(values) : setStep(step + 1))}
             disabled={!value.trim()}
-            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-5 py-2.5 rounded-lg"
+            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-5 py-2.5 min-h-[44px] rounded-lg"
           >
             {isLast ? 'Finish' : 'Next'}
           </button>
@@ -283,13 +289,13 @@ function Journal({
           autoFocus
         />
         <div className="flex justify-between items-center">
-          <button onClick={onClose} className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2">
+          <button onClick={onClose} className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2 min-h-[44px]">
             Keep it private
           </button>
           <button
             onClick={() => onShare(text)}
             disabled={!text.trim()}
-            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-5 py-2.5 rounded-lg"
+            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-5 py-2.5 min-h-[44px] rounded-lg"
           >
             Share with the AI
           </button>
@@ -378,13 +384,15 @@ export function SafetyPlanCard({ plan, onClose }: { plan: SafetyPlanData; onClos
         })}
         <div className="bg-red-50 rounded-xl p-4 space-y-1.5">
           <p className="text-xs uppercase tracking-wide text-red-400">If things feel unsafe</p>
-          <a href="tel:988" className="block text-sm text-red-900 font-medium">
+          <a href="tel:988" className="flex items-center min-h-[44px] text-sm text-red-900 font-medium underline">
             Call or text 988 — Suicide &amp; Crisis Lifeline
           </a>
-          <a href="sms:741741?&body=HOME" className="block text-sm text-red-900">
+          <a href="sms:741741?&body=HOME" className="flex items-center min-h-[44px] text-sm text-red-900 underline">
             Text HOME to 741741 — Crisis Text Line
           </a>
-          <p className="text-sm text-red-900">Call 911 for immediate danger</p>
+          <a href="tel:911" className="flex items-center min-h-[44px] text-sm text-red-900 underline">
+            Call 911 for immediate danger
+          </a>
         </div>
         <p className="text-xs text-gray-400 text-center">
           You can download this from the post-session screen so it&apos;s with you when you need it.
@@ -473,7 +481,7 @@ function ScaleForm({
                 <button
                   key={opt.value}
                   onClick={() => setAnswers((a) => a.map((v, j) => (j === i ? opt.value : v)))}
-                  className={`text-xs px-3 py-2.5 rounded-lg border transition-colors ${
+                  className={`text-xs px-3 py-2.5 min-h-[44px] rounded-lg border transition-colors ${
                     answers[i] === opt.value
                       ? 'bg-blue-600 border-blue-600 text-white'
                       : 'border-gray-200 text-gray-700 hover:bg-gray-50'
@@ -486,13 +494,13 @@ function ScaleForm({
           </div>
         ))}
         <div className="flex justify-between items-center">
-          <button onClick={onClose} className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2">
+          <button onClick={onClose} className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2 min-h-[44px]">
             Skip
           </button>
           <button
             onClick={() => void submit()}
             disabled={!complete || submitting}
-            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-5 py-2.5 rounded-lg"
+            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-5 py-2.5 min-h-[44px] rounded-lg"
           >
             {submitting ? 'Saving…' : 'Done'}
           </button>
@@ -557,7 +565,7 @@ function ValuesSort({ onClose, onComplete }: { onClose: () => void; onComplete: 
           <button
             onClick={() => onComplete(selected)}
             disabled={selected.length === 0}
-            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-5 py-2.5 rounded-lg"
+            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-5 py-2.5 min-h-[44px] rounded-lg"
           >
             Done
           </button>
@@ -628,13 +636,13 @@ function FearLadder({ onClose, onComplete }: { onClose: () => void; onComplete: 
           + Add another
         </button>
         <div className="flex justify-between items-center">
-          <button onClick={onClose} className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2">
+          <button onClick={onClose} className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2 min-h-[44px]">
             Cancel
           </button>
           <button
             onClick={() => onComplete(filled)}
             disabled={filled.length === 0}
-            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-5 py-2.5 rounded-lg"
+            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-5 py-2.5 min-h-[44px] rounded-lg"
           >
             Done
           </button>
@@ -719,14 +727,14 @@ function CustomWorksheet({
         <div className="flex justify-between">
           <button
             onClick={() => (step === 0 ? onClose() : setStep(step - 1))}
-            className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2"
+            className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2 min-h-[44px]"
           >
             {step === 0 ? 'Cancel' : 'Back'}
           </button>
           <button
             onClick={() => (isLast ? onComplete(values) : setStep(step + 1))}
             disabled={current.type !== 'scale' && !value.trim()}
-            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-5 py-2.5 rounded-lg"
+            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-5 py-2.5 min-h-[44px] rounded-lg"
           >
             {isLast ? 'Finish' : 'Next'}
           </button>

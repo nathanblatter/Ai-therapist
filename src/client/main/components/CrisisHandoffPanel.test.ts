@@ -40,10 +40,10 @@ describe('PinnedCrisisCard', () => {
     expect(html).not.toContain('<form');
   });
 
-  it.each(KINDS)('%s: every action is a 44px touch target', (kind) => {
+  it.each(KINDS)('%s: every action is a 48px touch target', (kind) => {
     const anchors = card(kind).match(/<a [^>]*>/g) ?? [];
     expect(anchors).toHaveLength(3);
-    for (const anchor of anchors) expect(anchor).toContain('min-h-[44px]');
+    for (const anchor of anchors) expect(anchor).toContain('min-h-[48px]');
   });
 
   it('the neutral card is still on screen, without the alert colours or the crisis caption', () => {
@@ -94,11 +94,11 @@ describe('crisisLineActions', () => {
 });
 
 describe('HandoffReplyBar', () => {
-  it('quick replies are buttons with 44px targets, in the order given', () => {
+  it('quick replies are buttons with 48px targets, in the order given', () => {
     const html = bar({ quickReplies: ['Yes', 'No', 'Not sure'] });
     const buttons = html.match(/<button[^>]*>[^<]*<\/button>/g) ?? [];
     expect(buttons.map((b) => b.replace(/<[^>]+>/g, ''))).toEqual(['Yes', 'No', 'Not sure']);
-    for (const button of buttons) expect(button).toContain('min-h-[44px]');
+    for (const button of buttons) expect(button).toContain('min-h-[48px]');
   });
 
   it('renders nothing when there is nothing to offer', () => {
@@ -116,7 +116,7 @@ describe('HandoffReplyBar', () => {
     const html = bar({ voiceReturnAllowed: true });
     expect(html).toContain('Go back to voice');
     expect(html).toContain('This starts a new voice call');
-    expect(html).toContain('min-h-[44px]');
+    expect(html).toContain('min-h-[48px]');
   });
 
   it('the voice button is disabled while a reply is pending or a call is starting', () => {

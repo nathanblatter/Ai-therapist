@@ -8,7 +8,6 @@ import express from 'express';
 import request from 'supertest';
 
 const dbMocks = vi.hoisted(() => ({
-  createSession: vi.fn(),
   getSession: vi.fn(),
   getUserSessions: vi.fn(),
   getSessionMessages: vi.fn(),
@@ -37,12 +36,9 @@ vi.mock('../../utils/sessionHelpers.js', () => helperMocks);
 vi.mock('../../middleware/auth.js', () => ({
   requireAuth: (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
-vi.mock('../../middleware/quietHours.js', () => ({
-  requireOutsideQuietHours: (_req: unknown, _res: unknown, next: () => void) => next(),
-}));
-vi.mock('../../middleware/studyStatus.js', () => ({
-  requireActiveStudyStatus: (_req: unknown, _res: unknown, next: () => void) => next(),
-}));
+// The real withdrawal middleware runs; only its status lookup is stubbed.
+const getStudyStatusMock = vi.hoisted(() => vi.fn());
+vi.mock('../../db/studyStatus.queries.js', () => ({ getStudyStatus: getStudyStatusMock }));
 vi.mock('../../services/sessionName.service.js', () => ({
   generateSessionNameAsync: vi.fn(),
 }));
@@ -64,12 +60,12 @@ import sessionsRoutes from './sessions.routes.js';
 
 const SESSION_ID = 'sess_test_1';
 
-function makeApp() {
+function makeApp(session: Record<string, unknown> = {}) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
     // Cookie ownership so the audio route's hot path skips the access lookup.
-    req.session = { ownedSessions: [SESSION_ID] } as unknown as typeof req.session;
+    req.session = { ownedSessions: [SESSION_ID], ...session } as unknown as typeof req.session;
     next();
   });
   app.use(sessionsRoutes());
@@ -84,6 +80,7 @@ beforeEach(() => {
   dbMocks.insertScaleResponse.mockResolvedValue(undefined);
   dbMocks.getUserLatestScaleScore.mockResolvedValue(null);
   dbMocks.isRecordingConsentedForSession.mockResolvedValue(true);
+  getStudyStatusMock.mockResolvedValue('active');
   (globalThis as { io?: unknown }).io = { to: () => ({ emit: () => {} }) };
 });
 
@@ -158,6 +155,63 @@ describe('POST /api/sessions/:id/scale-response weekly cadence gate', () => {
     expect(res.status).toBe(200);
     expect(dbMocks.getUserLatestScaleScore).not.toHaveBeenCalled();
     expect(dbMocks.insertScaleResponse).toHaveBeenCalled();
+  });
+});
+
+// ai-therapist-322: the consent form says nothing is collected after
+// withdrawal. Study submissions are refused 403; audio is dropped with 204.
+describe('writes from a withdrawn participant', () => {
+  const withdrawn = { userId: 42, userRole: 'participant' };
+
+  beforeEach(() => {
+    getStudyStatusMock.mockResolvedValue('withdrawn');
+  });
+
+  it('refuses a screener, a worksheet and post-session feedback with 403 study_status', async () => {
+    const app = makeApp(withdrawn);
+    const posts: Array<[string, Record<string, unknown>]> = [
+      ['scale-response', { scale: 'phq2', answers: [1, 2] }],
+      ['worksheet-response', { responses: { a: 'b' } }],
+      ['feedback', { helpfulness_rating: 4 }],
+    ];
+    for (const [path, body] of posts) {
+      const res = await request(app).post(`/api/sessions/${SESSION_ID}/${path}`).send(body);
+      expect(res.status).toBe(403);
+      expect(res.body).toMatchObject({ error: 'study_status', studyStatus: 'withdrawn' });
+    }
+    expect(dbMocks.insertScaleResponse).not.toHaveBeenCalled();
+    expect(dbMocks.getSessionAccessInfo).not.toHaveBeenCalled();
+  });
+
+  it('drops audio with 204 and records nothing', async () => {
+    const res = await request(makeApp(withdrawn))
+      .post(`/api/sessions/${SESSION_ID}/audio`)
+      .send({ chunks: ['AAAA'], sampleRate: 24000 });
+    expect(res.status).toBe(204);
+    expect(recorderMocks.appendChunk).not.toHaveBeenCalled();
+  });
+
+  it('does not touch the live conversation of a session already running (typed text still relays)', async () => {
+    sidebandTextMock.mockReturnValue(true);
+    const res = await request(makeApp(withdrawn)).post(`/api/sessions/${SESSION_ID}/text`).send({ text: 'hi' });
+    expect(res.status).toBe(200);
+  });
+
+  it('a paused participant can still submit a screener', async () => {
+    getStudyStatusMock.mockResolvedValue('paused');
+    const res = await request(makeApp(withdrawn))
+      .post(`/api/sessions/${SESSION_ID}/scale-response`)
+      .send({ scale: 'phq2', answers: [1, 2] });
+    expect(res.status).toBe(200);
+  });
+});
+
+describe('POST /api/sessions/create (removed, ai-therapist-323)', () => {
+  it('is gone: no route answers, nothing is created', async () => {
+    const res = await request(makeApp({ userId: 42, userRole: 'participant' }))
+      .post('/api/sessions/create')
+      .send({ sessionName: 'x' });
+    expect(res.status).toBe(404);
   });
 });
 

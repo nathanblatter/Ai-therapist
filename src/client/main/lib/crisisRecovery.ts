@@ -132,7 +132,10 @@ export type HandoffStartOutcome =
  */
 export function readHandoffStart(status: number, body: unknown, detail?: string): HandoffStartOutcome {
   if (status < 200 || status >= 300) {
-    return { screen: 'failed', reason: status === 0 ? `no response${detail ? `: ${detail}` : ''}` : `status ${status}` };
+    return {
+      screen: 'failed',
+      reason: status === 0 ? `no response${detail ? `: ${detail}` : ''}` : `status ${status}`,
+    };
   }
   const data = (body ?? {}) as {
     sessionId?: unknown;
@@ -146,7 +149,8 @@ export function readHandoffStart(status: number, body: unknown, detail?: string)
   if (typeof data.sessionId !== 'string' || !data.sessionId) return { screen: 'failed', reason: 'no session id' };
 
   const handoff = data.handoff ?? null;
-  const kind = handoff?.kind === 'crisis' || handoff?.kind === 'ceiling' || handoff?.kind === 'neutral' ? handoff.kind : null;
+  const kind =
+    handoff?.kind === 'crisis' || handoff?.kind === 'ceiling' || handoff?.kind === 'neutral' ? handoff.kind : null;
   if (kind && typeof data.opening === 'string' && data.opening.trim()) {
     return {
       screen: 'chat',

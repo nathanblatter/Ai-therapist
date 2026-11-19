@@ -11,7 +11,6 @@ import { requireAuth } from '../../middleware/auth.js';
 import { appendChunk, isFinalized } from '../../services/recorder.service.js';
 import { noteSessionActivity } from '../../services/sessionLifecycle.service.js';
 import {
-  createSession,
   getSession,
   getUserSessions,
   getSessionMessages,
@@ -20,10 +19,9 @@ import {
   getSessionAccessInfo,
 } from '../../db/index.js';
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
-import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
+import { canAccessSession } from '../../utils/sessionOwnership.js';
 import { getSystemConfig } from '../../utils/sessionHelpers.js';
-import { requireOutsideQuietHours } from '../../middleware/quietHours.js';
-import { requireActiveStudyStatus } from '../../middleware/studyStatus.js';
+import { dropIfWithdrawn, refuseIfWithdrawn } from '../../middleware/studyStatus.js';
 import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
 
 import { createLogger } from '../../utils/logger.js';
@@ -43,7 +41,9 @@ export default function sessionsRoutes(): Router {
   // each batch is appended to the session recording and relayed live to any
   // admin listening (over the admin socket, which is reliable). Uses its own
   // larger body limit since batches are bigger than the default 100kb.
-  router.post('/api/sessions/:sessionId/audio', json({ limit: '8mb' }), async (req, res) => {
+  // A withdrawn participant's audio is dropped with 204, the answer the
+  // uploader already treats as "recording off" (ai-therapist-322).
+  router.post('/api/sessions/:sessionId/audio', json({ limit: '8mb' }), dropIfWithdrawn, async (req, res) => {
     const { sessionId } = req.params;
     const { chunks, sampleRate, track } = req.body as {
       chunks?: string[];
@@ -110,7 +110,8 @@ export default function sessionsRoutes(): Router {
 
   // POST /api/sessions/:sessionId/scale-response - store a completed screener
   // (PHQ-2/GAD-2) submitted from the administer_scale overlay. Owner-gated.
-  router.post('/api/sessions/:sessionId/scale-response', async (req, res) => {
+  // Refused after withdrawal (ai-therapist-322).
+  router.post('/api/sessions/:sessionId/scale-response', refuseIfWithdrawn, async (req, res) => {
     const { sessionId } = req.params;
     const { scale, answers } = req.body as { scale?: string; answers?: number[] };
 
@@ -196,8 +197,8 @@ export default function sessionsRoutes(): Router {
   // straight from the model's function-call args (same pattern as the other
   // overlay tools) and never sees the server-generated instance_id, so this
   // resolves the most recent draft instance for the session — see
-  // getLatestDraftWorksheetInstance.
-  router.post('/api/sessions/:sessionId/worksheet-response', async (req, res) => {
+  // getLatestDraftWorksheetInstance. Refused after withdrawal (ai-therapist-322).
+  router.post('/api/sessions/:sessionId/worksheet-response', refuseIfWithdrawn, async (req, res) => {
     const { sessionId } = req.params;
     const { responses, summary } = req.body as { responses?: Record<string, string>; summary?: string };
 
@@ -391,7 +392,8 @@ export default function sessionsRoutes(): Router {
   // POST /api/sessions/:sessionId/feedback - post-session participant survey
   // (ai-therapist-25b): 2-3 Likert ratings (1-5) + optional free text, shown
   // once on the post-session screen. Upsert so a resubmit just overwrites.
-  router.post('/api/sessions/:sessionId/feedback', async (req, res) => {
+  // Refused after withdrawal (ai-therapist-322).
+  router.post('/api/sessions/:sessionId/feedback', refuseIfWithdrawn, async (req, res) => {
     const { sessionId } = req.params;
     const { helpfulness_rating, ease_rating, would_return_rating, comments } = req.body as {
       helpfulness_rating?: number | null;
@@ -447,20 +449,12 @@ export default function sessionsRoutes(): Router {
   // response body. The sideband attaches there, before the SDP answer is even
   // returned to the browser. There is nothing left for the client to register.
 
-  // POST /api/sessions/create - create a new therapy session. Quiet-hours
-  // gated as defense in depth alongside /api/live/session and /api/chat/start.
-  router.post('/api/sessions/create', requireOutsideQuietHours, requireActiveStudyStatus, async (req, res) => {
-    try {
-      const userId = req.session?.userId || null;
-      const { sessionName } = req.body;
-      const session = await createSession(userId, sessionName);
-      recordSessionOwnership(req, session.session_id);
-      res.json(session);
-    } catch (err) {
-      log.error({ err }, 'Failed to create session');
-      res.status(500).json({ error: 'Failed to create session' });
-    }
-  });
+  // POST /api/sessions/create was REMOVED (ai-therapist-323). It inserted an
+  // active therapy_sessions row with no consent check and no session-limit
+  // check, so after a consent revision it opened a session the real start
+  // routes refuse with 412. Nothing called it: sessions are created by
+  // /api/chat/start, /api/live/session and /api/grok/session, which carry the
+  // full gate stack (consent, quiet hours, study status, limits).
 
   // GET /api/sessions - list the authenticated user's sessions
   router.get('/api/sessions', requireAuth, async (req, res) => {

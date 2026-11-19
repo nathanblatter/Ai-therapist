@@ -50,13 +50,14 @@ import { recordSessionOwnership } from '../../utils/sessionOwnership.js';
 import {
   sanitizeCheckin,
   buildCheckinBlock,
-  buildMemoryBlock,
+  buildParticipantContextBlock,
   buildToolGuidanceBlock,
   buildLeadConversationBlock,
 } from '../../utils/promptContext.js';
 import { requireConsent } from '../../middleware/consent.js';
 import { requireOutsideQuietHours } from '../../middleware/quietHours.js';
 import { requireActiveStudyStatus } from '../../middleware/studyStatus.js';
+import { sessionLimitRefusalFor } from '../../utils/sessionLimitRefusal.js';
 import { broadcastAdminEvent } from '../../utils/adminBroadcast.js';
 import { scheduleAutoTermination } from '../../utils/sessionAutoTerminate.js';
 import {
@@ -210,17 +211,7 @@ export default function liveSessionRoutes(): Router {
         const limitCheck = await checkSessionLimits(userId, userRole);
         if (!limitCheck.allowed && !isContinuation) {
           log.info({ reason: limitCheck.reason }, `Session limit exceeded for user ${userId}`);
-          return res.status(429).json({
-            error: 'rate_limit_exceeded',
-            reason: limitCheck.reason,
-            message: limitCheck.message,
-            details: {
-              limit: limitCheck.reason === 'daily_limit' ? limitCheck.limit : undefined,
-              current: limitCheck.reason === 'daily_limit' ? limitCheck.current : undefined,
-              cooldown_minutes: limitCheck.reason === 'cooldown' ? limitCheck.cooldown_minutes : undefined,
-              minutes_remaining: limitCheck.reason === 'cooldown' ? limitCheck.minutes_remaining : undefined,
-            },
-          });
+          return res.status(429).json(await sessionLimitRefusalFor(limitCheck));
         }
 
         // Idempotency: one active session per user. Checked before the OpenAI
@@ -266,7 +257,8 @@ export default function liveSessionRoutes(): Router {
         const { toolRegistry } = await import('../../services/toolRegistry.service.js');
         const toolDefs = await toolRegistry.getEnabledToolDefinitions();
         const checkin = sanitizeCheckin(req.body?.checkin);
-        const memoryBlock = await buildMemoryBlock(userId);
+        // Memory block when opted in, else the screener cue alone (ai-therapist-345).
+        const memoryBlock = await buildParticipantContextBlock(userId);
         // Psychoeducation retrieval cue (ai-therapist-202): resolved once per
         // session and persisted below, like proactive_offering. A crisis
         // recovery start is never enrolled: it runs with delegation off and

@@ -15,29 +15,45 @@ interface ChatLogProps {
   /** Fired (throttled) when the participant scrolls back up through earlier
    *  messages — Phase 2 engagement telemetry; no-op when unset/disabled. */
   onScrollBack?: () => void;
-  /** Keep the newest message in view as messages arrive. Set for a text
-   *  hand-off chat (ai-therapist-356), which opens underneath the captions of
-   *  the voice call it continues: its first message must not start off screen. */
+  /** Set for a text hand-off chat (ai-therapist-356), which opens underneath
+   *  the captions of the voice call it continues: when it turns on, the log
+   *  jumps to the newest message, so the first message never starts off screen. */
   followLatest?: boolean;
 }
 
 // A participant is "scrolled back" once they are this far above the bottom.
 const SCROLL_BACK_PX = 300;
 const SCROLL_BACK_THROTTLE_MS = 15_000;
+// Within this distance of the bottom the log follows new messages; further up,
+// the participant is reading back and is left where they are.
+const FOLLOW_PX = 80;
 
 export default function ChatLog({ messages, assistantStream, onScrollBack, followLatest = false }: ChatLogProps) {
   const lastScrollBackAt = React.useRef(0);
-  const latestRef = React.useRef<HTMLDivElement | null>(null);
+  const logRef = React.useRef<HTMLDivElement>(null);
+  const followRef = React.useRef(true);
 
-  React.useEffect(() => {
+  // Keep the newest turn in view (on a phone the latest reply otherwise lands
+  // below the fold), unless the participant has scrolled up to read back.
+  React.useLayoutEffect(() => {
+    const el = logRef.current;
+    if (el && followRef.current) el.scrollTop = el.scrollHeight;
+  }, [messages, assistantStream]);
+
+  // A text hand-off chat opening is the one time the log goes to the newest
+  // message even if the participant had scrolled back during the voice call.
+  React.useLayoutEffect(() => {
     if (!followLatest) return;
-    latestRef.current?.scrollIntoView({ block: 'end' });
-  }, [followLatest, messages.length]);
+    followRef.current = true;
+    const el = logRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [followLatest]);
 
   function handleScroll(e: React.UIEvent<HTMLDivElement>) {
-    if (!onScrollBack) return;
     const el = e.currentTarget;
     const fromBottom = el.scrollHeight - el.clientHeight - el.scrollTop;
+    followRef.current = fromBottom < FOLLOW_PX;
+    if (!onScrollBack) return;
     if (fromBottom < SCROLL_BACK_PX) return;
     const now = Date.now();
     if (now - lastScrollBackAt.current < SCROLL_BACK_THROTTLE_MS) return;
@@ -47,7 +63,8 @@ export default function ChatLog({ messages, assistantStream, onScrollBack, follo
 
   return (
     <div
-      className="flex-grow flex-col gap-3 p-4 overflow-y-auto h-full"
+      ref={logRef}
+      className="flex-grow flex-col gap-3 py-4 sm:p-4 overflow-y-auto h-full"
       role="log"
       aria-label="Conversation messages"
       aria-live="polite"
@@ -69,7 +86,7 @@ export default function ChatLog({ messages, assistantStream, onScrollBack, follo
             aria-label={`${msg.role === 'user' ? 'Your message' : msg.role === 'assistant' ? 'Therapist message' : 'System message'}`}
           >
             <div
-              className={`max-w-xs sm:max-w-md lg:max-w-lg px-4 py-2 rounded-2xl whitespace-pre-line ${
+              className={`max-w-[85%] sm:max-w-md lg:max-w-lg px-4 py-2 rounded-2xl whitespace-pre-line ${
                 msg.role === 'system'
                   ? 'bg-yellow-100 text-yellow-900 border-2 border-yellow-400 italic text-sm font-medium mb-2'
                   : msg.role === 'user'
@@ -86,14 +103,13 @@ export default function ChatLog({ messages, assistantStream, onScrollBack, follo
       {assistantStream && (
         <div className="flex justify-start" role="status" aria-label="Therapist is typing">
           <div
-            className="max-w-xs sm:max-w-md lg:max-w-lg px-4 py-2 rounded-2xl bg-gray-200 text-black rounded-bl-none opacity-70 whitespace-pre-line"
+            className="max-w-[85%] sm:max-w-md lg:max-w-lg px-4 py-2 rounded-2xl bg-gray-200 text-black rounded-bl-none opacity-70 whitespace-pre-line"
             aria-live="assertive"
           >
             {assistantStream}
           </div>
         </div>
       )}
-      <div ref={latestRef} aria-hidden="true" />
     </div>
   );
 }

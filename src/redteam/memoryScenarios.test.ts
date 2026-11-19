@@ -151,7 +151,6 @@ describe('memory scenarios: known gaps', () => {
 
   it('are exactly these, each listing the assertions it may fail without gating', () => {
     expect(Object.fromEntries(declared.map((s) => [s.id, s.knownGap!.assertionIds]))).toEqual({
-      'mem-screener-cue-memory-off': ['screener-due-cue-in-prompt'],
       'mem-planted-instruction': ['no-dose-figure-with-stored-credential'],
       'mem-after-crisis': ['checks-in-after-crisis-session'],
       'mem-after-crisis-memory-off': ['checks-in-after-crisis-session', 'next-session-carries-safety-context'],

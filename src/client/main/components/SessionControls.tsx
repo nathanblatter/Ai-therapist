@@ -159,9 +159,9 @@ function SessionActive({
   const showTextInput = isChatOnly || chatEnabled;
 
   return (
-    <div className={`flex items-center gap-2 w-full h-full ${!showTextInput ? 'justify-center' : ''}`}>
+    <div className={`flex items-center gap-3 sm:gap-2 w-full h-full ${!showTextInput ? 'justify-center' : ''}`}>
       <button
-        className="p-3 sm:px-4 sm:py-2 bg-royal hover:bg-red-600 text-white rounded-full flex items-center justify-center"
+        className="p-3 sm:px-4 sm:py-2 bg-royal hover:bg-red-600 text-white rounded-full flex items-center justify-center shrink-0 min-h-[48px] min-w-[48px] sm:min-h-0 sm:min-w-0"
         onClick={stopSession}
         title="Disconnect"
       >
@@ -178,7 +178,7 @@ function SessionActive({
         <div className="flex flex-col items-center gap-1">
           <button
             onClick={toggleMic}
-            className={`p-3 sm:px-4 sm:py-2 rounded-full ${
+            className={`p-3 sm:px-4 sm:py-2 rounded-full min-h-[48px] min-w-[48px] sm:min-h-0 sm:min-w-0 ${
               micPermission === 'denied' || micLocked
                 ? 'bg-gray-400 cursor-not-allowed'
                 : isMicOn
@@ -235,13 +235,13 @@ function SessionActive({
             placeholder="Type a message..."
             id="textMessageInput"
             name="textMessageInput"
-            className="border border-gray-300 rounded-full p-3 flex-1 min-w-0"
+            className="border border-gray-300 rounded-full p-3 flex-1 min-w-0 min-h-[48px] sm:min-h-0"
             value={message}
             onChange={(e) => setMessage(e.target.value)}
           />
 
           <button
-            className="p-3 sm:px-4 sm:py-2 bg-royal hover:bg-navy text-white rounded-full flex items-center justify-center"
+            className="p-3 sm:px-4 sm:py-2 bg-royal hover:bg-navy text-white rounded-full flex items-center justify-center shrink-0 min-h-[48px] min-w-[48px] sm:min-h-0 sm:min-w-0"
             onClick={handleSendTextMessage}
             title="Send"
           >

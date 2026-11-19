@@ -210,7 +210,9 @@ export async function resolveIncidentChain(
  * one read already spans their sessions; an anonymous one has no account to
  * follow, so each linked session is read and the highest stands.
  */
-async function incidentPeak(chain: HandoffSessionRow[]): Promise<{ severity: HandoffSeverity; riskScore: number | null }> {
+async function incidentPeak(
+  chain: HandoffSessionRow[],
+): Promise<{ severity: HandoffSeverity; riskScore: number | null }> {
   const { resolveIncidentPeak } = await import('./crisisPaging.service.js');
   let best: { severity: HandoffSeverity; riskScore: number | null } = { severity: 'none', riskScore: null };
   // Newest first: for a logged-in participant the first read is the answer.

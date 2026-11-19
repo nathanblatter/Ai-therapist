@@ -14,7 +14,7 @@
 //    once the server says the risk check has cleared.
 //  - useVisualViewportHeight: keeps the input above the on-screen keyboard.
 //
-// Phone first: most participants are on phones. 16px gutters, 44px targets.
+// Phone first: most participants are on phones. 16px gutters, 48px targets (docs/mobile-audit).
 import { useEffect, useState } from 'react';
 import { Loader, MessageSquare, Mic, Phone } from 'react-feather';
 import type { CrisisContact } from '../../../shared/systemConfig';
@@ -80,7 +80,7 @@ export function PinnedCrisisCard({ crisisContact, kind, onMoreResources }: Pinne
     : 'bg-gray-50 border-gray-300 text-gray-800 active:bg-gray-100';
   const icon = alert ? 'text-red-600' : 'text-gray-500';
   const item =
-    `min-h-[44px] flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 ` +
+    `min-h-[48px] flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 ` +
     `text-sm font-semibold text-center leading-tight ${button}`;
 
   return (
@@ -100,7 +100,7 @@ export function PinnedCrisisCard({ crisisContact, kind, onMoreResources }: Pinne
             <button
               type="button"
               onClick={onMoreResources}
-              className={`min-h-[44px] min-w-[44px] flex-shrink-0 px-1 text-xs font-semibold underline ${caption}`}
+              className={`min-h-[48px] min-w-[44px] flex-shrink-0 px-1 text-xs font-semibold underline ${caption}`}
             >
               More
             </button>
@@ -164,7 +164,7 @@ export function HandoffReplyBar({
               key={reply}
               type="button"
               onClick={() => onQuickReply(reply)}
-              className="flex-1 min-h-[44px] rounded-full border-2 border-royal bg-white text-royal text-base font-semibold px-3 py-2 active:bg-blue-50"
+              className="flex-1 min-h-[48px] rounded-full border-2 border-royal bg-white text-royal text-base font-semibold px-3 py-2 active:bg-blue-50"
             >
               {reply}
             </button>
@@ -177,7 +177,7 @@ export function HandoffReplyBar({
             type="button"
             onClick={onReturnToVoice}
             disabled={returningToVoice || awaitingReply}
-            className="min-h-[44px] w-full flex items-center justify-center gap-2 rounded-full border border-gray-300 bg-white text-gray-800 text-sm font-semibold px-4 py-2 disabled:opacity-60"
+            className="min-h-[48px] w-full flex items-center justify-center gap-2 rounded-full border border-gray-300 bg-white text-gray-800 text-sm font-semibold px-4 py-2 disabled:opacity-60"
           >
             {returningToVoice ? (
               <Loader size={16} className="animate-spin" aria-hidden="true" />

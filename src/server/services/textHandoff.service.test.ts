@@ -139,7 +139,12 @@ describe('prepareTextHandoff: routing', () => {
     const result = await start();
     expect(result!.firstMessage).toBe(HANDOFF_NEUTRAL_FIRST_MESSAGE);
     expect(result!.firstMessage).not.toMatch(/ending your life/);
-    expect(result!.payload).toMatchObject({ kind: 'neutral', severity: 'none', quickReplies: [], voiceReturnAllowed: true });
+    expect(result!.payload).toMatchObject({
+      kind: 'neutral',
+      severity: 'none',
+      quickReplies: [],
+      voiceReturnAllowed: true,
+    });
     expect(q.markTextHandoffContinuation).not.toHaveBeenCalled();
     expect(consumeNarrowFirstTurn('chat_new')).toBe(false);
     // The model is told not to assume a crisis.
@@ -157,7 +162,12 @@ describe('prepareTextHandoff: routing', () => {
     arrange({ peak: { severity: 'medium', riskScore: 50 } });
     const result = await start();
     expect(result!.firstMessage).toBe(HANDOFF_NEUTRAL_FIRST_MESSAGE_NO_VOICE);
-    expect(result!.payload).toMatchObject({ kind: 'neutral', severity: 'medium', quickReplies: [], voiceReturnAllowed: false });
+    expect(result!.payload).toMatchObject({
+      kind: 'neutral',
+      severity: 'medium',
+      quickReplies: [],
+      voiceReturnAllowed: false,
+    });
     expect(q.markTextHandoffContinuation).toHaveBeenCalledWith(
       'chat_new',
       expect.objectContaining({ severity: 'medium', riskScore: 50 }),
@@ -171,7 +181,12 @@ describe('prepareTextHandoff: routing', () => {
     arrange({ peak: { severity: 'high', riskScore: 78 } });
     const result = await start({ reason: 'expired' });
     expect(result!.firstMessage).toBe(HANDOFF_CEILING_FIRST_MESSAGE);
-    expect(result!.payload).toMatchObject({ kind: 'ceiling', reason: 'expired', quickReplies: [], voiceReturnAllowed: false });
+    expect(result!.payload).toMatchObject({
+      kind: 'ceiling',
+      reason: 'expired',
+      quickReplies: [],
+      voiceReturnAllowed: false,
+    });
     expect(q.markTextHandoffContinuation).toHaveBeenCalledWith(
       'chat_new',
       expect.objectContaining({ severity: 'high', riskScore: 78, reason: 'expired' }),
@@ -229,7 +244,9 @@ describe('prepareTextHandoff: paging and records', () => {
   it('links the two sessions in both directions, with what was decided', async () => {
     arrange({ peak: { severity: 'high', riskScore: 85 } });
     await start();
-    const calls = q.insertHandoffLink.mock.calls.map(([id, details]) => [id, details] as [string, Record<string, unknown>]);
+    const calls = q.insertHandoffLink.mock.calls.map(
+      ([id, details]) => [id, details] as [string, Record<string, unknown>],
+    );
     const onChat = calls.find(([id]) => id === 'chat_new')![1];
     const onVoice = calls.find(([id]) => id === 'live_A')![1];
     expect(onChat).toMatchObject({
@@ -242,7 +259,12 @@ describe('prepareTextHandoff: paging and records', () => {
       riskScore: 85,
       seededFrom: ['live_A'],
     });
-    expect(onVoice).toMatchObject({ event: 'voice_cut_text_handoff', role: 'cut_session', to: 'chat_new', kind: 'crisis' });
+    expect(onVoice).toMatchObject({
+      event: 'voice_cut_text_handoff',
+      role: 'cut_session',
+      to: 'chat_new',
+      kind: 'crisis',
+    });
   });
 
   it('a failed flag or link write does not cost the participant the session', async () => {
@@ -327,7 +349,11 @@ describe('resolveIncidentChain', () => {
       rows: { live_A: row('live_A'), chat_B: row('chat_B'), live_C: row('live_C') },
       predecessors: { live_C: 'chat_B', chat_B: 'live_A' },
     });
-    expect((await resolveIncidentChain('live_C', mine)).map((r) => r.session_id)).toEqual(['live_A', 'chat_B', 'live_C']);
+    expect((await resolveIncidentChain('live_C', mine)).map((r) => r.session_id)).toEqual([
+      'live_A',
+      'chat_B',
+      'live_C',
+    ]);
   });
 
   it("stops at a session that is not the requester's", async () => {
@@ -381,7 +407,11 @@ describe('buildIncidentRecap', () => {
 
   it('marks where one session of the incident ends and the next begins', () => {
     const recap = buildIncidentRecap([turn('s1', 'user', 'first call'), turn('s2', 'user', 'second call')]);
-    expect(recap.split('\n')).toEqual(['Participant: first call', HANDOFF_RECAP_SESSION_BREAK, 'Participant: second call']);
+    expect(recap.split('\n')).toEqual([
+      'Participant: first call',
+      HANDOFF_RECAP_SESSION_BREAK,
+      'Participant: second call',
+    ]);
   });
 
   it('skips empty turns and anything that is not participant or assistant speech', () => {

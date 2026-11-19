@@ -644,13 +644,13 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
 
   return (
     <div
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="session-detail-title"
     >
-      <div className="bg-white w-full max-w-4xl h-5/6 rounded-lg shadow-xl flex flex-col">
-        <header className="bg-navy text-white p-4 flex justify-between items-start rounded-t-lg">
+      <div className="bg-white w-full max-w-4xl h-full sm:h-5/6 sm:rounded-lg shadow-xl flex flex-col sheet-safe-bottom">
+        <header className="bg-navy text-white p-4 pt-[max(1rem,env(safe-area-inset-top))] sm:pt-4 flex justify-between items-start sm:rounded-t-lg">
           <div className="flex-1">
             <div className="flex items-center gap-3">
               <h2 id="session-detail-title" className="text-xl font-bold">
@@ -986,11 +986,11 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
           {/* Admin Message Input - Only show for active sessions */}
           {session?.status === 'active' && (
             <div
-              className="p-4 bg-yellow-50 border-b border-yellow-200"
+              className="p-3 sm:p-4 bg-yellow-50 border-b border-yellow-200"
               role="form"
               aria-label="Send message to participant"
             >
-              <div className="flex items-center gap-2 mb-2">
+              <div className="flex flex-wrap items-center gap-2 mb-2">
                 <span className="text-sm font-semibold text-yellow-900">Send message to participant:</span>
                 <select
                   value={messageType}
@@ -1035,7 +1035,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
           )}
 
           {/* Export and Close buttons */}
-          <div className="p-4 flex gap-2">
+          <div className="p-2 sm:p-4 flex gap-2 whitespace-nowrap">
             <button
               onClick={() => handleExport('json')}
               aria-label="Export session as JSON file"

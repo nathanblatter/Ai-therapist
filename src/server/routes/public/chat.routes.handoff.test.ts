@@ -51,7 +51,7 @@ vi.mock('../../utils/sessionHelpers.js', () => helperMocks);
 vi.mock('../../utils/promptContext.js', () => ({
   sanitizeCheckin: () => null,
   buildCheckinBlock: () => '',
-  buildMemoryBlock: async () => '',
+  buildParticipantContextBlock: async () => '',
   buildToolGuidanceBlock: () => '',
   buildLeadConversationBlock: () => '',
 }));
@@ -114,7 +114,8 @@ const CRISIS_PREPARED = {
     reason: 'content',
     quickReplies: ['Yes', 'No', 'Not sure'],
     voiceReturnAllowed: false,
-    spokenBridge: "I'm still here. I've moved us to writing, on your screen. You can also call or text 988 at any time.",
+    spokenBridge:
+      "I'm still here. I've moved us to writing, on your screen. You can also call or text 988 at any time.",
     seededFrom: ['live_A'],
   },
   firstMessage: HANDOFF_CRISIS_FIRST_MESSAGE,
@@ -215,7 +216,13 @@ describe('POST /api/chat/start with continued_from (text hand-off)', () => {
 
   it('a no-risk cut returns the neutral message and no quick replies', async () => {
     handoffMocks.prepareTextHandoff.mockResolvedValue({
-      payload: { ...CRISIS_PREPARED.payload, kind: 'neutral', severity: 'none', quickReplies: [], voiceReturnAllowed: true },
+      payload: {
+        ...CRISIS_PREPARED.payload,
+        kind: 'neutral',
+        severity: 'none',
+        quickReplies: [],
+        voiceReturnAllowed: true,
+      },
       firstMessage: HANDOFF_NEUTRAL_FIRST_MESSAGE,
       guidance: null,
     });
@@ -252,8 +259,7 @@ describe('POST /api/chat/start with continued_from (text hand-off)', () => {
 });
 
 describe('POST /api/chat/message in a hand-off session', () => {
-  const send = (message = 'Yes') =>
-    request(makeApp()).post('/api/chat/message').send({ sessionId: 'chat_1', message });
+  const send = (message = 'Yes') => request(makeApp()).post('/api/chat/message').send({ sessionId: 'chat_1', message });
 
   it('first turn of a crisis hand-off: the reply is not held for the assessor, and the pipeline still runs', async () => {
     handoffMocks.consumeNarrowFirstTurn.mockReturnValue(true);
@@ -271,7 +277,10 @@ describe('POST /api/chat/message in a hand-off session', () => {
     let pipelineDoneWhenModelCalled: boolean | null = null;
     chatMocks.sendMessage.mockImplementation(async () => {
       pipelineDoneWhenModelCalled = pipelineDone;
-      return { text: 'Thank you for telling me. Have you thought about how? You can call or text 988.', toolEvents: [] };
+      return {
+        text: 'Thank you for telling me. Have you thought about how? You can call or text 988.',
+        toolEvents: [],
+      };
     });
 
     const res = await send('Yes');
