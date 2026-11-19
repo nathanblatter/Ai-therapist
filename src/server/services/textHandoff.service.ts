@@ -4,18 +4,25 @@
 //
 // What POST /api/chat/start does for a continuation (`continued_from`):
 //
-//  1. Finds every session of the incident (the voice call that was just cut,
-//     and anything it continued) that the requester owns.
+//  1. Finds this call's chain: the voice call that was just cut and the
+//     sessions linked to it (db/paging.queries getIncidentChainSessionIds, the
+//     one chain lookup the paging policy reads too), as far as the requester
+//     owns them.
 //  2. Waits, briefly, for the cut call's last participant turn to finish being
 //     scored. The vendor closes a session one to three seconds after a
 //     disclosure, which is about how long the risk assessor takes to read it;
 //     without the wait the hand-off would be worded for "no risk" at exactly
 //     the moment the risk row is being written.
-//  3. Reads the participant's real peak risk in the incident
-//     (crisisPaging.resolveIncidentPeak: flags and assessed scores, never the
-//     automatic continuation stamp) and from it chooses the first message.
-//  4. Flags the new chat session at that severity, as a continuation.
-//  5. Seeds the model with the most recent turns of the whole incident.
+//  3. Reads two peaks (flags and assessed scores, never the automatic
+//     continuation stamp):
+//       - the CHAIN's, which alone chooses the first message: the app says "I
+//         heard you" only about something said in this call;
+//       - the PARTICIPANT's across their sessions in the look-back
+//         (crisisPaging.resolveIncidentPeak, which the on-call page uses too),
+//         which decides the flag, and turns a calm first message into an open
+//         check-in after an earlier high flag elsewhere.
+//  4. Flags the new chat session at the participant's peak, as a continuation.
+//  5. Seeds the model with the most recent turns of the chain.
 //  6. Records the link on both sessions, so the incident can be reviewed from
 //     either side.
 //
@@ -27,9 +34,9 @@ import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { buildVoiceContinuationGuidance } from '../utils/openingLine.js';
 import {
   getHandoffRecord,
+  hasOrdinaryOpeningLine,
   getHandoffSessionRow,
   getIncidentTurns,
-  getPredecessorSessionId,
   getSessionAssessedPeak,
   getSessionRiskCheckSteps,
   insertHandoffLink,
@@ -40,11 +47,18 @@ import {
   type HandoffTurn,
 } from '../db/textHandoff.queries.js';
 import {
+  getIncidentChainSessionIds,
+  getParticipantAssessedRisk,
+  getParticipantFlagEvents,
+  INCIDENT_CHAIN_BACKSTOP_MS,
+} from '../db/paging.queries.js';
+import {
   handoffFirstMessage,
   handoffKind,
   handoffQuickReplies,
   handoffSpokenBridge,
   handoffStampSeverity,
+  maxHandoffSeverity,
   voiceReturnAllowed,
   type HandoffKind,
   type HandoffReason,
@@ -77,7 +91,20 @@ export const HANDOFF_MAX_CHAIN = 8;
  *  incident ends and the next begins. */
 export const HANDOFF_RECAP_SESSION_BREAK = '(the voice service ended the call here; the conversation went on)';
 
-const SEVERITY_RANK: Record<HandoffSeverity, number> = { none: 0, medium: 1, unknown: 2, high: 3 };
+/** Longest either risk read may hold the hand-off up; one that is slower is
+ *  treated as failed (risk unknown, worded as a crisis). */
+export const HANDOFF_RISK_READ_TIMEOUT_MS = 2_000;
+
+function withTimeout<T>(work: Promise<T>, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${what} timed out after ${HANDOFF_RISK_READ_TIMEOUT_MS} ms`)),
+      HANDOFF_RISK_READ_TIMEOUT_MS,
+    );
+  });
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
+}
 
 // ---------------------------------------------------------------------------
 // In-process state
@@ -85,7 +112,10 @@ const SEVERITY_RANK: Record<HandoffSeverity, number> = { none: 0, medium: 1, unk
 
 interface HandoffState {
   kind: HandoffKind;
+  /** This call's chain (the wording). */
   severity: HandoffSeverity;
+  /** The participant across the look-back (the flag). */
+  participantSeverity: HandoffSeverity;
   /** The first participant turn of a crisis hand-off takes the narrow model
    *  path (chat.routes.ts); cleared when that turn is taken. */
   narrowFirstTurn: boolean;
@@ -174,63 +204,98 @@ function asHandoffSeverity(value: string | null | undefined): HandoffSeverity {
 export type SessionAccessCheck = (row: { user_id: number | string | null }, sessionId: string) => boolean;
 
 /**
- * Every session of the incident that ends with `sessionId`, oldest first: the
- * session itself and the sessions it continued, followed back through the
- * link rows. Stops at the first session the requester may not read (one
- * session's transcript is never seeded into another person's), at a missing
- * row, at a loop, and at HANDOFF_MAX_CHAIN. Empty when `sessionId` itself is
- * missing or not theirs.
+ * This call's chain, oldest first: the session itself and the sessions it
+ * continues, as db/paging.queries getIncidentChainSessionIds finds them (the
+ * hand-off's own link rows first, the older stamp-and-start-order walk only
+ * where there is no link row; the same lookup the paging policy reads, so
+ * there is one answer to "which sessions are this incident"). Stops at the
+ * first session the requester may not read (one session's transcript is never
+ * seeded into another person's), at a missing row and at HANDOFF_MAX_CHAIN.
+ * Empty when `sessionId` itself is missing or not theirs. A chain lookup that
+ * fails leaves the cut session alone: it is always carried.
  */
 export async function resolveIncidentChain(
   sessionId: string,
   canAccess: SessionAccessCheck,
 ): Promise<HandoffSessionRow[]> {
+  let ids: string[];
+  try {
+    ids = await getIncidentChainSessionIds(sessionId, new Date(Date.now() - INCIDENT_CHAIN_BACKSTOP_MS));
+  } catch (err) {
+    log.error({ err }, `[handoff] could not follow the incident back from ${sessionId.substring(0, 12)}...`);
+    ids = [sessionId];
+  }
+  if (ids[0] !== sessionId) ids = [sessionId, ...ids.filter((id) => id !== sessionId)];
   const chain: HandoffSessionRow[] = [];
-  const seen = new Set<string>();
-  let current: string | null = sessionId;
-  while (current && !seen.has(current) && chain.length < HANDOFF_MAX_CHAIN) {
-    const id: string = current;
-    seen.add(id);
+  for (const id of ids.slice(0, HANDOFF_MAX_CHAIN)) {
     const row = await getHandoffSessionRow(id);
     if (!row || !canAccess(row, id)) break;
     chain.unshift(row);
-    try {
-      current = await getPredecessorSessionId(id);
-    } catch (err) {
-      // The cut session itself is always carried; older links are best effort.
-      log.error({ err }, `[handoff] could not follow the incident back from ${id.substring(0, 12)}...`);
-      current = null;
-    }
   }
   return chain;
 }
 
+interface Peak {
+  severity: HandoffSeverity;
+  riskScore: number | null;
+}
+
+const EVENT_RANK: Record<string, number> = { none: 0, low: 0, medium: 1, high: 2 };
+
 /**
- * The participant's peak risk across the incident. For a logged-in participant
- * one read already spans their sessions; an anonymous one has no account to
- * follow, so each linked session is read and the highest stands.
+ * The participant's peak risk in exactly these sessions: their crisis flags
+ * (a member of staff raising the risk by hand included) and the scores the
+ * assessor gave their turns, never the automatic continuation stamp (the same
+ * reads, and the same exclusion, as the paging policy's). No participant-wide
+ * look-back: this decides what the app SAYS, and it may only speak about what
+ * happened in this call. Throws (or times out) on a failed read.
  */
-async function incidentPeak(
-  chain: HandoffSessionRow[],
-): Promise<{ severity: HandoffSeverity; riskScore: number | null }> {
-  const { resolveIncidentPeak } = await import('./crisisPaging.service.js');
-  let best: { severity: HandoffSeverity; riskScore: number | null } = { severity: 'none', riskScore: null };
-  // Newest first: for a logged-in participant the first read is the answer.
-  for (const row of [...chain].reverse()) {
-    const peak = await resolveIncidentPeak(row.session_id, {
-      flagged: row.crisis_flagged === true,
-      severity: row.crisis_severity,
-    });
-    const severity = asHandoffSeverity(peak.severity);
-    if (
-      SEVERITY_RANK[severity] > SEVERITY_RANK[best.severity] ||
-      (severity === best.severity && (peak.riskScore ?? -1) > (best.riskScore ?? -1))
-    ) {
-      best = { severity, riskScore: peak.riskScore };
+export async function chainRiskPeak(sessionIds: string[]): Promise<Peak> {
+  const now = new Date();
+  const [flags, assessed] = await withTimeout(
+    Promise.all([getParticipantFlagEvents(sessionIds, null, now), getParticipantAssessedRisk(sessionIds, null, now)]),
+    'chain risk read',
+  );
+  let rank = 0;
+  let riskScore: number | null = null;
+  for (const event of [...(flags ?? []), ...(assessed ?? [])]) {
+    const r = EVENT_RANK[event.severity ?? 'none'] ?? 0;
+    if (r === 0) continue;
+    if (r > rank) {
+      rank = r;
+      riskScore = event.risk_score ?? null;
+    } else if (r === rank && (event.risk_score ?? -1) > (riskScore ?? -1)) {
+      riskScore = event.risk_score ?? null;
     }
-    if (best.severity === 'high' || row.user_id !== null) break;
   }
-  return best;
+  return { severity: rank === 2 ? 'high' : rank === 1 ? 'medium' : 'none', riskScore };
+}
+
+/**
+ * The participant's peak across ALL their sessions in the paging policy's
+ * look-back (crisisPaging.resolveIncidentPeak: the chain plus any other
+ * session of theirs in the last 2 hours). What the on-call is told, and what
+ * the chat is flagged at; never what the app says. Never throws: that
+ * function answers 'unknown' when it cannot read.
+ */
+async function participantPeak(cut: HandoffSessionRow): Promise<Peak> {
+  const { resolveIncidentPeak } = await import('./crisisPaging.service.js');
+  const peak = await resolveIncidentPeak(cut.session_id, {
+    flagged: cut.crisis_flagged === true,
+    severity: cut.crisis_severity,
+  });
+  return { severity: asHandoffSeverity(peak.severity), riskScore: peak.riskScore };
+}
+
+function maxPeak(a: Peak, b: Peak): Peak {
+  const severity = maxHandoffSeverity(a.severity, b.severity);
+  if (severity === 'unknown') return { severity, riskScore: null };
+  const candidates = [a, b].filter((p) => p.severity === severity);
+  const riskScore = candidates.reduce<number | null>(
+    (best, p) => (p.riskScore !== null && (best === null || p.riskScore > best) ? p.riskScore : best),
+    null,
+  );
+  return { severity, riskScore };
 }
 
 export interface PrepareHandoffInput {
@@ -264,7 +329,7 @@ export interface PreparedHandoff {
  * cost the participant the others or the session.
  */
 export async function prepareTextHandoff(input: PrepareHandoffInput): Promise<PreparedHandoff | null> {
-  const { chatSessionId, continuedFrom, reason } = input;
+  const { continuedFrom } = input;
   const short = continuedFrom.substring(0, 12);
 
   const chain = await resolveIncidentChain(continuedFrom, input.canAccess);
@@ -280,31 +345,160 @@ export async function prepareTextHandoff(input: PrepareHandoffInput): Promise<Pr
     log.error({ err }, `[handoff] could not wait for ${short}... to finish scoring`);
   }
 
-  let peak: { severity: HandoffSeverity; riskScore: number | null };
+  // This call's own risk: what the app may say.
+  let call: Peak;
   try {
-    peak = await incidentPeak(chain);
+    call = await chainRiskPeak(seededFrom);
   } catch (err) {
-    log.error({ err }, `[handoff] could not read the incident's risk for ${short}...; treating it as unknown`);
-    peak = { severity: 'unknown', riskScore: null };
+    log.error({ err }, `[handoff] could not read the risk in ${short}...'s chain; treating it as unknown`);
+    call = { severity: 'unknown', riskScore: null };
   }
-  if (!scored && peak.severity !== 'high') {
+  if (!scored && call.severity !== 'high') {
     log.warn(`[handoff] ${short}... still had a participant turn being scored; risk treated as unknown`);
-    peak = { severity: 'unknown', riskScore: null };
+    call = { severity: 'unknown', riskScore: null };
   }
 
-  const kind = handoffKind(reason, peak.severity);
+  // The participant across the look-back: what the chat is flagged at. It
+  // includes the chain, so it is never lower than the call.
+  let participant: Peak;
+  try {
+    participant = maxPeak(await participantPeak(chain[chain.length - 1]), call);
+  } catch (err) {
+    log.error({ err }, `[handoff] could not read the participant's risk for ${short}...; treating it as unknown`);
+    participant = maxPeak({ severity: 'unknown', riskScore: null }, call);
+  }
+
+  return await applyHandoff(input, { seededFrom, call, participant, scored, source: 'chat_start' });
+}
+
+/**
+ * The browser opened a hand-off chat and the server's answer carried no
+ * hand-off (the preparation failed, or the cut session could not be linked),
+ * so the browser fell back to the crisis wording on its own
+ * (client lib/crisisRecovery.ts readHandoffStart). Make the server agree with
+ * what is on the participant's screen, on the first request it can: flag the
+ * chat as a continuation with risk UNKNOWN (stamped high, no score), store the
+ * first message the participant was shown so the transcript, the summary and
+ * the model all have the question their next message answers, link and seed
+ * from the cut session when it is theirs, and answer their first message on
+ * the crisis path.
+ *
+ * Idempotent: a chat that already has a hand-off (this process's state or a
+ * stored link row) is left as it is and null is returned. `chatRow` is the
+ * caller's read of the chat session, which must be theirs, a chat session and
+ * not ended. Never throws; null when nothing was done.
+ */
+export async function recordClientHandoffFallback(input: ClientFallbackInput): Promise<PreparedHandoff | null> {
+  const { chatSessionId } = input;
+  // One at a time per chat (PR #79 review). The browser posts the fallback at
+  // once and also carries it on its first chat message until acknowledged, so
+  // a quick "Yes" sends it twice in parallel; both used to pass the checks
+  // below before either wrote: two flags, two link rows, and the first
+  // message twice in the transcript and in the model's context. A second
+  // caller now waits for the first and then does nothing.
+  const inFlight = fallbacksInFlight.get(chatSessionId);
+  if (inFlight) {
+    await inFlight.catch(() => null);
+    return null;
+  }
+  const work = recordClientHandoffFallbackOnce(input);
+  fallbacksInFlight.set(chatSessionId, work);
+  try {
+    return await work;
+  } finally {
+    fallbacksInFlight.delete(chatSessionId);
+  }
+}
+
+interface ClientFallbackInput {
+  chatSessionId: string;
+  chatRow: HandoffSessionRow;
+  continuedFrom: string;
+  reason: HandoffReason;
+  canAccess: SessionAccessCheck;
+  crisisContact?: RecoveryCrisisContact | null;
+  voiceEnabled: boolean;
+}
+
+const fallbacksInFlight = new Map<string, Promise<PreparedHandoff | null>>();
+
+/** Session ids are short and plain; anything else is not one and is never
+ *  stored (PR #79 review stored a 50,000-character `continued_from`). */
+const SESSION_ID_SHAPE = /^[A-Za-z0-9_.:-]{1,128}$/;
+
+async function recordClientHandoffFallbackOnce(input: ClientFallbackInput): Promise<PreparedHandoff | null> {
+  const { chatSessionId, chatRow, continuedFrom } = input;
+  try {
+    if (!SESSION_ID_SHAPE.test(continuedFrom)) return null;
+    if (chatRow.session_type !== 'chat' || chatRow.status === 'ended') return null;
+    if (!input.canAccess(chatRow, chatSessionId) || continuedFrom === chatSessionId) return null;
+    if (handoffStates.has(chatSessionId)) return null;
+    if (await getHandoffRecord(chatSessionId)) return null;
+    // Never an ORDINARY chat. A chat started as a hand-off continuation gets no
+    // ordinary opening line (chat.routes.ts), so a chat that has one was not
+    // opened by a vendor cut and must not be turned into a crisis continuation
+    // by a browser request (PR #79 review: one was, the crisis first message
+    // appended after "Hello! I'm an AI ...", flagged high).
+    if (await hasOrdinaryOpeningLine(chatSessionId)) return null;
+    // The cut session links and seeds only when it is the requester's; the
+    // flag and the first message stand either way, since the browser knows a
+    // vendor cut happened and has already said so.
+    const chain = await resolveIncidentChain(continuedFrom, input.canAccess).catch(() => []);
+    const unknown: Peak = { severity: 'unknown', riskScore: null };
+    return await applyHandoff(
+      { ...input, continuedFrom },
+      {
+        seededFrom: chain.map((row) => row.session_id),
+        call: unknown,
+        participant: unknown,
+        scored: false,
+        source: 'client_fallback',
+      },
+    );
+  } catch (err) {
+    log.error(
+      { err },
+      `[handoff] could not record the browser's hand-off fallback for ${chatSessionId.slice(0, 16)}...`,
+    );
+    return null;
+  }
+}
+
+/** Decide the wording, write the flag and the links, build the seeding, and
+ *  hold the in-process state. Shared by the chat start and the browser's
+ *  fallback. */
+async function applyHandoff(
+  input: Pick<PrepareHandoffInput, 'chatSessionId' | 'continuedFrom' | 'reason' | 'crisisContact' | 'voiceEnabled'>,
+  facts: {
+    seededFrom: string[];
+    call: Peak;
+    participant: Peak;
+    scored: boolean;
+    source: 'chat_start' | 'client_fallback';
+  },
+): Promise<PreparedHandoff> {
+  const { chatSessionId, continuedFrom, reason } = input;
+  const { seededFrom, call, participant, scored, source } = facts;
+  const short = continuedFrom.substring(0, 12);
+
+  const kind = handoffKind(reason, call.severity, participant.severity);
   const returnAllowed =
     input.voiceEnabled &&
-    voiceReturnAllowed({ handoffSeverity: peak.severity, chatPeakSeverity: 'none', riskCheckSteps: [] });
+    voiceReturnAllowed({
+      handoffSeverity: call.severity,
+      participantSeverity: participant.severity,
+      chatPeakSeverity: 'none',
+      riskCheckSteps: [],
+    });
   const firstMessage = handoffFirstMessage(kind, returnAllowed);
 
-  // The flag. A continuation starts at the incident's real severity.
-  const stamp = handoffStampSeverity(peak.severity);
+  // The flag: the participant's peak in the look-back, as a continuation stamp.
+  const stamp = handoffStampSeverity(participant.severity);
   if (stamp) {
     try {
       await markTextHandoffContinuation(chatSessionId, {
         severity: stamp,
-        riskScore: peak.severity === 'unknown' ? null : peak.riskScore,
+        riskScore: participant.severity === 'unknown' ? null : participant.riskScore,
         continuedFrom,
         reason,
       });
@@ -313,33 +507,43 @@ export async function prepareTextHandoff(input: PrepareHandoffInput): Promise<Pr
     }
   }
 
-  // The link, on both sessions.
+  // The link, on both sessions (only to a cut session that is the requester's).
+  const linked = seededFrom.includes(continuedFrom);
   const linkFacts = {
     event: HANDOFF_EVENT,
     reason,
     kind,
-    severity: peak.severity,
-    ...(peak.riskScore === null ? {} : { riskScore: peak.riskScore }),
+    severity: call.severity,
+    participantSeverity: participant.severity,
+    ...(call.riskScore === null ? {} : { riskScore: call.riskScore }),
+    ...(participant.riskScore === null ? {} : { participantRiskScore: participant.riskScore }),
     seededFrom,
     scoringSettled: scored,
+    source,
   };
   await Promise.all([
-    insertHandoffLink(chatSessionId, { ...linkFacts, role: 'continuation', from: continuedFrom }).catch((err) =>
-      log.error({ err }, '[handoff] failed to record the hand-off on the chat session'),
-    ),
-    insertHandoffLink(continuedFrom, { ...linkFacts, role: 'cut_session', to: chatSessionId }).catch((err) =>
-      log.error({ err }, '[handoff] failed to record the hand-off on the voice session'),
-    ),
+    insertHandoffLink(chatSessionId, {
+      ...linkFacts,
+      role: 'continuation',
+      ...(linked ? { from: continuedFrom } : { unlinkedFrom: continuedFrom }),
+    }).catch((err) => log.error({ err }, '[handoff] failed to record the hand-off on the chat session')),
+    linked
+      ? insertHandoffLink(continuedFrom, { ...linkFacts, role: 'cut_session', to: chatSessionId }).catch((err) =>
+          log.error({ err }, '[handoff] failed to record the hand-off on the voice session'),
+        )
+      : Promise.resolve(),
   ]);
 
-  // What was said, across the whole incident.
+  // What was said in this call's chain.
   let guidance: string | null = null;
   try {
-    const recap = buildIncidentRecap(await getIncidentTurns(seededFrom, HANDOFF_RECAP_MAX_TURNS));
+    const recap = seededFrom.length
+      ? buildIncidentRecap(await getIncidentTurns(seededFrom, HANDOFF_RECAP_MAX_TURNS))
+      : '';
     if (recap) {
       guidance = buildVoiceContinuationGuidance(recap, {
         kind,
-        severity: peak.severity,
+        severity: call.severity,
         crisisLine: recoveryCrisisLinePhrase(input.crisisContact),
       });
     }
@@ -348,7 +552,12 @@ export async function prepareTextHandoff(input: PrepareHandoffInput): Promise<Pr
     log.error({ err }, '[handoff] failed to read the incident transcript');
   }
 
-  handoffStates.set(chatSessionId, { kind, severity: peak.severity, narrowFirstTurn: kind === 'crisis' });
+  handoffStates.set(chatSessionId, {
+    kind,
+    severity: call.severity,
+    participantSeverity: participant.severity,
+    narrowFirstTurn: kind === 'crisis',
+  });
   if (handoffStates.size > 500) {
     for (const id of handoffStates.keys()) {
       if (handoffStates.size <= 400) break;
@@ -358,8 +567,9 @@ export async function prepareTextHandoff(input: PrepareHandoffInput): Promise<Pr
 
   log.warn(
     `[handoff] voice session ${short}... (${reason}) continues as chat ${chatSessionId.substring(0, 16)}...: ` +
-      `${kind}, incident risk ${peak.severity}${peak.riskScore === null ? '' : ` (${peak.riskScore}/100)`}, ` +
-      `seeded from ${seededFrom.length} session(s)`,
+      `${kind}, call risk ${call.severity}${call.riskScore === null ? '' : ` (${call.riskScore}/100)`}, ` +
+      `participant risk ${participant.severity}, seeded from ${seededFrom.length} session(s)` +
+      (source === 'client_fallback' ? ', recorded from the browser fallback' : ''),
   );
   if (global.io) {
     const event = {
@@ -367,9 +577,11 @@ export async function prepareTextHandoff(input: PrepareHandoffInput): Promise<Pr
       continuedFrom,
       reason,
       kind,
-      severity: peak.severity,
-      riskScore: peak.riskScore,
+      severity: call.severity,
+      participantSeverity: participant.severity,
+      riskScore: call.riskScore,
       seededFrom,
+      source,
       at: new Date(),
     };
     void broadcastAdminEventForSession(global.io, 'session:text-handoff', event, chatSessionId).catch((err: unknown) =>
@@ -380,7 +592,8 @@ export async function prepareTextHandoff(input: PrepareHandoffInput): Promise<Pr
   return {
     payload: {
       kind,
-      severity: peak.severity,
+      severity: call.severity,
+      participantSeverity: participant.severity,
       reason,
       quickReplies: handoffQuickReplies(kind),
       voiceReturnAllowed: returnAllowed,
@@ -405,17 +618,22 @@ export async function prepareTextHandoff(input: PrepareHandoffInput): Promise<Pr
  */
 export async function resolveVoiceReturn(chatSessionId: string): Promise<boolean | null> {
   try {
-    let severity = handoffStates.get(chatSessionId)?.severity;
+    const state = handoffStates.get(chatSessionId);
+    let severity = state?.severity;
+    let participantSeverity = state?.participantSeverity;
     if (severity === undefined) {
       const record = await getHandoffRecord(chatSessionId);
       if (!record) return null;
       severity = asHandoffSeverity(record.severity);
+      // A row written before the participant-wide severity was recorded
+      // carries only the one it was worded from.
+      participantSeverity = record.participantSeverity ? asHandoffSeverity(record.participantSeverity) : severity;
     }
     const [chatPeakSeverity, riskCheckSteps] = await Promise.all([
       getSessionAssessedPeak(chatSessionId),
       getSessionRiskCheckSteps(chatSessionId),
     ]);
-    return voiceReturnAllowed({ handoffSeverity: severity, chatPeakSeverity, riskCheckSteps });
+    return voiceReturnAllowed({ handoffSeverity: severity, participantSeverity, chatPeakSeverity, riskCheckSteps });
   } catch (err) {
     log.error({ err }, `[handoff] could not decide voice return for ${chatSessionId.substring(0, 16)}...`);
     return false;

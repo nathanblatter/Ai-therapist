@@ -2171,5 +2171,207 @@
   "inputFontPx": [],
   "smallTargets": [],
   "overflowX": []
+ },
+ "p30-handoff-crisis-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 2,
+   "14": 4,
+   "16": 9
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p30-handoff-crisis-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 2,
+   "14": 4,
+   "16": 9
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p31-handoff-crisis-sent-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 2,
+   "14": 5,
+   "16": 7
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p31-handoff-crisis-sent-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 2,
+   "14": 5,
+   "16": 7
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p32-handoff-neutral-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 5,
+   "16": 5
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p32-handoff-neutral-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 5,
+   "16": 5
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p33-handoff-crisis-keyboard-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 2,
+   "14": 4,
+   "16": 6
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p33-handoff-crisis-keyboard-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 2,
+   "14": 4,
+   "16": 7
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p34-handoff-moving-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "14": 9,
+   "18": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p34-handoff-moving-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "14": 9,
+   "18": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p35-handoff-checkin-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 2,
+   "14": 4,
+   "16": 5
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p35-handoff-checkin-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 2,
+   "14": 4,
+   "16": 5
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p36-handoff-medium-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 2,
+   "14": 4,
+   "16": 5
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p36-handoff-medium-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 2,
+   "14": 4,
+   "16": 5
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p37-handoff-crisis-sent-keyboard-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 2,
+   "14": 5,
+   "16": 4
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p37-handoff-crisis-sent-keyboard-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 2,
+   "14": 5,
+   "16": 5
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
  }
 }

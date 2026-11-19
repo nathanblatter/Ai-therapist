@@ -477,6 +477,17 @@ const participantScenes: Scene[] = [
     run: async (p) => void (await harness(p, 'handoff-crisis')),
   },
   { name: 'p34-handoff-moving', role: 'anon', run: async (p) => void (await harness(p, 'moderation-text')) },
+  // Follow-ups to PR #77: the check-in after an earlier high flag elsewhere,
+  // the medium wording with its open question, and the reply on its way with
+  // the keyboard up.
+  { name: 'p35-handoff-checkin', role: 'anon', run: async (p) => void (await harness(p, 'handoff-checkin')) },
+  { name: 'p36-handoff-medium', role: 'anon', run: async (p) => void (await harness(p, 'handoff-medium')) },
+  {
+    name: 'p37-handoff-crisis-sent-keyboard',
+    role: 'anon',
+    height: 480,
+    run: async (p) => void (await harness(p, 'handoff-crisis-sent')),
+  },
 ];
 
 const adminScenes: Scene[] = [

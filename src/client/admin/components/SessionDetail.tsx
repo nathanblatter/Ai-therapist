@@ -5,6 +5,7 @@ import SessionInsightsPanel from './SessionInsightsPanel';
 import SessionEvalPanel from './SessionEvalPanel';
 import RiskTimeline from './RiskTimeline';
 import SessionCrisisEvents from './SessionCrisisEvents';
+import SessionHandoffLinks from './SessionHandoffLinks';
 import RiskCheckLadder from './RiskCheckLadder';
 import { useSocket } from '../hooks/useSocket';
 import useAuth from '../hooks/useAuth';
@@ -821,6 +822,9 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
 
           {/* Crisis events for this session with the WP2 adjudication widget */}
           {!loading && <SessionCrisisEvents sessionId={sessionId} />}
+
+          {/* Text hand-off links: voice call -> vendor cut -> typed chat (356) */}
+          {!loading && <SessionHandoffLinks sessionId={sessionId} />}
 
           {/* LLM-judge quality scores (ended sessions only) */}
           {!loading && <SessionEvalPanel sessionId={sessionId} sessionStatus={session?.status} />}

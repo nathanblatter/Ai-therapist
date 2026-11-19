@@ -8,8 +8,11 @@
 // answers and acts on them.
 
 import {
-  HANDOFF_NEUTRAL_FIRST_MESSAGE_NO_VOICE,
+  handoffFirstMessage,
+  handoffKind,
+  handoffQuickReplies,
   handoffSpokenBridge,
+  type HandoffKind,
   type HandoffReason,
   type HandoffStartPayload,
 } from '../../../shared/textHandoff';
@@ -108,17 +111,30 @@ export type HandoffStartOutcome =
       sessionId: string;
       /** First message to show; the server's when it authored one. */
       firstMessage: string;
-      /** False when the server sent no first message (an older server during a
-       *  deploy, or a session it could not link): the line is then shown as an
-       *  app notice, since it is not in the stored conversation. */
+      /** False when the server sent no hand-off (its preparation failed, an
+       *  older server during a deploy, or a session it could not link). The
+       *  browser then words the screen itself, for risk UNKNOWN, and must tell
+       *  the server (`fallback`) so the chat is flagged to match. */
       serverAuthored: boolean;
       handoff: Pick<HandoffStartPayload, 'kind' | 'quickReplies' | 'voiceReturnAllowed' | 'spokenBridge'>;
+      /** Set when `serverAuthored` is false: what the server must be told, on
+       *  POST /api/chat/handoff-fallback and on every chat message until one
+       *  is acknowledged. */
+      fallback: HandoffFallback | null;
     }
   | {
       /** It could not be opened: the crisis lines and a retry button. */
       screen: 'failed';
       reason: string;
     };
+
+/** What the server is told when the browser worded a hand-off itself. */
+export interface HandoffFallback {
+  continued_from: string;
+  reason: HandoffReason;
+}
+
+const KNOWN_KINDS: readonly HandoffKind[] = ['crisis', 'ceiling', 'checkin', 'neutral'];
 
 /**
  * Read the response to POST /api/chat/start for a hand-off.
@@ -127,10 +143,22 @@ export type HandoffStartOutcome =
  * card and a retry button. There is no outcome that leaves the participant on
  * a blank screen or the post-session screen.
  *
+ * A chat session that came back WITHOUT hand-off details fails toward safety
+ * (PR #77 review): the browser knows the voice vendor ended the call, and it
+ * does not know why, so the risk is unknown and unknown is worded as a crisis
+ * (the same rule the server applies: shared/textHandoff.ts handoffKind), with
+ * the pinned card and the one-tap answers. `fallback` then tells the server to
+ * flag the chat to match.
+ *
  * `status` 0 stands for "no response at all" (network failure, timeout), with
- * `detail` saying which.
+ * `detail` saying which. `voiceSessionId` and `reason` are the cut call's.
  */
-export function readHandoffStart(status: number, body: unknown, detail?: string): HandoffStartOutcome {
+export function readHandoffStart(
+  status: number,
+  body: unknown,
+  detail?: string,
+  cut: { voiceSessionId: string | null; reason: HandoffReason } = { voiceSessionId: null, reason: 'content' },
+): HandoffStartOutcome {
   if (status < 200 || status >= 300) {
     return {
       screen: 'failed',
@@ -149,8 +177,7 @@ export function readHandoffStart(status: number, body: unknown, detail?: string)
   if (typeof data.sessionId !== 'string' || !data.sessionId) return { screen: 'failed', reason: 'no session id' };
 
   const handoff = data.handoff ?? null;
-  const kind =
-    handoff?.kind === 'crisis' || handoff?.kind === 'ceiling' || handoff?.kind === 'neutral' ? handoff.kind : null;
+  const kind = KNOWN_KINDS.includes(handoff?.kind as HandoffKind) ? (handoff?.kind as HandoffKind) : null;
   if (kind && typeof data.opening === 'string' && data.opening.trim()) {
     return {
       screen: 'chat',
@@ -168,23 +195,83 @@ export function readHandoffStart(status: number, body: unknown, detail?: string)
             ? handoff.spokenBridge
             : handoffSpokenBridge(kind),
       },
+      fallback: null,
     };
   }
-  // A chat session exists but the server said nothing about the hand-off.
-  // Continue in it with the neutral line and no assumptions: no suicide
-  // question from the app, no offer of a voice call.
+  // A chat session exists but the server said nothing about the hand-off. The
+  // cut happened and its cause is unknown: crisis wording (or the time-limit
+  // wording after the vendor's session ceiling), never an offer of a voice call.
+  const fallbackKind = handoffKind(cut.reason, 'unknown');
   return {
     screen: 'chat',
     sessionId: data.sessionId,
-    firstMessage: HANDOFF_NEUTRAL_FIRST_MESSAGE_NO_VOICE,
+    firstMessage: handoffFirstMessage(fallbackKind, false),
     serverAuthored: false,
     handoff: {
-      kind: 'neutral',
-      quickReplies: [],
+      kind: fallbackKind,
+      quickReplies: handoffQuickReplies(fallbackKind),
       voiceReturnAllowed: false,
-      spokenBridge: handoffSpokenBridge('neutral'),
+      spokenBridge: handoffSpokenBridge(fallbackKind),
     },
+    fallback: cut.voiceSessionId ? { continued_from: cut.voiceSessionId, reason: cut.reason } : null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Return to voice from a hand-off chat
+// ---------------------------------------------------------------------------
+
+export { VOICE_RETURN_FAILED_NOTICE, VOICE_RETURN_REFUSED_NOTICE } from '../../../shared/textHandoff';
+
+export type VoiceReturnOutcome = 'refused' | 'started' | 'failed';
+
+/**
+ * "Go back to voice" from a text hand-off chat, in the only safe order (PR #77
+ * review): ask the server, START the voice call, and end the chat only once
+ * that call is established. Until 2026-11-19 the chat was ended first, so a
+ * voice start that failed (microphone refused, server refusal, no
+ * `session.started`) left the participant on Home with a toast and the
+ * conversation gone. Now a failure leaves them in the chat, which was never
+ * touched; `abandonVoice` releases whatever the failed start left behind.
+ *
+ * `startVoice` resolves true only when the new call is established; it may
+ * throw, which counts as a failure. `endChat` is not allowed to undo a call
+ * that has started: its errors are swallowed.
+ */
+export async function runVoiceReturn(steps: {
+  checkAllowed: () => Promise<boolean>;
+  startVoice: () => Promise<boolean>;
+  abandonVoice: () => void | Promise<void>;
+  endChat: () => Promise<void>;
+}): Promise<VoiceReturnOutcome> {
+  let allowed = false;
+  try {
+    allowed = await steps.checkAllowed();
+  } catch {
+    allowed = false;
+  }
+  if (!allowed) return 'refused';
+
+  let started = false;
+  try {
+    started = await steps.startVoice();
+  } catch {
+    started = false;
+  }
+  if (!started) {
+    try {
+      await steps.abandonVoice();
+    } catch {
+      /* the chat is still there; nothing more to undo */
+    }
+    return 'failed';
+  }
+  try {
+    await steps.endChat();
+  } catch {
+    /* the voice call is live; a chat that did not end cleanly is swept server-side */
+  }
+  return 'started';
 }
 
 /** Longest the browser waits for the hand-off chat start before showing the

@@ -236,6 +236,25 @@ export default function adminSessionsRoutes(): Router {
     },
   );
 
+  // GET /admin/api/sessions/:sessionId/handoff-links - the text hand-off links
+  // on this session (ai-therapist-356): which voice call a typed chat
+  // continued, which chat a cut voice call went on in, and a voice call
+  // started again from a chat. Session ids, enums and times only.
+  router.get(
+    '/admin/api/sessions/:sessionId/handoff-links',
+    requireFullContent,
+    requireSessionClientAccess(),
+    async (req, res) => {
+      try {
+        const { getSessionHandoffLinks } = await import('../../db/textHandoff.queries.js');
+        res.json({ links: await getSessionHandoffLinks(req.params.sessionId) });
+      } catch (err) {
+        log.error({ err }, 'Failed to fetch hand-off links');
+        res.status(500).json({ error: 'Failed to fetch hand-off links' });
+      }
+    },
+  );
+
   // GET /admin/api/sessions/:sessionId/recording-info - playback availability
   router.get(
     '/admin/api/sessions/:sessionId/recording-info',

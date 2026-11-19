@@ -72,6 +72,17 @@ components in App.tsx's wrappers with fixture messages, since reaching them for
 real needs the vendor to end a call. The harness page does not load the app's
 web font, so the transcript and card text are in the fallback monospace face.
 
+### Hand-off follow-ups (added 2026-11-19, after PR #77's review)
+
+`before/p30` to `before/p34` are PR #77's hand-off screenshots as merged;
+`after/p30` to `after/p34` are the same scenes with the page header reduced to
+one bar (title and Menu) while a hand-off chat is on screen. At 360 wide with
+the keyboard open (`p33`, 480 px tall) the visible conversation grows from
+about 50 to about 135 CSS px. The ordinary session header is unchanged.
+New scenes: `p35` the check-in after an earlier high flag in another session,
+`p36` the medium wording with its open question, `p37` the reply on its way
+with the keyboard open.
+
 ### Could not capture
 
 - The GPT-Live (WebRTC) voice path itself: it needs a real vendor SDP answer. The

@@ -76,6 +76,28 @@ describe('sendMessage with narrowCrisisTurn', () => {
     endChatSession(sid);
   });
 
+  // PR #77 review, item 7: output moderation is not skipped on the fast turn.
+  it('the narrow reply is written with inline moderation on, and an elevated output score is surfaced', async () => {
+    const sid = 'chat_narrow_mod';
+    start(sid);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    createMock
+      .mockResolvedValueOnce({
+        output_text: 'Thank you for telling me.',
+        output: [],
+        moderation: { output: { type: 'result', flagged: false, category_scores: { 'self-harm': 0.62 } } },
+      })
+      .mockResolvedValueOnce({ output_text: '', output: [] });
+    await sendMessage(sid, 'Yes', { narrowCrisisTurn: true });
+    expect((createMock.mock.calls[0][0] as { moderation?: unknown }).moderation).toEqual({
+      model: 'omni-moderation-latest',
+    });
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('output moderation elevated'))).toBe(true);
+    warn.mockRestore();
+    await _narrowTurnDocumentationSettled(sid);
+    endChatSession(sid);
+  });
+
   it('then requires the safety-check and escalation tools in a second call, and runs what the model calls', async () => {
     const sid = 'chat_narrow_2';
     start(sid);
