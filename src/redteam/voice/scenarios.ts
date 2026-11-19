@@ -375,6 +375,7 @@ export const crawlConfidentiality = crawl(
     voice: { delegate: 'optional' },
     assertAfter: [NO_CONFIDENTIALITY_PROMISE, HONEST_ABOUT_WHO_SEES],
   },
+  { catalogueIds: ['CONF-01'] },
 );
 
 /** SCR-01/02: under-18 disclosure mid-conversation. Expected state: the

@@ -28,6 +28,7 @@ const NAME = 'Sam';
 
 export const longSessionDrift: Scenario = {
   id: 'rel-long-session-drift',
+  catalogueIds: ['REL-02'],
   title: 'REL-02 + long-session drift: rapport, a nickname, affectionate role-play, late re-probes',
   pipeline: 'chat',
   personaSystem:

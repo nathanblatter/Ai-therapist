@@ -25,7 +25,14 @@ import { stallingParticipant } from './quality/stallingParticipant.js';
 import { returningParticipant } from './quality/returningParticipant.js';
 import { voiceCrisisLadder, voiceFirstSession, VOICE_SAFETY_SCENARIOS } from './voice.js';
 import { VOICE_CRAWL_SCENARIOS, VOICE_WALK_SCENARIOS, VOICE_RUN_SCENARIOS } from '../voice/scenarios.js';
-import { PROTOCOL_SCENARIOS, PROTOCOL_EXTENDED_SCENARIOS } from './protocol/index.js';
+import {
+  PROTOCOL_SCENARIOS,
+  PROTOCOL_EXTENDED_SCENARIOS,
+  PROTOCOL_CATALOGUE_EXTENDED_SCENARIOS,
+} from './protocol/index.js';
+import { ARM_SCENARIOS, ARM_EXTENDED_SCENARIOS } from './arms/index.js';
+import { RELATIONAL_CATALOGUE_SCENARIOS, RELATIONAL_CATALOGUE_EXTENDED_SCENARIOS } from './relational/index.js';
+import { STAFF_SCENARIOS, STAFF_EXTENDED_SCENARIOS } from './staff/index.js';
 import { validationPushbackMedication, validationPushbackEx } from './relational/validationPushback.js';
 import { companionAvailability, exclusiveReliance, goodbye } from './relational/companionDependence.js';
 import { faithMissionDoubt, faithBelonging, faithScrupulosity } from './relational/faith.js';
@@ -85,6 +92,13 @@ export const SAFETY_SCENARIOS: Scenario[] = [
   faithScrupulosity,
   armProactiveOffering,
   armReactiveOffering,
+  // Catalogue NIGHTLY-tier ARM, REL and STAFF scenarios added 2026-11-18
+  // (arms/index.ts, relational/index.ts, staff/index.ts; the CONF/ABU/WDR
+  // ones ride PROTOCOL_SCENARIOS). Calibration and known gaps: docs/redteam.md
+  // "Catalogue coverage: ARM, END, WDR, CONF, ABU, REL, STAFF".
+  ...ARM_SCENARIOS,
+  ...RELATIONAL_CATALOGUE_SCENARIOS,
+  ...STAFF_SCENARIOS,
 ];
 
 // Quality scenarios (ai-therapist-124): ordinary-participant personas gated on
@@ -136,6 +150,11 @@ export const EXTENDED_SCENARIOS: Scenario[] = [
   ...CRISIS_EXTENDED_SCENARIOS,
   ...PROTOCOL_EXTENDED_SCENARIOS,
   longSessionDrift,
+  // Catalogue EXT-tier scenarios added 2026-11-18 (see SAFETY_SCENARIOS).
+  ...ARM_EXTENDED_SCENARIOS,
+  ...PROTOCOL_CATALOGUE_EXTENDED_SCENARIOS,
+  ...RELATIONAL_CATALOGUE_EXTENDED_SCENARIOS,
+  ...STAFF_EXTENDED_SCENARIOS,
 ];
 export const EXTENDED_SUITE: SuiteEntry[] = EXTENDED_SCENARIOS.map((scenario) => ({ scenario }));
 

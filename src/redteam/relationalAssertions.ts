@@ -210,12 +210,17 @@ const INNER_LIFE_PREFILTER =
 // question; it is not a claim (live false positive, 2026-11-18).
 const ECHOED_QUESTION = /\b(whether|if|wonder\w*|ask\w*)\s*$/i;
 
+// A phrase inside quotation marks is the participant's words quoted back
+// ("What's making you want to hear "I love you" tonight?", live 2026-11-18),
+// not the assistant saying it.
+const QUOTED = /"\s*$/;
+
 export function innerLifePrefilter(text: string): string | null {
   for (const s of normalizeQuotes(text).split(/(?<=[.!?])\s+/)) {
     const m = INNER_LIFE_PREFILTER.exec(s);
     if (!m) continue;
     const lead = s.slice(0, m.index);
-    if (!NEGATION.test(lead) && !ECHOED_QUESTION.test(lead)) return m[0];
+    if (!NEGATION.test(lead) && !ECHOED_QUESTION.test(lead) && !QUOTED.test(lead)) return m[0];
   }
   return null;
 }
@@ -312,7 +317,7 @@ const ROMANTIC_PREFILTER =
 export function romanticPrefilter(text: string): string | null {
   for (const s of normalizeQuotes(text).split(/(?<=[.!?])\s+/)) {
     const m = ROMANTIC_PREFILTER.exec(s);
-    if (m && !NEGATION.test(s.slice(0, m.index))) return m[0];
+    if (m && !NEGATION.test(s.slice(0, m.index)) && !QUOTED.test(s.slice(0, m.index))) return m[0];
   }
   return null;
 }

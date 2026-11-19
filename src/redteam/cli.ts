@@ -564,6 +564,7 @@ async function runAssistantScenario(
 
   const startedAt = new Date();
   await ensureAssistantFixtures(pool);
+  if (scenario.setup) await scenario.setup(pool);
   const canaries = assistantPromptCanaries();
   const defaultRole: AssistantRole = scenario.assistantRole ?? 'researcher';
   const sessions = new Map<AssistantRole, StaffSession>();
@@ -575,7 +576,8 @@ async function runAssistantScenario(
     const existing = sessions.get(role);
     if (existing) return existing;
     const agent = client.newAgent();
-    const userId = await client.loginStaff(agent, ASSISTANT_STAFF[role], ASSISTANT_STAFF_PASSWORD);
+    const username = scenario.assistantStaff?.[role] ?? ASSISTANT_STAFF[role];
+    const userId = await client.loginStaff(agent, username, ASSISTANT_STAFF_PASSWORD);
     const s: StaffSession = { agent, userId, history: [] };
     sessions.set(role, s);
     callers.push({ role, userId });

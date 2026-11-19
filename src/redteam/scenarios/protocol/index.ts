@@ -24,6 +24,15 @@ import { minorInCrisis } from './minorInCrisis.js';
 import { studyWithdrawal, withdrawalFeelingWorse, withdrawalProcedure } from './studyWithdrawal.js';
 import { partnerViolenceDisclosure, childAbuseDisclosure, abuseRetraction } from './abuseDisclosure.js';
 import { talkToARealPerson, noFalseActions } from './actionClaims.js';
+import { recordingQuestions, areYouHuman, usedAgainstMe, dataRemoval, actForMe } from './confidentialityQuestions.js';
+import {
+  identifiersVolunteered,
+  redactionInjection,
+  whatDoYouKnowMemoryOn,
+  whatDoYouKnowMemoryOff,
+} from './identifiersAndMemory.js';
+import { pastAbuse, rolePlayDisclosure, participantCausingHarm, notReportable, stalking } from './abuseMore.js';
+import { pauseVersusWithdraw, pressureAndGrades, isThisTherapy } from './withdrawalMore.js';
 
 export const PROTOCOL_SCENARIOS: Scenario[] = [
   honestyConfidentiality,
@@ -39,6 +48,31 @@ export const PROTOCOL_SCENARIOS: Scenario[] = [
   noFalseActions,
   withdrawalFeelingWorse,
   withdrawalProcedure,
+  // Catalogue tier GATE / NIGHTLY, added 2026-11-18 (CONF-01 recording,
+  // CONF-02, CONF-05, CONF-06, CONF-07, CONF-08, CONF-09, ABU-09). Full suite
+  // only; promotion of any to the smoke gate is the owner's call.
+  recordingQuestions,
+  areYouHuman,
+  dataRemoval,
+  actForMe,
+  identifiersVolunteered,
+  redactionInjection,
+  whatDoYouKnowMemoryOn,
+  whatDoYouKnowMemoryOff,
+  notReportable,
+];
+
+/** Catalogue tier EXT protocol scenarios (CONF-04, ABU-03/05/07/10,
+ *  WDR-03/04/05): the extended suite, weekly or before a prompt change. */
+export const PROTOCOL_CATALOGUE_EXTENDED_SCENARIOS: Scenario[] = [
+  usedAgainstMe,
+  pastAbuse,
+  rolePlayDisclosure,
+  participantCausingHarm,
+  stalking,
+  pauseVersusWithdraw,
+  pressureAndGrades,
+  isThisTherapy,
 ];
 
 /** On demand only (`npm run redteam:extended -- --scenario <id>`): see the header. */

@@ -22,7 +22,9 @@ import type { AssertionResult, Scenario, ScenarioResult } from './types.js';
 export interface KnownGap {
   /** What the product does today and which protocol or prompt line it breaks. */
   reason: string;
-  /** Flightdeck item for the product bug, e.g. `ai-therapist-301`. */
+  /** Flightdeck item for the product bug, e.g. `ai-therapist-301`. Empty
+   *  string = found by an eval and not filed yet: reported as `UNFILED` until
+   *  the owner files it and fills the reference in. */
   ref: string;
   /** Assertion ids (exact) that report without gating until the bug is fixed.
    *  Omitted: the scenario is only labelled and every assertion still gates. */
@@ -31,12 +33,20 @@ export interface KnownGap {
 
 export const FLIGHTDECK_REF = /^ai-therapist-\d+$/;
 
+/** Label reported for a known gap whose `ref` is still empty. */
+export const UNFILED_REF = 'UNFILED';
+
+/** The reference a report shows for a gap. */
+export function gapLabel(gap: Pick<KnownGap, 'ref'>): string {
+  return gap.ref === '' ? UNFILED_REF : gap.ref;
+}
+
 /** Problems with a knownGap declaration; empty when it is well formed. */
 export function validateKnownGap(scenario: Pick<Scenario, 'id' | 'knownGap' | 'beats' | 'assertFinal'>): string[] {
   const gap = scenario.knownGap;
   if (!gap) return [];
   const problems: string[] = [];
-  if (!FLIGHTDECK_REF.test(gap.ref)) problems.push(`${scenario.id}: flightdeck ref '${gap.ref}'`);
+  if (gap.ref !== '' && !FLIGHTDECK_REF.test(gap.ref)) problems.push(`${scenario.id}: flightdeck ref '${gap.ref}'`);
   if (gap.reason.trim().length < 20) problems.push(`${scenario.id}: reason too short to be useful`);
   if (!gap.assertionIds) return problems;
   if (gap.assertionIds.length === 0) problems.push(`${scenario.id}: assertionIds is empty`);
@@ -62,11 +72,12 @@ export function applyKnownGap(scenario: Pick<Scenario, 'knownGap'>, assertions: 
   const gap = scenario.knownGap;
   if (!gap?.assertionIds?.length) return assertions;
   const listed = new Set(gap.assertionIds);
+  const ref = gapLabel(gap);
   return assertions.map((a) => {
     if (!listed.has(a.id)) return a;
     return a.passed
-      ? { ...a, knownGap: gap.ref, detail: `KNOWN GAP ${gap.ref} PASSED THIS RUN: ${a.detail}` }
-      : { ...a, gating: false, knownGap: gap.ref, detail: `KNOWN GAP ${gap.ref}: ${a.detail}` };
+      ? { ...a, knownGap: ref, detail: `KNOWN GAP ${ref} PASSED THIS RUN: ${a.detail}` }
+      : { ...a, gating: false, knownGap: ref, detail: `KNOWN GAP ${ref}: ${a.detail}` };
   });
 }
 
