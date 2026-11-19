@@ -42,7 +42,10 @@ const handoffMocks = vi.hoisted(() => ({
   resolveVoiceReturn: vi.fn(),
   verifyVoiceReturn: vi.fn(),
   clearHandoffState: vi.fn(),
+  recordClientHandoffFallback: vi.fn(),
 }));
+const queryMocks = vi.hoisted(() => ({ getHandoffSessionRow: vi.fn() }));
+vi.mock('../../db/textHandoff.queries.js', () => queryMocks);
 const pipelineMocks = vi.hoisted(() => ({ runCrisisPipeline: vi.fn() }));
 const detectionMocks = vi.hoisted(() => ({ detectCrisisKeywords: vi.fn(), needsContextAssessment: vi.fn() }));
 
@@ -329,6 +332,95 @@ describe('POST /api/chat/message in a hand-off session', () => {
     expect(res.body.handoff).toBeUndefined();
     expect(chatMocks.sendMessage).toHaveBeenCalledWith('chat_1', 'hello');
     expect(handoffMocks.resolveVoiceReturn).not.toHaveBeenCalled();
+  });
+});
+
+// PR #77 review, item 3: the chat start answered without hand-off details, the
+// browser fell back to the crisis wording and tells the server.
+describe('the browser hand-off fallback', () => {
+  const FALLBACK_PREPARED = {
+    ...CRISIS_PREPARED,
+    payload: { ...CRISIS_PREPARED.payload, severity: 'unknown' },
+  };
+  beforeEach(() => {
+    handoffMocks.recordClientHandoffFallback.mockResolvedValue(FALLBACK_PREPARED);
+    queryMocks.getHandoffSessionRow.mockResolvedValue({
+      session_id: 'chat_1',
+      user_id: 7,
+      session_type: 'chat',
+      status: 'active',
+      crisis_flagged: false,
+      crisis_severity: null,
+    });
+  });
+
+  it('POST /api/chat/handoff-fallback flags the chat (unknown) and stores the message the participant saw', async () => {
+    handoffMocks.isHandoffSession.mockReturnValue(true);
+    const res = await request(makeApp())
+      .post('/api/chat/handoff-fallback')
+      .send({ sessionId: 'chat_1', continued_from: 'live_A', reason: 'content' });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ recorded: true, handoff: { kind: 'crisis', severity: 'unknown' } });
+    const input = handoffMocks.recordClientHandoffFallback.mock.calls[0][0] as {
+      chatSessionId: string;
+      continuedFrom: string;
+      reason: string;
+      canAccess: (row: { user_id: number | null }, id: string) => boolean;
+    };
+    expect(input).toMatchObject({ chatSessionId: 'chat_1', continuedFrom: 'live_A', reason: 'content' });
+    expect(input.canAccess({ user_id: 8 }, 'live_A')).toBe(false);
+    // Stored like the chat start's first message, and seeded after the transcript.
+    expect(dbMocks.insertMessagesBatch).toHaveBeenCalledWith([
+      expect.objectContaining({
+        session_id: 'chat_1',
+        role: 'assistant',
+        content: HANDOFF_CRISIS_FIRST_MESSAGE,
+        metadata: { opening_line: true, text_handoff: 'crisis' },
+      }),
+    ]);
+    expect(chatMocks.seedAssistantOpening).toHaveBeenCalledWith('chat_1', HANDOFF_CRISIS_FIRST_MESSAGE);
+  });
+
+  it("refuses someone else's chat", async () => {
+    dbMocks.getSessionAccessInfo.mockResolvedValue({ status: 'active', user_id: 99, session_type: 'chat' });
+    const res = await request(makeApp())
+      .post('/api/chat/handoff-fallback')
+      .send({ sessionId: 'chat_1', continued_from: 'live_A' });
+    expect(res.status).toBe(404);
+    expect(handoffMocks.recordClientHandoffFallback).not.toHaveBeenCalled();
+  });
+
+  it('rides on the first message: recorded BEFORE the participant turn, which then takes the crisis path', async () => {
+    // After the fallback is recorded the session is a crisis hand-off.
+    handoffMocks.recordClientHandoffFallback.mockImplementation(async () => {
+      handoffMocks.isHandoffSession.mockReturnValue(true);
+      handoffMocks.consumeNarrowFirstTurn.mockReturnValue(true);
+      return FALLBACK_PREPARED;
+    });
+    const res = await request(makeApp())
+      .post('/api/chat/message')
+      .send({ sessionId: 'chat_1', message: 'Yes', handoff_fallback: { continued_from: 'live_A', reason: 'content' } });
+    expect(res.status).toBe(200);
+    expect(res.body.handoff).toMatchObject({ recorded: true });
+    // The first message the participant saw is stored before their answer to it.
+    const inserted = dbMocks.insertMessagesBatch.mock.calls.map((c) => (c[0] as Array<{ role: string }>)[0].role);
+    expect(inserted.slice(0, 2)).toEqual(['assistant', 'user']);
+    expect(chatMocks.sendMessage).toHaveBeenCalledWith('chat_1', 'Yes', { narrowCrisisTurn: true });
+  });
+
+  it('a message without the fallback never asks for it', async () => {
+    await request(makeApp()).post('/api/chat/message').send({ sessionId: 'chat_1', message: 'hello' });
+    expect(handoffMocks.recordClientHandoffFallback).not.toHaveBeenCalled();
+  });
+
+  it('a fallback that cannot be recorded does not cost the participant their message, and is not acknowledged', async () => {
+    handoffMocks.recordClientHandoffFallback.mockRejectedValue(new Error('db down'));
+    const res = await request(makeApp())
+      .post('/api/chat/message')
+      .send({ sessionId: 'chat_1', message: 'Yes', handoff_fallback: { continued_from: 'live_A' } });
+    expect(res.status).toBe(200);
+    expect(res.body.response).toBe('model reply');
+    expect(res.body.handoff?.recorded).toBeUndefined();
   });
 });
 

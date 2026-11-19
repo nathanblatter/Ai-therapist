@@ -15,8 +15,8 @@ vi.mock('../config/db.js', () => ({
 
 import {
   getHandoffRecord,
-  getPredecessorSessionId,
   getSessionAssessedPeak,
+  getSessionHandoffLinks,
   markTextHandoffContinuation,
 } from './textHandoff.queries.js';
 
@@ -97,37 +97,56 @@ describe('markTextHandoffContinuation (ai-therapist-356)', () => {
 });
 
 describe('hand-off link reads', () => {
-  it('getPredecessorSessionId follows either kind of link, newest first', async () => {
-    poolQueryMock.mockResolvedValue({ rows: [{ from_session: 'live_A' }] });
-    expect(await getPredecessorSessionId('chat_1')).toBe('live_A');
-    const [sql, params] = poolQueryMock.mock.calls[0] as [string, unknown[]];
-    expect(sql).toMatch(/ORDER BY performed_at DESC/);
-    expect(params).toEqual(['chat_1', ['voice_cut_text_handoff', 'voice_resumed_from_text']]);
-    poolQueryMock.mockResolvedValue({ rows: [] });
-    expect(await getPredecessorSessionId('live_A')).toBeNull();
-  });
-
   it('getHandoffRecord reads the stored decision, from an object or a JSON string', async () => {
     const details = {
       event: 'voice_cut_text_handoff',
-      kind: 'crisis',
-      severity: 'high',
+      kind: 'checkin',
+      severity: 'none',
+      participantSeverity: 'high',
       reason: 'content',
       from: 'live_A',
     };
     poolQueryMock.mockResolvedValue({ rows: [{ details }] });
     expect(await getHandoffRecord('chat_1')).toEqual({
-      kind: 'crisis',
-      severity: 'high',
+      kind: 'checkin',
+      severity: 'none',
+      participantSeverity: 'high',
       reason: 'content',
       from: 'live_A',
     });
+    // The browser fallback's row on a chat whose cut session was not linkable
+    // has no `from`, and is still this chat's hand-off.
+    expect(String(poolQueryMock.mock.calls[0][0])).toMatch(/action_details->>'role' = 'continuation'/);
+    poolQueryMock.mockResolvedValue({ rows: [{ details: { ...details, kind: 'crisis', from: undefined } }] });
+    expect(await getHandoffRecord('chat_1')).toMatchObject({ kind: 'crisis', from: null });
+    poolQueryMock.mockResolvedValue({ rows: [{ details: { ...details, participantSeverity: undefined } }] });
+    expect((await getHandoffRecord('chat_1'))?.participantSeverity).toBeNull();
+    poolQueryMock.mockResolvedValue({ rows: [{ details }] });
     poolQueryMock.mockResolvedValue({ rows: [{ details: JSON.stringify(details) }] });
-    expect((await getHandoffRecord('chat_1'))?.kind).toBe('crisis');
+    expect((await getHandoffRecord('chat_1'))?.kind).toBe('checkin');
     poolQueryMock.mockResolvedValue({ rows: [] });
     expect(await getHandoffRecord('chat_plain')).toBeNull();
     poolQueryMock.mockResolvedValue({ rows: [{ details: '{not json' }] });
     expect(await getHandoffRecord('chat_bad')).toBeNull();
+  });
+
+  it('getSessionHandoffLinks returns the link rows for the admin view, skipping a row that does not parse', async () => {
+    const at = new Date('2026-11-19T21:40:00Z');
+    poolQueryMock.mockResolvedValue({
+      rows: [
+        {
+          performed_at: at,
+          details: { event: 'voice_cut_text_handoff', role: 'cut_session', to: 'chat_1', reason: 'content' },
+        },
+        { performed_at: at, details: '{broken' },
+        { performed_at: at, details: JSON.stringify({ event: 'voice_resumed_from_text', from: 'chat_1' }) },
+      ],
+    });
+    const links = await getSessionHandoffLinks('live_A');
+    expect(links).toHaveLength(2);
+    expect(links[0]).toMatchObject({ event: 'voice_cut_text_handoff', role: 'cut_session', to: 'chat_1', from: null });
+    expect(links[1]).toMatchObject({ event: 'voice_resumed_from_text', from: 'chat_1' });
+    expect(poolQueryMock.mock.calls[0][1]).toEqual(['live_A', ['voice_cut_text_handoff', 'voice_resumed_from_text']]);
   });
 
   it('getSessionAssessedPeak reads the stored bands, not a threshold', async () => {

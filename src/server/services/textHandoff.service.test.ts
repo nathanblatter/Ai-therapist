@@ -8,11 +8,17 @@ const q = vi.hoisted(() => ({
   getHandoffRecord: vi.fn(),
   getHandoffSessionRow: vi.fn(),
   getIncidentTurns: vi.fn(),
-  getPredecessorSessionId: vi.fn(),
   getSessionAssessedPeak: vi.fn(),
   getSessionRiskCheckSteps: vi.fn(),
   insertHandoffLink: vi.fn(),
   markTextHandoffContinuation: vi.fn(),
+}));
+// The chain lookup and the per-session risk reads (db/paging.queries), the
+// same ones the paging policy uses.
+const pq = vi.hoisted(() => ({
+  getIncidentChainSessionIds: vi.fn(),
+  getParticipantFlagEvents: vi.fn(),
+  getParticipantAssessedRisk: vi.fn(),
 }));
 const paging = vi.hoisted(() => ({
   resolveIncidentPeak: vi.fn(),
@@ -26,6 +32,7 @@ vi.mock('../db/textHandoff.queries.js', () => ({
   HANDOFF_EVENT: 'voice_cut_text_handoff',
   VOICE_RETURN_EVENT: 'voice_resumed_from_text',
 }));
+vi.mock('../db/paging.queries.js', () => ({ ...pq, INCIDENT_CHAIN_BACKSTOP_MS: 12 * 60 * 60 * 1000 }));
 vi.mock('./crisisPaging.service.js', () => paging);
 vi.mock('./sidebandManager.service.js', () => ({ sidebandManager: sideband }));
 vi.mock('../utils/adminBroadcast.js', () => ({
@@ -36,9 +43,11 @@ import {
   buildIncidentRecap,
   consumeNarrowFirstTurn,
   HANDOFF_RECAP_SESSION_BREAK,
+  HANDOFF_RISK_READ_TIMEOUT_MS,
   HANDOFF_SCORING_WAIT_MS,
   isHandoffSession,
   prepareTextHandoff,
+  recordClientHandoffFallback,
   resolveIncidentChain,
   resolveVoiceReturn,
   verifyVoiceReturn,
@@ -46,6 +55,7 @@ import {
 } from './textHandoff.service.js';
 import {
   HANDOFF_CEILING_FIRST_MESSAGE,
+  HANDOFF_CHECKIN_FIRST_MESSAGE,
   HANDOFF_CRISIS_FIRST_MESSAGE,
   HANDOFF_NEUTRAL_FIRST_MESSAGE,
   HANDOFF_NEUTRAL_FIRST_MESSAGE_NO_VOICE,
@@ -69,17 +79,32 @@ const turn = (sessionId: string, role: string, content: string) => ({
   created_at: new Date(),
 });
 
+type PeakFixture = { severity: string; riskScore: number | null };
+
+/**
+ * `peak` sets both reads to the same answer (the risk was in this call);
+ * `callPeak` is this call's chain alone (the wording), `participantPeak` the
+ * participant across the look-back (the flag). `chains` maps a session to
+ * what getIncidentChainSessionIds returns for it, newest first.
+ */
 function arrange(opts: {
   rows?: Record<string, ReturnType<typeof row>>;
-  predecessors?: Record<string, string | null>;
-  peak?: { severity: string; riskScore: number | null };
+  chains?: Record<string, string[]>;
+  peak?: PeakFixture;
+  callPeak?: PeakFixture;
+  participantPeak?: PeakFixture;
   scored?: boolean;
   turns?: ReturnType<typeof turn>[];
 }) {
   const rows = opts.rows ?? { live_A: row('live_A') };
   q.getHandoffSessionRow.mockImplementation(async (id: string) => rows[id] ?? null);
-  q.getPredecessorSessionId.mockImplementation(async (id: string) => opts.predecessors?.[id] ?? null);
-  paging.resolveIncidentPeak.mockResolvedValue(opts.peak ?? { severity: 'none', riskScore: null });
+  pq.getIncidentChainSessionIds.mockImplementation(async (id: string) => opts.chains?.[id] ?? [id]);
+  const call = opts.callPeak ?? opts.peak ?? { severity: 'none', riskScore: null };
+  pq.getParticipantFlagEvents.mockImplementation(async (ids: string[]) =>
+    call.severity === 'none' ? [] : [{ session_id: ids[0], severity: call.severity, risk_score: call.riskScore }],
+  );
+  pq.getParticipantAssessedRisk.mockResolvedValue([]);
+  paging.resolveIncidentPeak.mockResolvedValue(opts.participantPeak ?? opts.peak ?? call);
   sideband.waitForUserTurnsScored.mockResolvedValue(opts.scored ?? true);
   q.getIncidentTurns.mockResolvedValue(
     opts.turns ?? [turn('live_A', 'assistant', 'How has this week been?'), turn('live_A', 'user', 'Pretty rough.')],
@@ -218,9 +243,152 @@ describe('prepareTextHandoff: routing', () => {
 
   it('the risk read failing is not "no risk": crisis wording', async () => {
     arrange({});
-    paging.resolveIncidentPeak.mockRejectedValue(new Error('db down'));
+    pq.getParticipantFlagEvents.mockRejectedValue(new Error('db down'));
     const result = await start();
     expect(result!.payload).toMatchObject({ kind: 'crisis', severity: 'unknown' });
+    expect(result!.firstMessage).toBe(HANDOFF_CRISIS_FIRST_MESSAGE);
+  });
+
+  it('a chain read that hangs is bounded and treated as unknown', async () => {
+    vi.useFakeTimers();
+    try {
+      arrange({});
+      pq.getParticipantFlagEvents.mockReturnValue(new Promise(() => undefined));
+      const pending = start();
+      await vi.advanceTimersByTimeAsync(HANDOFF_RISK_READ_TIMEOUT_MS + 10);
+      const result = await pending;
+      expect(result!.payload).toMatchObject({ kind: 'crisis', severity: 'unknown' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// PR #77 review, item 1 (the 2-hour rule): the WORDING follows this call's own
+// chain of linked sessions; the participant-wide look-back only decides the
+// flag (and the check-in wording when nothing in the call was risky).
+describe('prepareTextHandoff: wording follows this call, the flag follows the participant', () => {
+  it('high in this chain: crisis wording, flagged high', async () => {
+    arrange({
+      rows: { live_A: row('live_A'), chat_B: row('chat_B'), live_C: row('live_C') },
+      chains: { live_C: ['live_C', 'chat_B', 'live_A'] },
+      callPeak: { severity: 'high', riskScore: 88 },
+    });
+    const result = await start({ continuedFrom: 'live_C' });
+    expect(result!.firstMessage).toBe(HANDOFF_CRISIS_FIRST_MESSAGE);
+    expect(result!.payload).toMatchObject({ kind: 'crisis', severity: 'high', participantSeverity: 'high' });
+    // The risk read covers exactly the chain: no participant-wide look-back.
+    expect(pq.getParticipantFlagEvents).toHaveBeenCalledWith(['live_A', 'chat_B', 'live_C'], null, expect.any(Date));
+    expect(pq.getParticipantAssessedRisk).toHaveBeenCalledWith(['live_A', 'chat_B', 'live_C'], null, expect.any(Date));
+    expect(q.markTextHandoffContinuation).toHaveBeenCalledWith(
+      'chat_new',
+      expect.objectContaining({ severity: 'high', riskScore: 88 }),
+    );
+  });
+
+  it('high earlier but not in this chain: the check-in wording, no "I heard you", flagged high', async () => {
+    // An ordinary call cut 90 minutes after a high flag in another session.
+    arrange({
+      callPeak: { severity: 'none', riskScore: null },
+      participantPeak: { severity: 'high', riskScore: 82 },
+      turns: [turn('live_A', 'assistant', 'Breathe in for four.'), turn('live_A', 'user', 'Okay.')],
+    });
+    const result = await start();
+    expect(result!.firstMessage).toBe(HANDOFF_CHECKIN_FIRST_MESSAGE);
+    expect(result!.firstMessage).not.toMatch(/heard you/i);
+    expect(result!.firstMessage).not.toMatch(/ending your life|suicid/i);
+    expect(result!.firstMessage).toMatch(/How are you doing right now\?$/);
+    expect(result!.payload).toMatchObject({
+      kind: 'checkin',
+      severity: 'none',
+      participantSeverity: 'high',
+      quickReplies: [],
+      voiceReturnAllowed: false,
+    });
+    // Flagged from the earlier incident, so the first reply follows the safety guidance.
+    expect(q.markTextHandoffContinuation).toHaveBeenCalledWith(
+      'chat_new',
+      expect.objectContaining({ severity: 'high', riskScore: 82 }),
+    );
+    // The model is told the truth: it did not ask about suicide in this call.
+    expect(result!.guidance).toMatch(/you did not ask about\s+suicide in it/);
+    expect(result!.guidance).toMatch(/another conversation/);
+    expect(result!.guidance).not.toMatch(/asked them directly whether they are thinking about ending their life/);
+    // Not the narrow crisis first turn: there was no suicide question to answer.
+    expect(consumeNarrowFirstTurn('chat_new')).toBe(false);
+    // Recorded with both severities, so a restart reads the same decision.
+    const onChat = q.insertHandoffLink.mock.calls.find(([id]) => id === 'chat_new')![1] as Record<string, unknown>;
+    expect(onChat).toMatchObject({ kind: 'checkin', severity: 'none', participantSeverity: 'high' });
+  });
+
+  it('none anywhere: the neutral wording, no flag', async () => {
+    arrange({
+      callPeak: { severity: 'none', riskScore: null },
+      participantPeak: { severity: 'none', riskScore: null },
+    });
+    const result = await start();
+    expect(result!.firstMessage).toBe(HANDOFF_NEUTRAL_FIRST_MESSAGE);
+    expect(result!.payload).toMatchObject({ kind: 'neutral', severity: 'none', participantSeverity: 'none' });
+    expect(q.markTextHandoffContinuation).not.toHaveBeenCalled();
+  });
+
+  it('unknown (the last turn still being scored): crisis wording, whatever the look-back says', async () => {
+    arrange({
+      callPeak: { severity: 'none', riskScore: null },
+      participantPeak: { severity: 'none', riskScore: null },
+      scored: false,
+    });
+    const result = await start();
+    expect(result!.firstMessage).toBe(HANDOFF_CRISIS_FIRST_MESSAGE);
+    expect(result!.payload).toMatchObject({ kind: 'crisis', severity: 'unknown', participantSeverity: 'unknown' });
+    expect(q.markTextHandoffContinuation).toHaveBeenCalledWith(
+      'chat_new',
+      expect.objectContaining({ severity: 'high', riskScore: null }),
+    );
+  });
+
+  it('medium in this call, high earlier elsewhere: the check-in, flagged high', async () => {
+    arrange({
+      callPeak: { severity: 'medium', riskScore: 50 },
+      participantPeak: { severity: 'high', riskScore: 80 },
+    });
+    const result = await start();
+    expect(result!.payload).toMatchObject({ kind: 'checkin', severity: 'medium', participantSeverity: 'high' });
+    expect(q.markTextHandoffContinuation).toHaveBeenCalledWith(
+      'chat_new',
+      expect.objectContaining({ severity: 'high' }),
+    );
+  });
+
+  it('medium earlier elsewhere, nothing in this call: calm wording with the open question, flagged medium', async () => {
+    arrange({
+      callPeak: { severity: 'none', riskScore: null },
+      participantPeak: { severity: 'medium', riskScore: 55 },
+    });
+    const result = await start();
+    expect(result!.firstMessage).toBe(HANDOFF_NEUTRAL_FIRST_MESSAGE_NO_VOICE);
+    expect(result!.payload).toMatchObject({ kind: 'neutral', voiceReturnAllowed: false, quickReplies: [] });
+    expect(q.markTextHandoffContinuation).toHaveBeenCalledWith(
+      'chat_new',
+      expect.objectContaining({ severity: 'medium' }),
+    );
+  });
+
+  it('the participant-wide read failing on a clean call: check-in wording, flagged as unknown', async () => {
+    arrange({ callPeak: { severity: 'none', riskScore: null } });
+    paging.resolveIncidentPeak.mockRejectedValue(new Error('db down'));
+    const result = await start();
+    expect(result!.payload).toMatchObject({ kind: 'checkin', severity: 'none', participantSeverity: 'unknown' });
+    expect(q.markTextHandoffContinuation).toHaveBeenCalledWith(
+      'chat_new',
+      expect.objectContaining({ severity: 'high', riskScore: null }),
+    );
+  });
+
+  it('an expired call with only an earlier high flag gets the time-limit wording, not the crisis one', async () => {
+    arrange({ callPeak: { severity: 'none', riskScore: null }, participantPeak: { severity: 'high', riskScore: 80 } });
+    const result = await start({ reason: 'expired' });
+    expect(result!.firstMessage).toBe(HANDOFF_CEILING_FIRST_MESSAGE);
   });
 
   it("someone else's session, or one that does not exist, is not continued", async () => {
@@ -294,7 +462,7 @@ describe('seeding: every session of the incident, most recent first', () => {
         chat_B: row('chat_B'),
         live_C: row('live_C', { crisis_flagged: true, crisis_severity: 'high' }),
       },
-      predecessors: { live_C: 'chat_B', chat_B: 'live_A' },
+      chains: { live_C: ['live_C', 'chat_B', 'live_A'] },
       peak: { severity: 'high', riskScore: 85 },
       turns: [
         turn('live_A', 'user', 'I have had a rough week.'),
@@ -325,58 +493,138 @@ describe('seeding: every session of the incident, most recent first', () => {
     expect(guidance).toMatch(/read a short reply \("yes", "no", "ok"/);
   });
 
-  it('an anonymous incident takes the highest risk across its linked sessions', async () => {
+  it('an anonymous incident reads the risk of every linked session, not just the cut one', async () => {
     arrange({
       rows: {
-        live_A: row('live_A', { user_id: null, crisis_flagged: true, crisis_severity: 'high' }),
+        live_A: row('live_A', { user_id: null }),
         chat_B: row('chat_B', { user_id: null }),
         live_C: row('live_C', { user_id: null }),
       },
-      predecessors: { live_C: 'chat_B', chat_B: 'live_A' },
+      chains: { live_C: ['live_C', 'chat_B', 'live_A'] },
     });
-    paging.resolveIncidentPeak.mockImplementation(async (id: string) =>
-      id === 'live_A' ? { severity: 'high', riskScore: 80 } : { severity: 'none', riskScore: null },
+    // The disclosure was in the first call of the chain.
+    pq.getParticipantFlagEvents.mockImplementation(async (ids: string[]) =>
+      ids.includes('live_A') ? [{ session_id: 'live_A', severity: 'high', risk_score: 80 }] : [],
     );
     const result = await start({ continuedFrom: 'live_C' });
     expect(result!.payload).toMatchObject({ kind: 'crisis', severity: 'high' });
-    expect(paging.resolveIncidentPeak).toHaveBeenCalledTimes(3);
   });
 });
 
-describe('resolveIncidentChain', () => {
+describe('resolveIncidentChain (one lookup: db/paging.queries getIncidentChainSessionIds)', () => {
   it('returns the sessions oldest first', async () => {
     arrange({
       rows: { live_A: row('live_A'), chat_B: row('chat_B'), live_C: row('live_C') },
-      predecessors: { live_C: 'chat_B', chat_B: 'live_A' },
+      chains: { live_C: ['live_C', 'chat_B', 'live_A'] },
     });
     expect((await resolveIncidentChain('live_C', mine)).map((r) => r.session_id)).toEqual([
       'live_A',
       'chat_B',
       'live_C',
     ]);
+    expect(pq.getIncidentChainSessionIds).toHaveBeenCalledWith('live_C', expect.any(Date));
   });
 
   it("stops at a session that is not the requester's", async () => {
     arrange({
       rows: { live_A: row('live_A', { user_id: 99 }), chat_B: row('chat_B'), live_C: row('live_C') },
-      predecessors: { live_C: 'chat_B', chat_B: 'live_A' },
+      chains: { live_C: ['live_C', 'chat_B', 'live_A'] },
     });
     const chain = await resolveIncidentChain('live_C', (r) => r.user_id === USER);
     expect(chain.map((r) => r.session_id)).toEqual(['chat_B', 'live_C']);
   });
 
-  it('does not loop on a cycle of links', async () => {
-    arrange({
-      rows: { live_A: row('live_A'), chat_B: row('chat_B') },
-      predecessors: { live_A: 'chat_B', chat_B: 'live_A' },
-    });
-    expect((await resolveIncidentChain('live_A', mine)).map((r) => r.session_id)).toEqual(['chat_B', 'live_A']);
+  it('is bounded at HANDOFF_MAX_CHAIN sessions, newest kept', async () => {
+    const ids = Array.from({ length: 12 }, (_, i) => `s_${12 - i}`); // s_12 (cut) ... s_1
+    arrange({ rows: Object.fromEntries(ids.map((id) => [id, row(id)])), chains: { s_12: ids } });
+    const chain = await resolveIncidentChain('s_12', mine);
+    expect(chain).toHaveLength(8);
+    expect(chain.at(-1)!.session_id).toBe('s_12');
   });
 
-  it('keeps the cut session when the link lookup fails', async () => {
+  it('keeps the cut session when the chain lookup fails', async () => {
     arrange({});
-    q.getPredecessorSessionId.mockRejectedValue(new Error('timeout'));
+    pq.getIncidentChainSessionIds.mockRejectedValue(new Error('timeout'));
     expect((await resolveIncidentChain('live_A', mine)).map((r) => r.session_id)).toEqual(['live_A']);
+  });
+});
+
+// PR #77 review, item 3: the chat start came back without hand-off details, so
+// the browser put the crisis wording on screen itself and tells the server.
+describe('recordClientHandoffFallback', () => {
+  const chatRow = (over: Record<string, unknown> = {}) =>
+    row('chat_new', { session_type: 'chat', status: 'active', ...over });
+  const fallback = (over: Record<string, unknown> = {}) =>
+    recordClientHandoffFallback({
+      chatSessionId: 'chat_new',
+      chatRow: chatRow(),
+      continuedFrom: 'live_A',
+      reason: 'content',
+      canAccess: mine,
+      crisisContact: null,
+      voiceEnabled: true,
+      ...over,
+    });
+
+  it('flags the chat as a continuation with unknown risk and answers with the crisis wording', async () => {
+    arrange({ callPeak: { severity: 'none', riskScore: null } });
+    const result = await fallback();
+    expect(result!.firstMessage).toBe(HANDOFF_CRISIS_FIRST_MESSAGE);
+    expect(result!.payload).toMatchObject({
+      kind: 'crisis',
+      severity: 'unknown',
+      quickReplies: ['Yes', 'No', 'Not sure'],
+      voiceReturnAllowed: false,
+    });
+    expect(q.markTextHandoffContinuation).toHaveBeenCalledWith('chat_new', {
+      severity: 'high',
+      riskScore: null,
+      continuedFrom: 'live_A',
+      reason: 'content',
+    });
+    // The risk is not read: the browser's fallback IS the unknown case.
+    expect(pq.getParticipantFlagEvents).not.toHaveBeenCalled();
+    // Linked and seeded from the cut call, which is the requester's.
+    const onChat = q.insertHandoffLink.mock.calls.find(([id]) => id === 'chat_new')![1] as Record<string, unknown>;
+    expect(onChat).toMatchObject({ from: 'live_A', source: 'client_fallback', severity: 'unknown' });
+    expect(q.insertHandoffLink.mock.calls.some(([id]) => id === 'live_A')).toBe(true);
+    expect(result!.guidance).toMatch(/Transcript of the conversation so far/);
+    // Its first participant turn takes the crisis hand-off's path.
+    expect(consumeNarrowFirstTurn('chat_new')).toBe(true);
+  });
+
+  it('a cut session that is not theirs: still flagged unknown, but neither linked nor seeded', async () => {
+    arrange({ rows: { live_A: row('live_A', { user_id: 99 }) } });
+    const result = await fallback({ canAccess: (r: { user_id: unknown }) => r.user_id === USER });
+    expect(result!.payload.kind).toBe('crisis');
+    expect(q.markTextHandoffContinuation).toHaveBeenCalled();
+    expect(q.insertHandoffLink.mock.calls.map(([id]) => id)).toEqual(['chat_new']);
+    const onChat = q.insertHandoffLink.mock.calls[0][1] as Record<string, unknown>;
+    expect(onChat).not.toHaveProperty('from');
+    expect(onChat).toMatchObject({ unlinkedFrom: 'live_A', role: 'continuation' });
+    expect(result!.guidance).toBeNull();
+  });
+
+  it('after the vendor time limit: the time-limit wording', async () => {
+    arrange({});
+    const result = await fallback({ reason: 'expired' });
+    expect(result!.firstMessage).toBe(HANDOFF_CEILING_FIRST_MESSAGE);
+  });
+
+  it('does nothing for a chat that already has a hand-off, or that is not theirs, ended or not a chat', async () => {
+    arrange({ peak: { severity: 'high', riskScore: 85 } });
+    await start();
+    vi.clearAllMocks();
+    expect(await fallback()).toBeNull(); // this process holds its hand-off
+    _resetTextHandoffStateForTests();
+    q.getHandoffRecord.mockResolvedValue({ kind: 'crisis', severity: 'high', reason: 'content', from: 'live_A' });
+    expect(await fallback()).toBeNull(); // a stored one
+    q.getHandoffRecord.mockResolvedValue(null);
+    expect(await fallback({ canAccess: () => false })).toBeNull();
+    expect(await fallback({ chatRow: chatRow({ status: 'ended' }) })).toBeNull();
+    expect(await fallback({ chatRow: chatRow({ session_type: 'realtime' }) })).toBeNull();
+    expect(await fallback({ continuedFrom: 'chat_new' })).toBeNull();
+    expect(q.markTextHandoffContinuation).not.toHaveBeenCalled();
   });
 });
 
@@ -445,6 +693,37 @@ describe('return to voice', () => {
     // A turn scored high in the chat closes it again, whatever the check says.
     q.getSessionAssessedPeak.mockResolvedValue('high');
     expect(await resolveVoiceReturn('chat_new')).toBe(false);
+  });
+
+  it('after a check-in (high flag elsewhere, nothing in this call): never, even once the check reads none', async () => {
+    // Seen live 2026-11-19: the model logged ideation "none" in the same turn
+    // in which it first asked the question.
+    arrange({ callPeak: { severity: 'none', riskScore: null }, participantPeak: { severity: 'high', riskScore: 80 } });
+    await start();
+    expect(await resolveVoiceReturn('chat_new')).toBe(false);
+    q.getSessionRiskCheckSteps.mockResolvedValue([{ step: 'ideation', risk_band: 'none' }]);
+    expect(await resolveVoiceReturn('chat_new')).toBe(false);
+    // The same answer from the stored row after a restart.
+    _resetTextHandoffStateForTests();
+    q.getHandoffRecord.mockResolvedValue({
+      kind: 'checkin',
+      severity: 'none',
+      participantSeverity: 'high',
+      reason: 'content',
+      from: 'live_A',
+    });
+    expect(await resolveVoiceReturn('chat_new')).toBe(false);
+  });
+
+  it('a medium flag elsewhere in the look-back: withheld until the check clears, then allowed', async () => {
+    arrange({
+      callPeak: { severity: 'none', riskScore: null },
+      participantPeak: { severity: 'medium', riskScore: 55 },
+    });
+    await start();
+    expect(await resolveVoiceReturn('chat_new')).toBe(false);
+    q.getSessionRiskCheckSteps.mockResolvedValue([{ step: 'ideation', risk_band: 'low' }]);
+    expect(await resolveVoiceReturn('chat_new')).toBe(true);
   });
 
   it('reads the stored hand-off when this process did not start it (after a restart)', async () => {

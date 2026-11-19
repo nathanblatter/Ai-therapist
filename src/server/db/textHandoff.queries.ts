@@ -41,31 +41,16 @@ export async function getHandoffSessionRow(sessionId: string): Promise<HandoffSe
   return result.rows[0] ?? null;
 }
 
-/**
- * The session this one continues, or null: the `from` of the newest link row
- * written against it (a chat that continued a voice call, or a voice call
- * started again from such a chat).
- */
-export async function getPredecessorSessionId(sessionId: string): Promise<string | null> {
-  const result = await pool.query<{ from_session: string | null }>(
-    `SELECT action_details->>'from' AS from_session
-       FROM intervention_actions
-      WHERE session_id = $1
-        AND action_type = 'external_api_called'
-        AND action_details->>'event' = ANY($2::text[])
-        AND action_details ? 'from'
-      ORDER BY performed_at DESC
-      LIMIT 1`,
-    [sessionId, [HANDOFF_EVENT, VOICE_RETURN_EVENT]],
-  );
-  const from = result.rows[0]?.from_session;
-  return typeof from === 'string' && from.length > 0 ? from : null;
-}
-
 export interface HandoffRecord {
   kind: string | null;
+  /** Peak risk in the cut call's chain (what the wording followed). */
   severity: string | null;
+  /** Peak across the participant's sessions in the look-back (the flag);
+   *  null on rows written before it was recorded. */
+  participantSeverity: string | null;
   reason: string | null;
+  /** The cut session; null when it could not be linked (the browser's
+   *  fallback for a session that was not the requester's). */
   from: string | null;
 }
 
@@ -78,7 +63,7 @@ export async function getHandoffRecord(chatSessionId: string): Promise<HandoffRe
       WHERE session_id = $1
         AND action_type = 'external_api_called'
         AND action_details->>'event' = $2
-        AND action_details ? 'from'
+        AND (action_details ? 'from' OR action_details->>'role' = 'continuation')
       ORDER BY performed_at DESC
       LIMIT 1`,
     [chatSessionId, HANDOFF_EVENT],
@@ -92,7 +77,76 @@ export async function getHandoffRecord(chatSessionId: string): Promise<HandoffRe
     return null;
   }
   const text = (key: string): string | null => (typeof details[key] === 'string' ? (details[key] as string) : null);
-  return { kind: text('kind'), severity: text('severity'), reason: text('reason'), from: text('from') };
+  return {
+    kind: text('kind'),
+    severity: text('severity'),
+    participantSeverity: text('participantSeverity'),
+    reason: text('reason'),
+    from: text('from'),
+  };
+}
+
+/** One hand-off link row as the admin session view shows it. Session ids,
+ *  enums and times only: no participant words. */
+export interface HandoffLinkView {
+  at: Date;
+  event: 'voice_cut_text_handoff' | 'voice_resumed_from_text';
+  /** On a hand-off row: 'continuation' (this is the chat) or 'cut_session'
+   *  (this is the voice call that was ended). Null on a return-to-voice row. */
+  role: string | null;
+  /** The session this one continues. */
+  from: string | null;
+  /** The session that continued this one. */
+  to: string | null;
+  /** A cut session the chat could not be linked to (browser fallback). */
+  unlinkedFrom: string | null;
+  reason: string | null;
+  kind: string | null;
+  severity: string | null;
+  participantSeverity: string | null;
+  source: string | null;
+}
+
+/**
+ * The hand-off link rows written against a session, oldest first, so a
+ * reviewer can follow voice call -> vendor cut -> typed chat (-> voice again)
+ * from the admin session view (PR #77 review, item 7).
+ */
+export async function getSessionHandoffLinks(sessionId: string): Promise<HandoffLinkView[]> {
+  const result = await pool.query<{ performed_at: Date; details: Record<string, unknown> | string | null }>(
+    `SELECT performed_at, action_details AS details
+       FROM intervention_actions
+      WHERE session_id = $1
+        AND action_type = 'external_api_called'
+        AND action_details->>'event' = ANY($2::text[])
+      ORDER BY performed_at ASC, action_id ASC`,
+    [sessionId, [HANDOFF_EVENT, VOICE_RETURN_EVENT]],
+  );
+  const links: HandoffLinkView[] = [];
+  for (const row of result.rows) {
+    let details: Record<string, unknown>;
+    try {
+      details =
+        typeof row.details === 'string' ? (JSON.parse(row.details) as Record<string, unknown>) : (row.details ?? {});
+    } catch {
+      continue;
+    }
+    const text = (key: string): string | null => (typeof details[key] === 'string' ? (details[key] as string) : null);
+    links.push({
+      at: row.performed_at,
+      event: text('event') === VOICE_RETURN_EVENT ? VOICE_RETURN_EVENT : HANDOFF_EVENT,
+      role: text('role'),
+      from: text('from'),
+      to: text('to'),
+      unlinkedFrom: text('unlinkedFrom'),
+      reason: text('reason'),
+      kind: text('kind'),
+      severity: text('severity'),
+      participantSeverity: text('participantSeverity'),
+      source: text('source'),
+    });
+  }
+  return links;
 }
 
 /** Write one link row. Throws on failure; the caller decides what that costs. */
