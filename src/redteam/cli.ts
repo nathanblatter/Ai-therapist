@@ -270,7 +270,9 @@ function buildCtx(
   classify: AssertionContext['classify'],
   cfg: RedteamConfig,
   beatId?: string,
-  extra?: Partial<Pick<AssertionContext, 'chatSessionEnded' | 'lastMessageStatus' | 'lastMessageBody' | 'assistant'>>,
+  extra?: Partial<
+    Pick<AssertionContext, 'chatSessionEnded' | 'lastMessageStatus' | 'lastMessageBody' | 'assistant' | 'http'>
+  >,
 ): AssertionContext {
   return {
     scenarioId: scenario.id,
@@ -641,6 +643,39 @@ async function runAssistantScenario(
   return { assertions, judge: null, judgeBreaches: false, sessionId: '', transcript };
 }
 
+/**
+ * HTTP pipeline (docs/eval-scenario-catalogue.md A2 gates, STAFF-10): no
+ * persona, no model, no judge. The scenario's probe drives the real routes on
+ * accounts and rows it seeded itself, and its final assertions read what the
+ * probe recorded. Identical with and without --dry-run: nothing here can call
+ * a model, so there is nothing to stub.
+ */
+async function runHttpScenario(
+  scenario: Scenario,
+  _beats: Beat[],
+  _runJudgeFlag: boolean,
+  client: HarnessClient,
+  _openai: OpenAI | null,
+  cfg: RedteamConfig,
+  _cost: CostTracker,
+  canaries: string[],
+  pool: AssertionContext['pool'],
+  classify: AssertionContext['classify'],
+): Promise<{
+  assertions: AssertionResult[];
+  judge: null;
+  judgeBreaches: false;
+  sessionId: string;
+  transcript?: Turn[];
+}> {
+  if (!scenario.httpProbe) throw new Error(`${scenario.id}: http pipeline scenario has no httpProbe`);
+  if (scenario.setup) await scenario.setup(pool);
+  const http = await scenario.httpProbe({ client, pool, dryRun: cfg.dryRun });
+  const ctx = buildCtx(scenario, '', '', [], client, {}, canaries, pool, classify, cfg, undefined, { http });
+  const assertions = await runAssertions(scenario.assertFinal, ctx);
+  return { assertions, judge: null, judgeBreaches: false, sessionId: '' };
+}
+
 async function runEntry(
   entry: SuiteEntry,
   client: HarnessClient,
@@ -686,9 +721,11 @@ async function runEntry(
         ? runChatScenario
         : scenario.pipeline === 'assistant'
           ? runAssistantScenario
-          : scenario.pipeline === 'voice' && !cfg.dryRun
-            ? (await import('./voiceClient.js')).runVoiceScenario
-            : runRealtimeScenario;
+          : scenario.pipeline === 'http'
+            ? runHttpScenario
+            : scenario.pipeline === 'voice' && !cfg.dryRun
+              ? (await import('./voiceClient.js')).runVoiceScenario
+              : runRealtimeScenario;
     // Scenario fixture (test-only fault injection): installed around the run
     // and always undone, so a failed scenario cannot leak its fault into the next.
     const undoFixture = await scenario.fixture?.({ pool, dryRun: cfg.dryRun });
