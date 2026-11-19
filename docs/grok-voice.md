@@ -402,6 +402,11 @@ resampling code exists on either side.
   consent-gated recording tee (`startMixedTee` + HTTP uploader) exactly like
   the WebRTC remote track did. The recording path, participant track,
   acoustic features and the admin live-listen relay are all unchanged.
+- **Speaker mute:** the participant's speaker button sets an output gain
+  that sits after that `MediaStreamAudioDestinationNode`
+  (`createPlaybackChain`, `setSpeakerMuted`), so muting silences the speakers
+  and nothing else: the orb and the recording still get the assistant. See
+  docs/gpt-live.md "Muting the assistant's voice".
 
 Proxying is more sensitive to the WebSocket path through reverse proxies than
 WebRTC was. Caddy (`Caddyfile.prod`) proxies upgrades by default and Cloudflare

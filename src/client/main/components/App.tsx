@@ -86,6 +86,8 @@ import {
   type InterimSpeechEnv,
 } from '../lib/crisisRecovery';
 import { HandoffReplyBar, PinnedCrisisCard, useVisualViewportHeight } from './CrisisHandoffPanel';
+import { AgentVoiceMutedNotice, useSpeakerMute } from './AgentVoiceMute';
+import { elementSink, mayBrowserSpeakAtCut, speakerMutedAtStart } from '../lib/speakerMute';
 
 interface Features {
   output_modalities: string[];
@@ -473,6 +475,12 @@ export default function App() {
   // Invoked the moment the new call can carry audio, so the browser's voice
   // never talks over the returning assistant or into the new microphone.
   const stopInterimSpeechRef = useRef<() => void>(() => {});
+  // The assistant's voice muted on this device (speaker button; rules in
+  // lib/speakerMute.ts). `mutedAtCutRef` is whether it was muted when the
+  // vendor cut the call: the browser's own spoken lines and a recovery voice
+  // session follow it, never unmuting on the participant's behalf.
+  const { muted: speakerMuted, api: speakerApi } = useSpeakerMute();
+  const mutedAtCutRef = useRef(false);
   // The terminated session's flushLogs + POST /end, when a cut session's
   // teardown let them finish in the background so the recovery start did not
   // have to wait behind two round trips. The typed-chat fallback awaits it:
@@ -901,6 +909,7 @@ export default function App() {
    */
   function cleanupFailedStart() {
     setIsConnecting(false);
+    speakerApi.end(); // a session that never started has no speaker timeline to report
     if (grokClientRef.current) {
       grokClientRef.current.stop();
       grokClientRef.current = null;
@@ -1084,6 +1093,22 @@ export default function App() {
     return socket;
   }
 
+  /**
+   * One of the browser's own lines at a vendor cut, unless the participant had
+   * the assistant's voice muted then (lib/speakerMute.ts mayBrowserSpeakAtCut).
+   * Returns its stop function. The screen it accompanies is the same either way.
+   */
+  function speakAtCut(line: string): () => void {
+    if (!mayBrowserSpeakAtCut(mutedAtCutRef.current)) return () => {};
+    return startInterimSpeech(speechEnv(), line, sessionSettings.language);
+  }
+
+  /** End this voice session's speaker timeline and report it once (numbers only). */
+  function reportSpeakerTimeline(endingSessionId: string | null) {
+    const timeline = speakerApi.end();
+    if (timeline) reportClientEvent('speaker_timeline', { ...timeline }, endingSessionId);
+  }
+
   /** The browser's own speech synthesis, when it has one (lib/crisisRecovery.ts). */
   function speechEnv(): InterimSpeechEnv {
     return {
@@ -1157,11 +1182,7 @@ export default function App() {
       // Said aloud once, for someone who is not looking at the screen: the
       // numbers are there whatever else failed.
       stopInterimSpeechRef.current();
-      stopInterimSpeechRef.current = startInterimSpeech(
-        speechEnv(),
-        handoffFailedSpokenLine(crisisContact),
-        sessionSettings.language,
-      );
+      stopInterimSpeechRef.current = speakAtCut(handoffFailedSpokenLine(crisisContact));
       setModerationRecovery('failed');
       return;
     }
@@ -1219,11 +1240,7 @@ export default function App() {
     // their phone. It may be inaudible (iOS with Bluetooth audio, a muted
     // phone); the screen stands on its own.
     stopInterimSpeechRef.current();
-    stopInterimSpeechRef.current = startInterimSpeech(
-      speechEnv(),
-      outcome.handoff.spokenBridge,
-      sessionSettings.language,
-    );
+    stopInterimSpeechRef.current = speakAtCut(outcome.handoff.spokenBridge);
     console.log(
       `[Live] Voice session continued as chat session ${outcome.sessionId} (${outcome.handoff.kind}) ` +
         `${Math.round(performance.now() - requestedAt)} ms after the hand-off was requested`,
@@ -1495,6 +1512,9 @@ export default function App() {
       return;
     }
     moderationHandledRef.current = true;
+    // Before the teardown below resets it: the spoken lines at this cut and a
+    // recovery voice session follow the participant's mute.
+    mutedAtCutRef.current = speakerApi.wasMuted();
 
     const voiceSessionId = terminatedSessionId ?? liveSessionIdRef.current ?? sessionId;
     const reason = handoffReasonFromClose(closeReason);
@@ -1553,11 +1573,7 @@ export default function App() {
     // (startRealtimeSession), or when a voice start that was promised fails.
     // "Reconnecting now." is said only when a voice call is about to come back.
     const voiceReturning = plan === 'voice';
-    stopInterimSpeechRef.current = startInterimSpeech(
-      speechEnv(),
-      recoveryInterimSpokenLine(voiceReturning),
-      sessionSettings.language,
-    );
+    stopInterimSpeechRef.current = speakAtCut(recoveryInterimSpokenLine(voiceReturning));
 
     if (isTearingDownRef.current) {
       // A stopSession() is already in flight. Running teardown twice would
@@ -1664,6 +1680,7 @@ export default function App() {
       moderationTakeoverRef.current = false;
       moderationVoiceSessionIdRef.current = null;
       moderationVoiceAttemptsRef.current = 0;
+      mutedAtCutRef.current = false;
     }
 
     // Create a peer connection. Assigned to the ref immediately so a failure
@@ -1729,6 +1746,15 @@ export default function App() {
     const audioEl = document.createElement('audio');
     audioEl.autoplay = true;
     audioElement.current = audioEl;
+    // Speaker mute acts on this element only (`muted`, which iOS honours; not
+    // `volume`, which it ignores). The recording taps the remote stream
+    // itself, so it keeps the assistant's voice while this is muted.
+    speakerApi.begin(
+      elementSink(audioEl, (name) =>
+        reportClientEvent('audio_play_refused', { name, recovery, stage: 'speaker_unmute' }, liveSessionIdRef.current),
+      ),
+      speakerMutedAtStart({ recovery, mutedAtCut: mutedAtCutRef.current }),
+    );
 
     // Microphone first: the SDP offer has to carry the audio track. Asking
     // before the server call also means a denied-permission start never creates
@@ -2504,6 +2530,10 @@ export default function App() {
       },
     });
     grokClientRef.current = client;
+    // Speaker mute: the output gain after the recording tap
+    // (grokVoiceClient.ts createPlaybackChain). Grok has no recovery session.
+    mutedAtCutRef.current = false;
+    speakerApi.begin({ setMuted: (muted) => client.setSpeakerMuted(muted) }, false);
 
     // Resolves once the server reports the xAI session configured. Throws on
     // timeout or refusal, which startSession() turns into a toast + cleanup.
@@ -2550,6 +2580,7 @@ export default function App() {
     // Tell the server first so upstream billing stops immediately; POST /end
     // below runs the rest of the server-side teardown.
     grokClientRef.current?.end();
+    reportSpeakerTimeline(endingSessionId);
 
     logConversation({ sessionId: endingSessionId, role: 'system', type: 'session_end', message: 'Session ended' });
     stopPeriodicFlush();
@@ -2683,6 +2714,9 @@ export default function App() {
     socket.on('session:crisis-emergency', (data: { severity?: unknown } | undefined) => {
       if (crisisEmergencyMarksCrisis(data)) crisisActiveRef.current = true;
       setToolUI({ kind: 'resource', resourceType: 'all' });
+      // Counted for the study; never unmutes (lib/speakerMute.ts). The card
+      // pins "Tap to hear the assistant" while the voice is muted.
+      speakerApi.crisisSignal();
     });
 
     // Backstop for the content-filter takeover (incident 2026-09-11). The
@@ -2745,6 +2779,7 @@ export default function App() {
           msg.message_type === 'admin_visible'
         ) {
           console.log('[Crisis] Sending intervention message to AI to speak:', msg.content.substring(0, 100));
+          speakerApi.crisisSignal();
           // Escape single quotes in the message content
           const escapedContent = msg.content.replace(/'/g, "\\'");
           // Wrap in "Say this phrase exactly" format so AI speaks it. An
@@ -3001,6 +3036,7 @@ export default function App() {
         }
       });
     }
+    reportSpeakerTimeline(sessionId);
 
     logConversation({ sessionId: sessionId, role: 'system', type: 'session_end', message: 'Session ended' });
     stopPeriodicFlush();
@@ -3094,6 +3130,16 @@ export default function App() {
     // this can now safely open its own.
     voiceTeardownInFlightRef.current = false;
   }
+
+  // The speaker timeline of a voice session the page is leaving mid-call.
+  // reportClientEvent uses sendBeacon, which survives the unload; end() makes
+  // it report once. Its own listener, so the unload handler below is untouched.
+  useEffect(() => {
+    const onPageHide = () => reportSpeakerTimeline(liveSessionIdRef.current);
+    window.addEventListener('pagehide', onPageHide);
+    return () => window.removeEventListener('pagehide', onPageHide);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs and a stable api only
+  }, []);
 
   // Handle page unload - warn user and end session
   useEffect(() => {
@@ -3668,6 +3714,11 @@ export default function App() {
         {isSessionActive && sessionType === 'realtime' && (
           <VoiceOrb localStream={localStream} remoteStream={remoteStream} />
         )}
+        {/* The assistant's voice is muted on this device: say so where the
+            participant is looking, so the session does not seem frozen. */}
+        {isSessionActive && sessionType === 'realtime' && speakerMuted && (
+          <AgentVoiceMutedNotice onUnmute={() => speakerApi.set(false)} />
+        )}
         <div className="w-full flex-1 overflow-y-auto px-4 py-2 sm:p-4">
           {isSessionActive ? (
             <ChatLog
@@ -3757,6 +3808,8 @@ export default function App() {
             chatEnabled={features.chat_enabled !== false}
             sessionType={sessionType}
             micLocked={micLocked}
+            speakerMuted={speakerMuted}
+            onToggleSpeaker={sessionType === 'realtime' ? speakerApi.toggle : undefined}
             isConnecting={isConnecting}
             rateLimited={rateLimitInfo.limited}
             rateLimitResetsAt={rateLimitInfo.resetsAt}
@@ -3853,6 +3906,8 @@ export default function App() {
           }
         }}
         sessionId={sessionId}
+        agentVoiceMuted={isSessionActive && sessionType === 'realtime' && speakerMuted}
+        onUnmuteAgentVoice={() => speakerApi.set(false)}
       />
 
       {/* Content-filter recovery (incident 2026-09-11). z-[70] — above every

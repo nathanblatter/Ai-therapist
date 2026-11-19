@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Mic, MicOff, PhoneOff, Send, Settings, AlertCircle } from 'react-feather';
 import { toast } from '../../shared/components/Toast';
+import { SpeakerMuteButton } from './AgentVoiceMute';
 
 interface SessionStoppedProps {
   startSession: () => void;
@@ -73,6 +74,10 @@ interface SessionActiveProps {
   /** True once the session hit its time limit and is wrapping up: the mic is
    *  forced off and can't be re-enabled (ai-therapist-101/112). */
   micLocked: boolean;
+  /** The assistant's voice is muted on this device (AgentVoiceMute.tsx). */
+  speakerMuted: boolean;
+  /** Mute or unmute the assistant's voice; the button is shown only when given. */
+  onToggleSpeaker?: () => void;
 }
 
 function SessionActive({
@@ -83,6 +88,8 @@ function SessionActive({
   chatEnabled,
   sessionType,
   micLocked,
+  speakerMuted,
+  onToggleSpeaker,
 }: SessionActiveProps) {
   const [message, setMessage] = useState('');
   const [isMicOn, setIsMicOn] = useState(true);
@@ -222,6 +229,10 @@ function SessionActive({
         </div>
       )}
 
+      {/* Speaker: mutes the assistant's voice on this device only (the
+          recording and the transcript are unaffected; lib/speakerMute.ts). */}
+      {!isChatOnly && onToggleSpeaker && <SpeakerMuteButton muted={speakerMuted} onToggle={onToggleSpeaker} />}
+
       {/* Only show text input and send button if chat is enabled */}
       {showTextInput && (
         <>
@@ -270,6 +281,8 @@ interface SessionControlsProps {
   chatEnabled: boolean;
   sessionType: string | null;
   micLocked?: boolean;
+  speakerMuted?: boolean;
+  onToggleSpeaker?: () => void;
   isConnecting?: boolean;
   rateLimited?: boolean;
   rateLimitResetsAt?: string | null;
@@ -286,6 +299,8 @@ export default function SessionControls({
   chatEnabled,
   sessionType,
   micLocked = false,
+  speakerMuted = false,
+  onToggleSpeaker,
   isConnecting = false,
   rateLimited = false,
   rateLimitResetsAt = null,
@@ -301,6 +316,8 @@ export default function SessionControls({
           chatEnabled={chatEnabled}
           sessionType={sessionType}
           micLocked={micLocked}
+          speakerMuted={speakerMuted}
+          onToggleSpeaker={onToggleSpeaker}
         />
       ) : (
         <SessionStopped

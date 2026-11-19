@@ -92,6 +92,34 @@ registerProcessor('grok-capture', GrokCaptureProcessor);
 
 type WebkitWindow = Window & { webkitAudioContext?: typeof AudioContext };
 
+export interface PlaybackChain {
+  /** Every scheduled assistant buffer connects here. */
+  input: GainNode;
+  /** The assistant's audio for the orb and the session recording: taken BEFORE the mute. */
+  record: MediaStreamAudioDestinationNode;
+  /** Gain to the participant's speakers, AFTER the recording tap: 0 while muted. */
+  output: GainNode;
+}
+
+/**
+ * The Grok playback graph: input -> record (MediaStream for the orb and the
+ * recording tee), and input -> output gain -> speakers. Muting the assistant's
+ * voice (lib/speakerMute.ts) sets only `output`, so the recording keeps the
+ * assistant's voice. A gain node is the right mute here, iOS Safari included:
+ * playback already runs through Web Audio, and an AudioContext keeps running
+ * at gain 0, so unmuting needs no new user gesture.
+ */
+export function createPlaybackChain(ctx: AudioContext, speakers: AudioNode, muted: boolean): PlaybackChain {
+  const input = ctx.createGain();
+  const record = ctx.createMediaStreamDestination();
+  const output = ctx.createGain();
+  output.gain.value = muted ? 0 : 1;
+  input.connect(record);
+  input.connect(output);
+  output.connect(speakers);
+  return { input, record, output };
+}
+
 export class GrokVoiceClient {
   private ws: WebSocket | null = null;
   private ctx: AudioContext | null = null;
@@ -100,6 +128,8 @@ export class GrokVoiceClient {
   private captureSink: GainNode | null = null;
   private playbackGain: GainNode | null = null;
   private playbackDestination: MediaStreamAudioDestinationNode | null = null;
+  private playbackOutput: GainNode | null = null;
+  private speakerMuted = false;
   private scheduled: AudioBufferSourceNode[] = [];
   private nextPlayAt = 0;
   private ready = false;
@@ -118,6 +148,16 @@ export class GrokVoiceClient {
   /** Assistant audio as a MediaStream (for the orb and the recording tee). */
   get remoteStream(): MediaStream | null {
     return this.playbackDestination?.stream ?? null;
+  }
+
+  /**
+   * Mute or unmute the assistant's voice on this device only (the speaker
+   * button). The recording and the orb read `remoteStream`, which is taken
+   * before this gain and is unaffected. Safe before the graph exists.
+   */
+  setSpeakerMuted(muted: boolean): void {
+    this.speakerMuted = muted;
+    if (this.playbackOutput) this.playbackOutput.gain.value = muted ? 0 : 1;
   }
 
   /** Open the socket and start the audio graph. Resolves on the `ready` message. */
@@ -276,11 +316,12 @@ export class GrokVoiceClient {
     this.ctx = ctx;
     if (ctx.state === 'suspended') await ctx.resume();
 
-    // Playback chain: sources → gain → (speakers + MediaStream for orb/tee).
-    this.playbackGain = ctx.createGain();
-    this.playbackDestination = ctx.createMediaStreamDestination();
-    this.playbackGain.connect(ctx.destination);
-    this.playbackGain.connect(this.playbackDestination);
+    // Playback chain: sources → gain → (MediaStream for orb/tee, and the
+    // speaker-mute gain → speakers). See createPlaybackChain.
+    const chain = createPlaybackChain(ctx, ctx.destination, this.speakerMuted);
+    this.playbackGain = chain.input;
+    this.playbackDestination = chain.record;
+    this.playbackOutput = chain.output;
     this.nextPlayAt = 0;
 
     // Capture chain: mic → worklet → muted sink (a node with no output path is
@@ -429,6 +470,7 @@ export class GrokVoiceClient {
     }
     try {
       this.playbackGain?.disconnect();
+      this.playbackOutput?.disconnect();
     } catch {
       /* ignore */
     }
@@ -437,6 +479,7 @@ export class GrokVoiceClient {
     this.captureSink = null;
     this.playbackGain = null;
     this.playbackDestination = null;
+    this.playbackOutput = null;
     if (this.ctx) {
       void this.ctx.close().catch(() => {});
       this.ctx = null;
