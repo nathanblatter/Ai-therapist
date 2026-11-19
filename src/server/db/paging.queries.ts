@@ -8,7 +8,10 @@
 //     row, the convention the sandbox suppression already used. Both carry
 //     the decision under action_details.paging.
 //   - crisis_events: what the participant's risk actually was.
-// No new table and no migration.
+// No new table and no migration. The one piece of state that is UPDATED rather
+// than appended is the silence check of a vendor cut that was not paged
+// (action_details.paging.silenceCheck on the cut's own row): pending, then
+// claimed by exactly one app instance, then done. See the end of this file.
 //
 // Deliberately imported directly by the service, not re-exported from
 // db/index.js: the many tests that mock db/index.js with a partial factory
@@ -69,9 +72,73 @@ export interface ParticipantFlagRow {
 }
 
 /**
- * Crisis flags that came from what the participant said (or from a person or
- * the model flagging them): every 'flagged' event on this session, plus those
+ * How far back a recovery chain is followed. A chain is as long as the
+ * incident, which can be hours (each link may run to the vendor's session
+ * ceiling); this only stops a walk from reaching into an earlier day.
+ */
+export const INCIDENT_CHAIN_BACKSTOP_MS = 12 * 60 * 60 * 1000;
+
+/**
+ * The recovery chain this session belongs to: the session itself and, while
+ * the session being looked at carries the automatic 'recovery_continuation'
+ * stamp, the same participant's session immediately before it. A recovery
+ * session is started by the app the moment its predecessor is cut and is
+ * stamped then (markSessionCrisisContinuation), so "stamped" means "continues
+ * the participant's previous session"; no column links the two.
+ *
+ * An incident is this chain, however long it has been running: a participant
+ * flagged high whose recovery session is cut 2 h 20 min later is still the
+ * same incident. `backstop` bounds the walk in time (a link that started
+ * before it is not followed further back) and the depth is capped, so a
+ * pathological history cannot make this slow or pull in last week.
+ * Always contains `sessionId`, including for a row that does not exist yet.
+ */
+export async function getIncidentChainSessionIds(sessionId: string, backstop: Date): Promise<string[]> {
+  const result = await pool.query<{ session_id: string }>(
+    `WITH RECURSIVE chain AS (
+       SELECT ts.session_id, ts.user_id, ts.created_at, 0 AS depth
+         FROM therapy_sessions ts
+        WHERE ts.session_id = $1
+       UNION ALL
+       SELECT prev.session_id, prev.user_id, prev.created_at, c.depth + 1
+         FROM chain c
+         CROSS JOIN LATERAL (
+           SELECT p.session_id, p.user_id, p.created_at
+             FROM therapy_sessions p
+            WHERE p.user_id = c.user_id
+              AND p.session_id <> c.session_id
+              AND p.created_at < c.created_at
+            ORDER BY p.created_at DESC
+            LIMIT 1
+         ) prev
+        WHERE c.user_id IS NOT NULL
+          AND c.depth < 25
+          AND c.created_at >= $2
+          AND EXISTS (SELECT 1 FROM crisis_events ce
+                       WHERE ce.session_id = c.session_id
+                         AND ce.event_type = 'flagged'
+                         AND ce.risk_factors @> '["recovery_continuation"]'::jsonb)
+     )
+     SELECT session_id FROM chain`,
+    [sessionId, backstop],
+  );
+  const ids = result.rows.map((row) => row.session_id);
+  return ids.includes(sessionId) ? ids : [sessionId, ...ids];
+}
+
+/**
+ * Crisis events that say what the participant's risk was, from what they said
+ * or from a person or the model judging it: every such event on the sessions
+ * of the incident (`sessionIds`, see getIncidentChainSessionIds), plus those
  * on the same participant's other sessions since `since`.
+ *
+ * Counted: 'flagged' (auto, manual, the model's escalate tool), and the two
+ * event types a member of staff writes when they revise a session's risk by
+ * hand, 'risk_score_updated' and 'severity_changed'. A researcher who raised
+ * a session to high has said the participant is at high risk; a vendor cut
+ * afterwards must not be reported as "no risk signal". A revision DOWNWARD
+ * changes nothing here, because the caller takes the peak: the earlier,
+ * higher event is still in the incident.
  *
  * The 'recovery_continuation' mark is excluded on purpose. A recovery session
  * is stamped high the moment it starts, whatever the session it continues was
@@ -79,7 +146,7 @@ export interface ParticipantFlagRow {
  * cut", not "this participant is at high risk".
  */
 export async function getParticipantFlagEvents(
-  sessionId: string,
+  sessionIds: string[],
   userId: number | null,
   since: Date,
 ): Promise<ParticipantFlagRow[]> {
@@ -87,11 +154,11 @@ export async function getParticipantFlagEvents(
     `SELECT ce.session_id, ce.severity, ce.risk_score
        FROM crisis_events ce
        JOIN therapy_sessions ts ON ts.session_id = ce.session_id
-      WHERE ce.event_type = 'flagged'
+      WHERE ce.event_type IN ('flagged', 'risk_score_updated', 'severity_changed')
         AND NOT COALESCE(ce.risk_factors @> '["recovery_continuation"]'::jsonb, FALSE)
-        AND (ce.session_id = $1
+        AND (ce.session_id = ANY($1::text[])
              OR ($2::int IS NOT NULL AND ts.user_id = $2::int AND ce.created_at >= $3))`,
-    [sessionId, userId, since],
+    [sessionIds, userId, since],
   );
   return result.rows;
 }
@@ -99,20 +166,17 @@ export async function getParticipantFlagEvents(
 /**
  * What the risk assessor actually scored for the participant's own turns:
  * the highest medium and the highest high score in risk_score_history, on
- * this session and on the same participant's other sessions since `since`.
+ * the sessions of the incident and on the same participant's other sessions
+ * since `since`.
  *
  * Needed beside the flag events because a turn can score high WITHOUT a flag
- * event being written. The pipeline re-flags an already-flagged session only
- * when severity rises or the score exceeds the stored one by more than 10,
- * and a recovery session is stamped high from its first second (at the
- * inherited score, or 100 when there is none). A real disclosure in a
- * recovery session therefore leaves no 'flagged' event of its own; without
- * this read, the cut of that session would be classified "no risk".
+ * event being written: the pipeline re-flags an already-flagged session only
+ * when severity rises or the score exceeds the stored one by more than 10.
  * `severity` is the band stored when the turn was scored, so this does not
  * carry a copy of the thresholds.
  */
 export async function getParticipantAssessedRisk(
-  sessionId: string,
+  sessionIds: string[],
   userId: number | null,
   since: Date,
 ): Promise<ParticipantFlagRow[]> {
@@ -121,36 +185,16 @@ export async function getParticipantAssessedRisk(
        FROM risk_score_history h
        JOIN therapy_sessions ts ON ts.session_id = h.session_id
       WHERE h.severity IN ('medium', 'high')
-        AND (h.session_id = $1
+        AND (h.session_id = ANY($1::text[])
              OR ($2::int IS NOT NULL AND ts.user_id = $2::int AND h.calculated_at >= $3))
       GROUP BY h.severity`,
-    [sessionId, userId, since],
+    [sessionIds, userId, since],
   );
   return result.rows.map((row) => ({
-    session_id: sessionId,
+    session_id: sessionIds[0] ?? '',
     severity: row.severity,
     risk_score: row.risk_score === null ? null : Number(row.risk_score),
   }));
-}
-
-/**
- * Is this session's high flag nothing but the automatic recovery-continuation
- * stamp? True when the stamp's event exists and no other 'flagged' event at
- * high severity does: nobody has yet been paged about anything the
- * participant said in this session.
- */
-export async function highFlagIsContinuationStampOnly(sessionId: string): Promise<boolean> {
-  const result = await pool.query<{ stamped: boolean; real_high: boolean }>(
-    `SELECT EXISTS (SELECT 1 FROM crisis_events ce
-                     WHERE ce.session_id = $1 AND ce.event_type = 'flagged'
-                       AND ce.risk_factors @> '["recovery_continuation"]'::jsonb) AS stamped,
-            EXISTS (SELECT 1 FROM crisis_events ce
-                     WHERE ce.session_id = $1 AND ce.event_type = 'flagged' AND ce.severity = 'high'
-                       AND NOT COALESCE(ce.risk_factors @> '["recovery_continuation"]'::jsonb, FALSE)) AS real_high`,
-    [sessionId],
-  );
-  const row = result.rows[0];
-  return row?.stamped === true && row.real_high !== true;
 }
 
 /**
@@ -188,4 +232,118 @@ export async function insertPagingRecord(
   );
   const id = Number(result.rows[0]?.action_id);
   return Number.isFinite(id) ? id : null;
+}
+
+// ---- the silence check of an unpaged vendor cut (ai-therapist-362) ---------
+//
+// A vendor cut with no participant risk signal writes a 'no_page' row that
+// promises a check a few minutes later. The promise lives on that row, under
+// action_details.paging.silenceCheck:
+//   { state: 'pending' }                         written with the row
+//   { state: 'running', claimedAt, claimedBy }   one instance has taken it
+//   { state: 'done', outcome, ... }              it ran; it never runs again
+//   { state: 'expired', ... }                    nobody ran it in time
+// so any app instance, including one that started after the cut, can find
+// what is owed and run it, and two instances cannot both run the same check.
+
+export interface UnfinishedSilenceCheckRow {
+  action_id: number;
+  session_id: string;
+  /** Age of the row by the DATABASE clock, so a skewed app clock cannot make
+   *  a check run early or look expired. */
+  age_ms: number;
+}
+
+const SILENCE_CHECK_OPEN_SQL = `(ia.action_details #>> '{paging,silenceCheck,state}' = 'pending'
+             OR (ia.action_details #>> '{paging,silenceCheck,state}' = 'running'
+                 AND (ia.action_details #>> '{paging,silenceCheck,claimedAt}')::timestamptz
+                     < now() - make_interval(secs => $2::double precision)))`;
+
+/**
+ * 'no_page' vendor-cut rows whose silence check has not finished: pending, or
+ * claimed more than `staleClaimSeconds` ago by an instance that never
+ * reported back (it died mid-check). Oldest first, no older than
+ * `lookbackSeconds`.
+ *
+ * Harness and demo sessions (therapy_sessions.is_demo) are left out: an eval
+ * child shares this database with a live server, and a server must never
+ * page a person about a synthetic session whose child has exited. Their
+ * check still runs in the process that recorded the cut.
+ */
+export async function getUnfinishedSilenceChecks(
+  lookbackSeconds: number,
+  staleClaimSeconds: number,
+): Promise<UnfinishedSilenceCheckRow[]> {
+  const result = await pool.query<{ action_id: number | string; session_id: string; age_ms: number | string }>(
+    `SELECT ia.action_id, ia.session_id,
+            EXTRACT(EPOCH FROM (now() - ia.performed_at)) * 1000 AS age_ms
+       FROM intervention_actions ia
+       JOIN therapy_sessions ts ON ts.session_id = ia.session_id
+      WHERE ia.action_type = 'external_api_called'
+        AND ia.performed_at >= now() - make_interval(secs => $1::double precision)
+        AND ia.action_details #>> '{paging,decision}' = 'no_page'
+        AND ts.is_demo IS NOT TRUE
+        AND ${SILENCE_CHECK_OPEN_SQL}
+      ORDER BY ia.performed_at ASC
+      LIMIT 200`,
+    [lookbackSeconds, staleClaimSeconds],
+  );
+  return result.rows.map((row) => ({
+    action_id: Number(row.action_id),
+    session_id: row.session_id,
+    age_ms: Number(row.age_ms),
+  }));
+}
+
+/**
+ * Take a silence check, atomically: one UPDATE that only matches while the
+ * check is pending (or its claim is stale). Postgres re-evaluates the WHERE
+ * after a concurrent writer commits, so of two instances (or the in-process
+ * timer and the sweep) exactly one gets the row back. Returns the session and
+ * the time the cut was recorded when the claim was won; null when someone
+ * else has it, it has finished, or the row carries no silence check.
+ */
+export async function claimSilenceCheck(
+  actionId: number,
+  claimedBy: string,
+  staleClaimSeconds: number,
+): Promise<{ sessionId: string; cutAt: Date } | null> {
+  const result = await pool.query<{ session_id: string; performed_at: Date }>(
+    `UPDATE intervention_actions ia
+        SET action_details = jsonb_set(
+              ia.action_details,
+              '{paging,silenceCheck}',
+              jsonb_build_object('state', 'running', 'claimedAt', now(), 'claimedBy', $3::text))
+      WHERE ia.action_id = $1
+        AND ia.action_details #>> '{paging,decision}' = 'no_page'
+        AND ${SILENCE_CHECK_OPEN_SQL}
+      RETURNING ia.session_id, ia.performed_at`,
+    [actionId, staleClaimSeconds, claimedBy],
+  );
+  const row = result.rows[0];
+  return row ? { sessionId: row.session_id, cutAt: new Date(row.performed_at) } : null;
+}
+
+/**
+ * Record how a silence check ended ('done': it ran; 'expired': it was found
+ * too late to be worth a page). Terminal: a finished check is never selected
+ * or claimed again. `result` is stored beside the state. Returns whether this
+ * call was the one that finished it.
+ */
+export async function finishSilenceCheck(
+  actionId: number,
+  state: 'done' | 'expired',
+  result: Record<string, unknown>,
+): Promise<boolean> {
+  const updated = await pool.query(
+    `UPDATE intervention_actions ia
+        SET action_details = jsonb_set(
+              ia.action_details,
+              '{paging,silenceCheck}',
+              $2::jsonb || jsonb_build_object('state', $3::text, 'finishedAt', now()))
+      WHERE ia.action_id = $1
+        AND ia.action_details #>> '{paging,silenceCheck,state}' IN ('pending', 'running')`,
+    [actionId, JSON.stringify(result), state],
+  );
+  return (updated.rowCount ?? 0) > 0;
 }

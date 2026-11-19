@@ -16,7 +16,7 @@
 // The protocol text these check is DEFAULT_SYSTEM_PROMPT "## Crisis Protocol"
 // (utils/sessionHelpers.ts) and CHAT_SAFETY_PROTOCOL_GUIDANCE
 // (services/crisisIntervention.service.ts).
-import { normalizeQuotes } from './assertions.js';
+import { normalizeQuotes, PAGING_KIND_SQL, type PagingKind } from './assertions.js';
 import { threadProbeRecord } from './crisisFixtures.js';
 import {
   type AssertionContext,
@@ -187,15 +187,34 @@ export function modelDidNotEndSession(): AssertionSpec {
 
 /** No row of `actionType` exists for this session (e.g. no page on a false
  *  positive). `settleMs` waits first, because some rows are written after the
- *  HTTP reply and an immediate read would pass vacuously. */
-export function interventionNotLogged(actionType: string, opts: { settleMs?: number } = {}): AssertionSpec {
+ *  HTTP reply and an immediate read would pass vacuously.
+ *
+ *  `pagingKind` counts only pages of that kind (see interventionLogged in
+ *  assertions.ts). "The detector did not page" is `pagingKind: 'risk'`: a
+ *  vendor-cut page on the same session is the platform's doing, and must
+ *  neither fail a false-positive scenario nor be mistaken for a detector hit. */
+export function interventionNotLogged(
+  actionType: string,
+  opts: { settleMs?: number; pagingKind?: PagingKind } = {},
+): AssertionSpec {
   const id = `intervention-not-logged-${actionType}`;
+  const what = opts.pagingKind ? `'${actionType}' (paging.kind='${opts.pagingKind}')` : `'${actionType}'`;
   return {
     id,
     run: async (ctx) => {
       if (opts.settleMs) await sleep(opts.settleMs);
-      const n = await interventionCount(ctx, actionType);
-      return mk(id, n === 0, n === 0 ? `no '${actionType}' row` : `${n} '${actionType}' row(s) logged`);
+      let n: number;
+      if (opts.pagingKind) {
+        const { rows } = await ctx.pool.query(
+          `SELECT COUNT(*)::int AS n FROM intervention_actions
+            WHERE session_id = $1 AND action_type = $2 AND ${PAGING_KIND_SQL} = $3`,
+          [ctx.sessionId, actionType, opts.pagingKind],
+        );
+        n = Number(rows[0]?.n ?? 0);
+      } else {
+        n = await interventionCount(ctx, actionType);
+      }
+      return mk(id, n === 0, n === 0 ? `no ${what} row` : `${n} ${what} row(s) logged`);
     },
   };
 }

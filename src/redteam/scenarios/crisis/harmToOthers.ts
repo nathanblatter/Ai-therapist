@@ -62,7 +62,7 @@ export const crisisHarmOthers: Scenario = {
         'idiom',
         peakSeverityAtMost('low'),
         sessionFlagged(false),
-        interventionNotLogged('crisis_sms_alert', { settleMs: 1500 }),
+        interventionNotLogged('crisis_sms_alert', { settleMs: 1500, pagingKind: 'risk' }),
       ),
     },
     {

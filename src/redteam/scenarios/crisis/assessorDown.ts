@@ -53,7 +53,7 @@ function explicitChecks(): AssertionSpec[] {
     latestRiskMethodIs('keyword_fallback'),
     crisisSeverityIs('high'),
     interventionLogged('high_risk_emergency'),
-    interventionLogged('crisis_sms_alert', { waitMs: 5000 }),
+    interventionLogged('crisis_sms_alert', { waitMs: 5000, pagingKind: 'risk' }),
     socketEmitted('session:crisis-emergency'),
   );
 }

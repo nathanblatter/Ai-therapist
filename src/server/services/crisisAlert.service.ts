@@ -18,6 +18,9 @@ const IMESSAGE_API_URL = process.env.IMESSAGE_API_URL || 'http://100.79.61.79:88
 const IMESSAGE_API_KEY = process.env.IMESSAGE_API_KEY || '';
 const ENV_ALERT_PHONE = process.env.CRISIS_ALERT_PHONE || '';
 
+/** Longest the admin-config read may hold a page back. */
+export const ALERT_CONFIG_TIMEOUT_MS = 2000;
+
 interface CrisisAlertConfig {
   enabled?: boolean;
   phone?: string | null;
@@ -27,9 +30,21 @@ interface CrisisAlertConfig {
  *  Never throws — any lookup failure is treated as "use env defaults" so a
  *  config problem can't silently swallow crisis alerts. */
 async function resolveAlertTarget(): Promise<{ enabled: boolean; phone: string }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const { getSystemConfig } = await import('../utils/sessionHelpers.js');
-    const config = await getSystemConfig();
+    // Bounded: this read sits inside the send path of every page. A database
+    // that has stopped answering must not hold a page back indefinitely; past
+    // the timeout the env defaults are used, exactly as for a failed read.
+    const config = await Promise.race([
+      getSystemConfig(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`crisis_alert config read timed out after ${ALERT_CONFIG_TIMEOUT_MS} ms`)),
+          ALERT_CONFIG_TIMEOUT_MS,
+        );
+      }),
+    ]);
     const alertConfig = config.crisis_alert as CrisisAlertConfig | undefined;
     if (!alertConfig) return { enabled: true, phone: ENV_ALERT_PHONE };
     return {
@@ -39,6 +54,8 @@ async function resolveAlertTarget(): Promise<{ enabled: boolean; phone: string }
   } catch (err) {
     log.error({ err }, '[alert] failed to resolve crisis_alert config; falling back to env');
     return { enabled: true, phone: ENV_ALERT_PHONE };
+  } finally {
+    clearTimeout(timer);
   }
 }
 

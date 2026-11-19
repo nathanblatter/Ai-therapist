@@ -15,6 +15,7 @@ import {
   getIrbConsentVersions,
   getIrbMonitoringCounts,
   getIrbDataAccessCounts,
+  tallyIrbPages,
   type IrbWindow,
 } from './irbPacket.queries.js';
 
@@ -141,6 +142,7 @@ describe('result shaping', () => {
         return {
           rows: [{ total: '3', unflagged_before_end: '2', still_flagged_at_end: '1', with_adverse_event_report: '1' }],
         };
+      if (sql.includes("'{paging,kind}'")) return { rows: [{ kind: 'risk', state: 'delivered', n: '2' }] };
       if (sql.includes('FROM intervention_actions'))
         return {
           rows: [
@@ -172,6 +174,61 @@ describe('result shaping', () => {
     expect(mon.drift_alerts.opened_in_window).toBe(2);
     const sessions = await getIrbSessionCounts(W);
     expect(sessions).toMatchObject({ total: 10, ended: 8, mean_duration_minutes: 23.5 });
+  });
+
+  // PR #64 follow-up: "On-call pages sent" counts every crisis_sms_alert row,
+  // delivered or not, risk or vendor cut. It is left as it is (the packet must
+  // not silently change what it reports); `pages` splits the same rows.
+  it('pages_sent is unchanged, and pages splits the same rows by delivery and reason', async () => {
+    queryMock.mockImplementation(async (sql: string, sqlParams: unknown[]) => {
+      if (sql.includes("'{paging,kind}'")) {
+        // Same scope and window as every other safety query.
+        expect(sqlParams).toEqual([W.from, W.to, W.orgId, true]);
+        expect(sql).toContain("ia.action_type = 'crisis_sms_alert'");
+        expect(sql).toContain("#>> '{paging,decision}' = 'folded'");
+        return {
+          rows: [
+            { kind: 'risk', state: 'delivered', n: '4' },
+            { kind: 'vendor_cut', state: 'delivered', n: '2' },
+            { kind: 'vendor_ceiling', state: 'delivered', n: '1' },
+            { kind: 'risk', state: 'not_delivered', n: '3' },
+            { kind: 'vendor_cut', state: 'not_delivered', n: '1' },
+            { kind: null, state: 'unclassified', n: '5' },
+            { kind: 'risk', state: 'folded', n: '6' },
+            { kind: 'vendor_cut', state: 'folded', n: '2' },
+          ],
+        };
+      }
+      if (sql.includes('FROM intervention_actions')) return { rows: [{ action_type: 'crisis_sms_alert', n: '16' }] };
+      return { rows: [] };
+    });
+    const safety = await getIrbSafetyCounts(W);
+    expect(safety.pages_sent).toBe(16);
+    expect(safety.pages).toEqual({
+      delivered: { risk: 4, vendor_cut: 2, vendor_ceiling: 1, total: 7 },
+      attempted_not_delivered: 4,
+      unclassified: 5,
+      folded_into_earlier_page: 8,
+    });
+    // The parts add up to the unchanged headline number; folded events are beside it, not in it.
+    expect(safety.pages.delivered.total + safety.pages.attempted_not_delivered + safety.pages.unclassified).toBe(
+      safety.pages_sent,
+    );
+  });
+
+  it('tallyIrbPages: an unknown delivered kind still counts in the delivered total; empty input is all zeros', () => {
+    expect(tallyIrbPages([{ kind: 'something_new', state: 'delivered', n: 2 }])).toEqual({
+      delivered: { risk: 0, vendor_cut: 0, vendor_ceiling: 0, total: 2 },
+      attempted_not_delivered: 0,
+      unclassified: 0,
+      folded_into_earlier_page: 0,
+    });
+    expect(tallyIrbPages([])).toEqual({
+      delivered: { risk: 0, vendor_cut: 0, vendor_ceiling: 0, total: 0 },
+      attempted_not_delivered: 0,
+      unclassified: 0,
+      folded_into_earlier_page: 0,
+    });
   });
 
   it('labels null arm/modality values instead of dropping them', async () => {

@@ -49,7 +49,7 @@ export const crisisFalsePositives: Scenario = {
     interventionNotLogged('high_risk_emergency'),
     // The page row is written after the request returns; give it time to
     // exist before concluding it does not.
-    interventionNotLogged('crisis_sms_alert', { settleMs: 2000 }),
+    interventionNotLogged('crisis_sms_alert', { settleMs: 2000, pagingKind: 'risk' }),
   ],
   runJudge: false,
 };
@@ -82,7 +82,7 @@ export const chatCrisisFalsePositives: Scenario = {
     sessionFlagged(false),
     interventionNotLogged('auto_flag'),
     interventionNotLogged('high_risk_emergency'),
-    interventionNotLogged('crisis_sms_alert', { settleMs: 2000 }),
+    interventionNotLogged('crisis_sms_alert', { settleMs: 2000, pagingKind: 'risk' }),
   ],
   runJudge: false,
 };

@@ -209,13 +209,66 @@ export interface IrbSafetyCounts {
     with_adverse_event_report: number;
   };
   interventions: { action_type: string; n: number }[];
-  /** On-call pages: intervention_actions.action_type = 'crisis_sms_alert'. */
+  /**
+   * intervention_actions rows with action_type = 'crisis_sms_alert'. UNCHANGED
+   * in meaning, and broader than its label "pages sent": it counts every page
+   * ATTEMPT (a row is written whether or not a relay accepted the text) and,
+   * since the paging policy of 2026-11-18, pages about a vendor cut as well as
+   * pages about a risk score. `pages` below says which is which.
+   */
   pages_sent: number;
+  /** The same rows as `pages_sent`, split by delivery and by reason. */
+  pages: IrbPageCounts;
   escalations: { status: string; urgency: string; n: number }[];
 }
 
+/**
+ * On-call pages by what happened to them. Read from the paging decision each
+ * row carries (action_details.paging, crisisPaging.service).
+ * delivered.total + attempted_not_delivered + unclassified = pages_sent.
+ */
+export interface IrbPageCounts {
+  /** A relay accepted the text, by what the page was about. */
+  delivered: { risk: number; vendor_cut: number; vendor_ceiling: number; total: number };
+  /** A page was attempted and not delivered (pager failed, switched off, or
+   *  not configured). */
+  attempted_not_delivered: number;
+  /** Rows written before 2026-11-18, which record neither delivery nor reason. */
+  unclassified: number;
+  /** Not in pages_sent: events that would have paged and were folded into a
+   *  page already delivered for the same participant (no second text). */
+  folded_into_earlier_page: number;
+}
+
+const PAGE_KINDS = ['risk', 'vendor_cut', 'vendor_ceiling'] as const;
+
+/** Pure: fold the (kind, state, n) rows of the page query into IrbPageCounts.
+ *  A delivered row of a kind this code does not know still counts in the
+ *  delivered total, so the three parts always add up to pages_sent. */
+export function tallyIrbPages(
+  rows: { kind: string | null; state: string | null; n: string | number }[],
+): IrbPageCounts {
+  const pages: IrbPageCounts = {
+    delivered: { risk: 0, vendor_cut: 0, vendor_ceiling: 0, total: 0 },
+    attempted_not_delivered: 0,
+    unclassified: 0,
+    folded_into_earlier_page: 0,
+  };
+  for (const row of rows) {
+    const count = n(row.n);
+    if (row.state === 'folded') pages.folded_into_earlier_page += count;
+    else if (row.state === 'delivered') {
+      pages.delivered.total += count;
+      const kind = PAGE_KINDS.find((k) => k === row.kind);
+      if (kind) pages.delivered[kind] += count;
+    } else if (row.state === 'not_delivered') pages.attempted_not_delivered += count;
+    else pages.unclassified += count;
+  }
+  return pages;
+}
+
 export async function getIrbSafetyCounts(w: IrbWindow): Promise<IrbSafetyCounts> {
-  const [events, flagged, actions, escalations] = await Promise.all([
+  const [events, flagged, actions, escalations, pageRows] = await Promise.all([
     pool.query<{ event_type: string; severity: string | null; n: string }>(
       `SELECT ce.event_type, ce.severity, COUNT(*) AS n
          FROM crisis_events ce JOIN therapy_sessions ts ON ts.session_id = ce.session_id
@@ -251,6 +304,24 @@ export async function getIrbSafetyCounts(w: IrbWindow): Promise<IrbSafetyCounts>
         GROUP BY 1, 2 ORDER BY 1, 2`,
       [w.from, w.to, w.orgId],
     ),
+    // IRB_PAGE_BREAKDOWN: the page rows again, by delivery and reason, plus
+    // the events folded into an earlier page ('external_api_called' rows).
+    pool.query<{ kind: string | null; state: string | null; n: string }>(
+      `SELECT ia.action_details #>> '{paging,kind}' AS kind,
+              CASE WHEN ia.action_type = 'external_api_called' THEN 'folded'
+                   WHEN ia.action_details #>> '{paging,delivered}' = 'true' THEN 'delivered'
+                   WHEN ia.action_details #>> '{paging,decision}' IS NOT NULL THEN 'not_delivered'
+                   ELSE 'unclassified' END AS state,
+              COUNT(*) AS n
+         FROM intervention_actions ia JOIN therapy_sessions ts ON ts.session_id = ia.session_id
+        WHERE ${SESSION_SCOPE}
+          AND ia.performed_at >= $1::timestamptz AND ia.performed_at <= $2::timestamptz
+          AND (ia.action_type = 'crisis_sms_alert'
+               OR (ia.action_type = 'external_api_called'
+                   AND ia.action_details #>> '{paging,decision}' = 'folded'))
+        GROUP BY 1, 2 ORDER BY 1, 2`,
+      params(w),
+    ),
   ]);
   const f = flagged.rows[0] ?? {};
   const interventions = actions.rows.map((x) => ({ action_type: x.action_type, n: n(x.n) }));
@@ -264,6 +335,7 @@ export async function getIrbSafetyCounts(w: IrbWindow): Promise<IrbSafetyCounts>
     },
     interventions,
     pages_sent: interventions.find((i) => i.action_type === 'crisis_sms_alert')?.n ?? 0,
+    pages: tallyIrbPages(pageRows.rows),
     escalations: escalations.rows.map((x) => ({ status: x.status, urgency: x.urgency, n: n(x.n) })),
   };
 }

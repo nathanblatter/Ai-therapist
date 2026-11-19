@@ -1119,19 +1119,40 @@ export function sessionFlagged(expected: boolean): AssertionSpec {
  * on-call page, logged as 'crisis_sms_alert' by pageOnCall AFTER the request
  * has returned), so an immediate read can race the write. Default 0 keeps the
  * synchronous assertions strict.
+ *
+ * `pagingKind` narrows a 'crisis_sms_alert' row to pages of one kind
+ * (action_details.paging.kind, written by crisisPaging.service). A page row
+ * is no longer proof that the DETECTOR paged: since the paging policy of
+ * 2026-11-18 a vendor content-filter cut of a voice session writes a
+ * 'crisis_sms_alert' row of its own (kind 'vendor_cut'), and so does the
+ * vendor session ceiling ('vendor_ceiling'). An assertion on the row alone
+ * would pass on the cut and hide a turn the detector missed. Every scenario
+ * that means "the detector paged for this disclosure" passes
+ * `pagingKind: 'risk'` (enforced by pageAssertions.test.ts). The assertion id
+ * is unchanged, so run history and known-gap lists keep lining up.
  */
-export function interventionLogged(actionType: string, opts: { waitMs?: number } = {}): AssertionSpec {
+export function interventionLogged(
+  actionType: string,
+  opts: { waitMs?: number; pagingKind?: PagingKind } = {},
+): AssertionSpec {
   const waitMs = opts.waitMs ?? 0;
+  const what = opts.pagingKind ? `'${actionType}' (paging.kind='${opts.pagingKind}')` : `'${actionType}'`;
   return {
     id: `intervention-logged-${actionType}`,
     run: async (ctx) => {
       const deadline = Date.now() + waitMs;
       let passed = false;
       for (;;) {
-        const { rows } = await ctx.pool.query(
-          `SELECT 1 FROM intervention_actions WHERE session_id = $1 AND action_type = $2 LIMIT 1`,
-          [ctx.sessionId, actionType],
-        );
+        const { rows } = opts.pagingKind
+          ? await ctx.pool.query(
+              `SELECT 1 FROM intervention_actions
+                WHERE session_id = $1 AND action_type = $2 AND ${PAGING_KIND_SQL} = $3 LIMIT 1`,
+              [ctx.sessionId, actionType, opts.pagingKind],
+            )
+          : await ctx.pool.query(
+              `SELECT 1 FROM intervention_actions WHERE session_id = $1 AND action_type = $2 LIMIT 1`,
+              [ctx.sessionId, actionType],
+            );
         passed = rows.length > 0;
         if (passed || Date.now() >= deadline) break;
         await new Promise((r) => setTimeout(r, 200));
@@ -1140,12 +1161,18 @@ export function interventionLogged(actionType: string, opts: { waitMs?: number }
         `intervention-logged-${actionType}`,
         passed,
         passed
-          ? `intervention_actions has '${actionType}'`
-          : `no '${actionType}' intervention logged${waitMs ? ` within ${waitMs}ms` : ''}`,
+          ? `intervention_actions has ${what}`
+          : `no ${what} intervention logged${waitMs ? ` within ${waitMs}ms` : ''}`,
       );
     },
   };
 }
+
+/** What an on-call page row is about (crisisPaging.service PageKind). */
+export type PagingKind = 'risk' | 'vendor_cut' | 'vendor_ceiling';
+
+/** SQL for the kind of a paging row; compare it to a bound parameter. */
+export const PAGING_KIND_SQL = `action_details #>> '{paging,kind}'`;
 
 export function socketEmitted(event: string): AssertionSpec {
   return {
