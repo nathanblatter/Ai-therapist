@@ -242,11 +242,11 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-navy to-royal">
-      <div className="max-w-md w-full mx-4">
-        <div className="bg-white rounded-2xl shadow-2xl p-8 space-y-8">
+    <div className="h-dvh overflow-y-auto flex justify-center bg-gradient-to-br from-navy to-royal py-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <div className="max-w-md w-full mx-4 my-auto">
+        <div className="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 space-y-6 sm:space-y-8">
           <div className="text-center">
-            <h1 className="text-4xl font-bold text-navy mb-2">AI Therapist Assistant</h1>
+            <h1 className="text-3xl sm:text-4xl font-bold text-navy mb-2">AI Therapist Assistant</h1>
             <p className="text-lg text-gray-600">
               {mfaRequired ? 'Two-Factor Authentication' : 'Sign in to start your session'}
             </p>
@@ -439,7 +439,7 @@ export default function Login() {
           <div className="text-center pt-4 border-t border-gray-200">
             <p className="text-sm text-gray-500">
               If you experience emotional distress or crisis, please contact{' '}
-              <a href="tel:988" className="text-royal hover:underline font-medium">
+              <a href="tel:988" className="text-royal hover:underline font-medium py-4">
                 988 Suicide & Crisis Lifeline: 988
               </a>
             </p>

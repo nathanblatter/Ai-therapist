@@ -235,7 +235,7 @@ export default function Profile() {
   return (
     <div className="fixed inset-0 bg-gray-50 overflow-y-auto">
       {/* Header */}
-      <div className="bg-navy text-white p-6" role="banner">
+      <div className="bg-navy text-white p-6 pt-[max(1.5rem,env(safe-area-inset-top))]" role="banner">
         <div className="max-w-6xl mx-auto">
           <button
             onClick={() => navigate('/')}

@@ -3220,7 +3220,7 @@ export default function App() {
         {isSessionActive && sessionType === 'realtime' && (
           <VoiceOrb localStream={localStream} remoteStream={remoteStream} />
         )}
-        <div className="w-full flex-1 overflow-y-auto p-2 sm:p-4">
+        <div className="w-full flex-1 overflow-y-auto px-4 py-2 sm:p-4">
           {isSessionActive ? (
             <ChatLog
               messages={messages}
@@ -3241,7 +3241,7 @@ export default function App() {
             <Home onOpenMessages={() => setActiveView('messages')} messagesUnread={messagesUnread} />
           )}
         </div>
-        <div className="w-full max-w-4xl p-2 sm:p-4">
+        <div className="w-full max-w-4xl px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-4">
           {/* Persistent wrap-up notice (ai-therapist-101/112): the transient
               toast was easy to miss; this stays visible until teardown. */}
           {isSessionActive && micLocked && (
