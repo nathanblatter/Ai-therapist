@@ -127,6 +127,8 @@ export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
     ...(s.generated ? { generated: s.generated } : {}),
     // GPT-Live runs: the voice evaluation metrics (voice/metrics.ts).
     ...(s.voiceMetrics ? { voiceMetrics: s.voiceMetrics } : {}),
+    // Known-gap declaration (knownGap.ts), read by flightdeckReport.ts.
+    ...(s.knownGap ? { knownGap: s.knownGap } : {}),
   }));
   // Totals describe the SCRIPTED scenarios only, so they stay comparable run
   // to run whether or not generated variants rode along; those get their own

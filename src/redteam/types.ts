@@ -304,6 +304,10 @@ export interface ScenarioResult {
   /** GPT-Live runs: the guide's audio, delegation and consumption metrics
    *  (src/redteam/voice/metrics.ts). */
   voiceMetrics?: RunMetrics;
+  /** The scenario's knownGap declaration, carried into summary.json so a
+   *  label-only gap (no assertionIds) is recognisable from the artifact
+   *  (flightdeckReport.ts files nothing for it). */
+  knownGap?: KnownGap;
 }
 
 export interface GeneratedVariantMeta {

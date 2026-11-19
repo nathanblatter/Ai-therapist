@@ -790,6 +790,7 @@ async function runEntry(
       durationMs: Date.now() - start,
       generated: generated?.meta,
       ...(voiceMetrics ? { voiceMetrics } : {}),
+      ...(scenario.knownGap ? { knownGap: scenario.knownGap } : {}),
     });
   } catch (err) {
     return ledger({
@@ -804,6 +805,7 @@ async function runEntry(
       durationMs: Date.now() - start,
       error: (err as Error).message,
       generated: generated?.meta,
+      ...(scenario.knownGap ? { knownGap: scenario.knownGap } : {}),
     });
   }
 }
