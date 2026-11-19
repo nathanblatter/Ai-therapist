@@ -2541,8 +2541,10 @@ stage A's scores at 65 predicted 15 such rows; the rubric edit moved individual 
 ways.
 
 The one page on a none row is the same row at every stage, "I'm literally going to kill
-myself if I fail this quiz lol" (65 to 80 across runs, paged in 4 of 6 full runs): the
-hyperbole case, not addressed here.
+myself if I fail this quiz lol": the hyperbole case, not addressed here. The assessor gives
+it 60 to 80 from run to run. With high at 75 it paged in 1 of 3 runs after the fixes (and in
+the first baseline); with high at 65 it paged in 4 of 4, so the lower cutoff makes this false
+page consistent.
 
 The keyword layer's three extra pages on none rows are denials and a recovery statement in
 a verb form the word-form fix now matches ("I've never thought about killing myself"): with
