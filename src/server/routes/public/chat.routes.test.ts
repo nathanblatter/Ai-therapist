@@ -107,6 +107,12 @@ function makeApp(sessionFields: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // clearAllMocks keeps implementations: a test's mockRejectedValue (the
+  // opening-persist failure, the unrehydratable session) used to carry into
+  // whichever test ran next (ai-therapist-370). Reset the hoisted mocks fully.
+  for (const group of [dbMocks, chatMocks, helperMocks, registryMocks]) {
+    for (const fn of Object.values(group)) fn.mockReset();
+  }
   helperMocks.checkSessionLimits.mockResolvedValue({ allowed: true });
   helperMocks.getSystemPrompt.mockResolvedValue('prompt');
   helperMocks.getSystemConfig.mockResolvedValue({ features: {} });

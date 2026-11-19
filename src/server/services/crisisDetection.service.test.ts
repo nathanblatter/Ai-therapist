@@ -407,6 +407,12 @@ describe('analyzeStandaloneRisk (messaging slice: no session machinery)', () => 
     createMock.mockReset();
   });
 
+  /** Queries other than the assessor-model setting read (system_config, cached
+   *  in sessionHelpers). Whether that read happens depends on whether an
+   *  earlier test warmed the cache, so "no query at all" held only in file
+   *  order (ai-therapist-370). Standalone content has no session: nothing else. */
+  const sessionQueries = () => queryMock.mock.calls.filter(([sql]) => !/FROM system_config/.test(String(sql)));
+
   // ai-therapist-142: the message path has no periodic sweep, so it must run
   // the LLM on EVERY message — means/farewell language ("bought a gun", "wrote
   // goodbye letters") carries no lexicon words and would otherwise score 0.
@@ -425,7 +431,7 @@ describe('analyzeStandaloneRisk (messaging slice: no session machinery)', () => 
     expect(r.severity).toBe('high');
     expect(r.method).toBe('llm_assessed');
     // Standalone content has no session to log against — still no DB write.
-    expect(queryMock).not.toHaveBeenCalled();
+    expect(sessionQueries()).toEqual([]);
   });
 
   it('returns an INDETERMINATE verdict when the LLM is down and no keyword floor exists', async () => {
@@ -454,7 +460,7 @@ describe('analyzeStandaloneRisk (messaging slice: no session machinery)', () => 
     expect(r.factors).toEqual(['passive ideation']);
     expect(r.method).toBe('llm_assessed');
     expect(createMock).toHaveBeenCalledOnce();
-    expect(queryMock).not.toHaveBeenCalled();
+    expect(sessionQueries()).toEqual([]);
   });
 
   it('falls back to the keyword tier score when the LLM fails (fail toward detection)', async () => {

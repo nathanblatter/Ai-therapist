@@ -9,6 +9,7 @@
 // labelled, and must score 0 when the assessor is down.
 // OpenAI, the DB and the pager are mocked; no network.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { warmCrisisPathImports } from '../testing/warmCrisisImports.js';
 
 const { queryMock, createMock, moderationCreateMock, recentMessagesMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
@@ -98,6 +99,10 @@ function riskRow(): Record<string, unknown> {
   return { ...JSON.parse(insert![1][4] as string), _score: insert![1][2], _messageId: insert![1][1] };
 }
 const assessorSaw = (n = 0): string => createMock.mock.calls[n][0].messages[1].content as string;
+
+// Load the crisis path's lazy imports now, so the first test to reach the
+// assessor does not wait on real module loading under fake timers.
+await warmCrisisPathImports();
 
 beforeEach(() => {
   _resetAssessorHealthForTests();

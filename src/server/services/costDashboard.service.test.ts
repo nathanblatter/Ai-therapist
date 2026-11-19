@@ -3,7 +3,7 @@
 // decisions while looking authoritative. These tests pin the apportionment,
 // the shared-model case, and the honesty guarantees (totals never inflate,
 // estimates get flagged).
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
 
 const { getCostsSummaryMock, usageMock, realtimeMock, volumeMock } = vi.hoisted(() => ({
   getCostsSummaryMock: vi.fn(),
@@ -240,6 +240,13 @@ describe('getCostDashboard attribution', () => {
   });
 
   it('flags cap risk from the month-to-date projection', async () => {
+    // The service reads the clock too: pin it so the test's "today" is the
+    // service's today (they differed when the run crossed UTC midnight).
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(Math.floor(Date.now() / 86_400_000) * 86_400_000 + 12 * 3_600_000));
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const today = new Date().toISOString().slice(0, 10);
     getCostsSummaryMock.mockResolvedValue(
       costs([{ lineItem: 'gpt-5, output', amountUsd: 110 }], [{ date: today, amountUsd: 110 }]),

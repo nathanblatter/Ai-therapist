@@ -12,6 +12,7 @@
 //     retry on quota, Retry-After honoured only when it is short).
 // OpenAI, the DB and the pager are mocked; no network.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { warmCrisisPathImports } from '../testing/warmCrisisImports.js';
 
 const { queryMock, createMock, moderationCreateMock, reportQuotaMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
@@ -84,6 +85,10 @@ async function settle<T>(p: Promise<T>): Promise<T> {
   await vi.advanceTimersByTimeAsync(5000);
   return p;
 }
+
+// Load the crisis path's lazy imports now, so the first test to reach the
+// assessor does not wait on real module loading under fake timers.
+await warmCrisisPathImports();
 
 beforeEach(() => {
   vi.useFakeTimers();

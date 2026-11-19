@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 
 // Mock the database pool so the rate-limit logic can be exercised without Postgres.
 const { queryMock } = vi.hoisted(() => ({ queryMock: vi.fn() }));
@@ -16,6 +16,16 @@ import {
   setFeatureOverrides,
   setPsychoeducationCueArmOverride,
 } from './sessionHelpers.js';
+
+// The harness overrides are module state in sessionHelpers: the arm pinned by
+// 'pins the psychoeducation-cue arm' used to stay pinned for whichever test ran
+// next (ai-therapist-370). A Math.random spy left behind by a failed assertion
+// is restored here too.
+afterEach(() => {
+  setFeatureOverrides(null);
+  setPsychoeducationCueArmOverride(null);
+  vi.restoreAllMocks();
+});
 
 const SESSION_LIMITS = {
   enabled: true,
