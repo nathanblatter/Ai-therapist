@@ -3,6 +3,7 @@ import { redactableRowsSql, REDACTABLE_ROWS_SQL } from '../db/redactionScope.js'
 import { wipeAgedThreadMessageBodies } from '../db/messagingRetention.queries.js';
 import { broadcastAdminEvent } from '../utils/adminBroadcast.js';
 import { withLongQueries } from '../config/dbLongQueries.js';
+import { forgetTurnsBefore } from '../utils/recentTurns.js';
 
 // Scheduler state
 let wipeInterval: ReturnType<typeof setTimeout> | null = null;
@@ -80,6 +81,28 @@ export async function updateRetentionSettings(
   return (result.rows[0]?.config_value as RetentionSettings) || settings;
 }
 
+const MS_PER_HOUR = 60 * 60 * 1000;
+
+/**
+ * The content-wipe cutoff: `retentionHours` of ELAPSED time before `nowMs`
+ * (ai-therapist-374). This used to be `setHours(getHours() - retention_hours)`,
+ * which counts local wall-clock hours, so in a DST time zone a 24-hour
+ * retention cut 23 real hours back on the spring-forward day (content wiped an
+ * hour early) and 25 on the fall-back day.
+ *
+ * Math.ceil rounds a fractional setting up (keeps content longer). The admin UI
+ * sends whole hours, but the PUT route accepts e.g. 1.5; a wipe run with it
+ * then fails at the INTEGER content_wipe_log insert before reaching this, so
+ * only the read-only pending-wipe stat sees a fraction. The old setHours
+ * truncated its argument toward zero, so it cut ceil(h) hours back when the
+ * local hour was >= h and floor(h) otherwise; ceil is never shorter than
+ * either. Outside a DST change, an integer setting gives exactly the old
+ * cutoff, so the wipe never deletes more than it did before.
+ */
+export function retentionCutoff(retentionHours: number, nowMs: number = Date.now()): Date {
+  return new Date(nowMs - Math.ceil(retentionHours) * MS_PER_HOUR);
+}
+
 /**
  * Execute content wipe operation
  * @param {string} triggeredBy - 'scheduler' or 'manual'
@@ -116,9 +139,8 @@ export async function executeContentWipe(
 
     console.log(`[ContentWipe] Starting content wipe (${triggeredBy})...`);
 
-    // Calculate cutoff time based on retention hours
-    const cutoffTime = new Date();
-    cutoffTime.setHours(cutoffTime.getHours() - settings.retention_hours);
+    // Calculate cutoff time based on retention hours (elapsed time, ai-therapist-374)
+    const cutoffTime = retentionCutoff(settings.retention_hours);
 
     // NOTE (ai-therapist-95, IRB): this wipe only nulls messages.content. The
     // REDACTED transcript excerpts snapshotted into adverse_event_reports
@@ -169,6 +191,10 @@ export async function executeContentWipe(
     // Unbatched bulk UPDATE: the long statement limit (ai-therapist-366).
     const wipeResult = await withLongQueries('content_wipe', () => pool.query(wipeQuery, queryParams));
     const messagesWiped = wipeResult.rowCount;
+    // The crisis pipeline's in-memory copy of recent turns must not outlive
+    // the stored text: drop the remembered turns from before the same cutoff
+    // (ai-therapist-374). Memory only; the query above is unchanged.
+    forgetTurnsBefore(cutoffTime.getTime());
 
     // Thread-message inclusion (caseworker portal spec section 10 item 8:
     // messages retain like sessions). Same cutoff clock: async thread message
@@ -280,8 +306,7 @@ async function getWipeStatsUnbounded(): Promise<Record<string, unknown>> {
   const settings = await getRetentionSettings();
 
   // Get pending wipe count (messages that would be wiped now)
-  const cutoffTime = new Date();
-  cutoffTime.setHours(cutoffTime.getHours() - settings.retention_hours);
+  const cutoffTime = retentionCutoff(settings.retention_hours);
 
   // Mirrors the wipe query's sandbox exemption so the "pending" stat never
   // counts messages the wipe will deliberately skip forever.

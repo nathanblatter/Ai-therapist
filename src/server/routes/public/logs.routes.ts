@@ -113,7 +113,7 @@ export default function logsRoutes(): Router {
           rememberSessionAccount(sessionId, req.session?.userRole);
           // Started here: this process's copy of its turns is complete
           // (ai-therapist-373).
-          rememberSessionStart(sessionId);
+          rememberSessionStart(sessionId, null, userId);
           log.info(`Created session ${sessionId.substring(0, 12)}... with user_id: ${userId}`);
 
           try {

@@ -65,7 +65,8 @@ const { PAGE_FOLD_WINDOW_MS } = await import('./crisisPaging.service.js');
 const { clearCrisisResourceState } = await import('./crisisResources.js');
 const { _settleBackgroundForTests } = await import('../utils/backgroundWork.js');
 const { rememberSessionAccount, _forgetSessionAccountsForTests } = await import('../utils/sessionAccounts.js');
-const { rememberSessionStart, rememberTurn, _resetRecentTurnsForTests } = await import('../utils/recentTurns.js');
+const { rememberSessionStart, rememberTurn, _resetRecentTurnsForTests, forgetTurnsBefore, forgetParticipantTurns } =
+  await import('../utils/recentTurns.js');
 
 const acquireTimeout = () => new Error('timeout exceeded when trying to connect');
 const UNFLAGGED = { crisis_flagged: false, crisis_severity: null, crisis_risk_score: null };
@@ -183,6 +184,34 @@ describe('chooseHistory: where a turn is read against', () => {
     expect(rows).toHaveLength(10);
     expect(rows.at(-1)?.message_id).toBe(99);
     expect(String(rows[0].message_id)).toMatch(/^mem:/);
+  });
+
+  // PR #91 review: a content wipe drops remembered turns of a session that is
+  // still open, whose stored text the wipe kept (it is redacted only at end).
+  // The copy is then short of the record, so it is partial: the stored history
+  // is preferred when read, and the context-blind rule applies when it is not.
+  it('a content wipe took turns from an open session: memory is partial', () => {
+    const now = Date.now();
+    rememberSessionStart('s1');
+    rememberTurn('s1', 'user', 'I keep thinking about the pills', { at: now - 3 * 3_600_000 });
+    rememberTurn('s1', 'assistant', 'Are you safe?', { at: now - 60_000 });
+    forgetTurnsBefore(now - 3_600_000);
+    expect(chooseHistory({ sessionId: 's1', messageId: 1, content: 'x' }, null).source).toBe('memory_partial');
+    expect(chooseHistory({ sessionId: 's1', messageId: null, content: 'x' }, STORED)).toEqual({
+      rows: STORED,
+      source: 'database',
+    });
+  });
+
+  // A withdrawn participant's live call: the copy is dropped, later turns
+  // start a fragment, and a failed read puts the turn under the context-blind
+  // rule rather than scoring it as complete.
+  it('a withdrawal dropped the copy mid-call: later turns are partial', () => {
+    rememberSessionStart('s1', null, 7);
+    rememberTurn('s1', 'assistant', 'Are you safe?');
+    forgetParticipantTurns(7);
+    rememberTurn('s1', 'user', 'no');
+    expect(chooseHistory({ sessionId: 's1', messageId: 1, content: 'no' }, null).source).toBe('memory_partial');
   });
 });
 
