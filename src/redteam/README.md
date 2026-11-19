@@ -43,10 +43,15 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `scenarios/quality/*.ts` | Rubric-floor quality scenarios (first session, low mood, advice seeker, rambling venting, terse participant, stalling participant, returning participant). |
 | `scenarios/protocol/*.ts` | Protocol scenarios from `docs/eval-scenario-catalogue.md` (honesty about confidentiality and reporting, minors hard refusal, eligibility leaks, withdrawal, abuse disclosures). In the full suite, except the two minors-refusal scenarios, which are on demand only (`extended`; see docs/redteam.md). |
 | `protocolAssertions.ts`, `protocolRubricFixtures.ts` | Assertions for those scenarios, written against the consent form and the prompt, and the synthetic transcripts (pass and must-fail) that test them. `protocolRubrics.live.test.ts` runs the fixtures through the real classifier (opt-in). |
+| `scenarios/screening/*.ts`, `scenarios/opening/*.ts`, `scenarios/use/*.ts` | Catalogue SCR-*, OPEN-* and USE-* scenarios (eligibility disclosed in session, the pre-session check-in, limits of scope and difficult disclosures). NIGHTLY-tier ones in the full suite, EXT-tier ones in `extended`; SCR-03 is report-only. |
+| `scopeAssertions.ts`, `scopeRubricFixtures.ts` | Their assertions and the synthetic pass and must-fail replies that test them; `scopeRubrics.live.test.ts` runs the fixtures through the real classifier (opt-in). |
 | `participantIdentity.ts` | Refuses to run `requiresReservedParticipant` scenarios unless the harness participant has a reserved userid (OpenAI safety-identifier collision, ai-therapist-306). |
-| `scenarios/crisis/*.ts` | The crisis group from `docs/eval-scenario-catalogue.md` (CRI-03, 04, 06, 08, 09, 10, 12, 17, 24), one catalogue entry per file. Design, measured pass rates and known gaps: `docs/redteam-crisis-scenarios.md`. |
+| `scenarios/crisis/*.ts` | The crisis group from `docs/eval-scenario-catalogue.md` (every CRI id that runs on chat or realtime-text, plus GATE-02), one catalogue entry per file, each scenario tagged with `catalogueIds`. Design, the CRI coverage map, measured pass rates and known gaps: `docs/redteam-crisis-scenarios.md`. |
 | `crisisAssertions.ts` | Assertions for the crisis group: pipeline state, reply regexes, one classifier question per Crisis Protocol promise. |
 | `crisisFixtures.ts` | Test-only fixtures and probes for the crisis group: assessor made unreachable, `end_session` guard probe, session-timer probe. |
+| `multiSession.ts` | Multi-session chat scenarios: `Scenario.sessions` run in order for accounts created for the run; a session `daysSincePrevious: n` is dated n days later by ageing that participant's stored history (docs/redteam.md "Multi-session scenarios"). |
+| `scenarios/memory/*.ts` | Memory and cross-session scenarios (catalogue MEM-01 to MEM-05, OPEN-02, ARM-09, USE-04 second session, CRI-27, SCR-11, CONF-09) and the cross-participant isolation check. Eleven in the full suite, five in `extended`. |
+| `memoryAssertions.ts`, `memoryFixtures.ts` | Assertions for those scenarios (mostly deterministic: what was built for a session, canaries, stored rows) and the synthetic evidence each one must pass and must fail on. `memoryRubrics.live.test.ts` runs the classifier fixtures through the real classifier (opt-in). |
 | `knownGap.ts` | Known product gaps: listed assertions report loudly on every run and do not gate until the filed bug is fixed. |
 | `crisisRubrics.live.test.ts` | Opt-in calibration of the crisis classifier questions against the real classifier (skipped in `npm test`). |
 | `scenarios/_preamble.ts` | Shared persona preamble. |
@@ -57,6 +62,7 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `voiceClient.ts`, `liveVoiceClient.ts` | Voice drivers: Grok proxy socket and GPT-Live WebRTC, selected by `system_config.ai_model`. |
 | `relationalAssertions.ts` | REL/LIT-14/USE-08/ARM assertions (sycophancy, dependence, faith, exercise-offer counts, tool log). |
 | `arms.ts` | Forces the proactive_offering arm (and, via `featureHooks`, lead-conversation, the psychoeducation-cue arm or ab_test mode) in-process for the ARM scenarios. |
+| `scenarios/gates/*.ts` | Catalogue GATE-01, GATE-03 to GATE-06 and STAFF-10 on the `http` pipeline: session-start gates, RBAC and audit rows, driven through the real routes with no model and no judge (identical under `--dry-run`). `support.ts` holds the account seeding, probe recorder and clock helper. |
 | `scenarios/relational/*.ts`, `scenarios/arms/*.ts` | Catalogue REL-*, USE-08 and ARM-01/02 scenarios. |
 | `catalogueAssertions.ts`, `staffAssertions.ts` | Graders for the remaining ARM, END-03, WDR, CONF, ABU, REL and STAFF-04..09 catalogue scenarios (tool log, de-identified data, session config, 3-vote classifier); synthetic pass/must-fail transcripts in `catalogueRubricFixtures.ts`, live calibration in `catalogueRubrics.live.test.ts` (opt-in). |
 | `scenarios/arms/index.ts`, `scenarios/relational/index.ts`, `scenarios/staff/*`, `scenarios/protocol/{confidentialityQuestions,identifiersAndMemory,abuseMore,withdrawalMore}.ts` | Those scenarios, tagged with `catalogueIds`. Coverage map, calibration and known gaps: docs/redteam.md "Catalogue coverage: ARM, END, WDR, CONF, ABU, REL, STAFF". |
@@ -74,6 +80,7 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `jobSummary.ts`, `ciSummary.ts` | GitHub job summary and the nightly's red/green verdict (`npm run redteam:ci-summary`). |
 | `configSnapshot.ts` | `--config-snapshot <file>`: load an environment's evaluated configuration into the eval DB (config drift gate, `docs/redteam.md`); a `--variant` still overlays it. |
 | `configEvalClient.ts` | HTTP client the `redteam-config.yml` workflow uses to claim and record config evaluations. |
+| `goldens/` | Goldens runner (`npm run redteam:goldens`): the labelled detector and reply rows in `evals/goldens/*.jsonl` run in bulk through the real pipeline, with a confusion matrix, rates, a row diff and review sheets. See docs/redteam.md "Goldens". |
 | `*.test.ts` | Offline unit tests (assertions, diff, judge policy, suite composition, voice helpers); run in the normal `npm test`. |
 
 Results are written to `redteam-results/` (gitignored). Scheduled in-app runs

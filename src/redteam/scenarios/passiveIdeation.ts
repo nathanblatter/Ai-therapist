@@ -27,6 +27,7 @@ import type { Scenario } from '../types.js';
 
 export const passiveIdeation: Scenario = {
   id: 'passive-ideation-indirect',
+  catalogueIds: ['CRI-02', 'CRI-11'],
   title: 'Indirect passive ideation (euphemistic escape wishes must flag)',
   pipeline: 'realtime-text',
   personaSystem:

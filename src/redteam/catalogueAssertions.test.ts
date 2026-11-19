@@ -37,6 +37,7 @@ import {
 import { CATALOGUE_FIXTURES } from './catalogueRubricFixtures.js';
 import { ALL_SCENARIOS, EXTENDED_SCENARIOS, SMOKE_SUITE, selectSuite } from './scenarios/index.js';
 import { VOICE_CRAWL_SCENARIOS } from './voice/scenarios.js';
+import { VOICE_SAFETY_SCENARIOS } from './scenarios/voice.js';
 import { validateKnownGap } from './knownGap.js';
 import type { AssertionContext, AssistantTurnState, ClassifyFn, ClassifyRequest, DbLike, Turn } from './types.js';
 
@@ -456,11 +457,9 @@ describe('staff graders', () => {
  *  docs/redteam.md cannot silently drift from the code. */
 const NOT_COVERED: Record<string, string> = {
   'ARM-04': 'config matrix: a run recipe over the quality suite (--variant), not a scenario',
-  'ARM-09': 'two sessions with memory (owned by the cross-session work)',
   'END-01': 'needs the session timer: voice only (chat arms no timer)',
   'END-02': 'needs the session timer: voice only (chat arms no timer)',
   'END-04': 'end_session and session:end-approved are realtime only',
-  'STAFF-10': 'RBAC and audit with no model reply: integration tests',
 };
 
 const SLICE = [
@@ -484,8 +483,6 @@ const NEW_FULL = [
   'conf-act-for-me',
   'conf-identifiers-volunteered',
   'conf-redaction-injection',
-  'conf-what-do-you-know-memory-on',
-  'conf-what-do-you-know-memory-off',
   'abu-not-reportable',
   'rel-name-and-role-play',
   'rel-validation-pushback-fast',
@@ -519,7 +516,7 @@ const NEW_EXTENDED = [
 ];
 
 describe('catalogue coverage for ARM / END / WDR / CONF / ABU / REL / STAFF', () => {
-  const every = [...ALL_SCENARIOS, ...EXTENDED_SCENARIOS, ...VOICE_CRAWL_SCENARIOS];
+  const every = [...ALL_SCENARIOS, ...EXTENDED_SCENARIOS, ...VOICE_CRAWL_SCENARIOS, ...VOICE_SAFETY_SCENARIOS];
   const tagged = new Set(every.flatMap((s) => s.catalogueIds ?? []));
 
   it('every ID in the slice exists in the catalogue', () => {
@@ -535,8 +532,14 @@ describe('catalogue coverage for ARM / END / WDR / CONF / ABU / REL / STAFF', ()
     }
   });
 
-  it('tags are well formed catalogue IDs', () => {
-    for (const s of every) for (const id of s.catalogueIds ?? []) expect(id, s.id).toMatch(/^[A-Z]+-\d{2}$/);
+  it('every tag on every scenario, all families, names an ID that exists in the catalogue', () => {
+    const doc = fs.readFileSync(path.resolve(process.cwd(), 'docs/eval-scenario-catalogue.md'), 'utf8');
+    for (const s of every) {
+      for (const id of s.catalogueIds ?? []) {
+        expect(id, s.id).toMatch(/^[A-Z]+-\d{2}$/);
+        expect(doc.includes(`**${id} `), `${s.id}: ${id} is not in the catalogue`).toBe(true);
+      }
+    }
   });
 
   it('new scenarios: verbatim checkpoints, a gating assertion, never in the smoke gate, ids unique', () => {

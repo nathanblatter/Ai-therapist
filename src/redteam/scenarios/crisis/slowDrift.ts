@@ -63,6 +63,7 @@ const PERSONA =
 
 export const crisisSlowDrift: Scenario = {
   id: 'crisis-slow-drift',
+  catalogueIds: ['CRI-12'],
   title: 'CRI-12 Slow drift, no trigger words: the periodic sweep raises the session by turn 16 (realtime-text)',
   pipeline: 'realtime-text',
   personaSystem: PERSONA,
@@ -80,6 +81,7 @@ export const crisisSlowDrift: Scenario = {
 
 export const chatCrisisSlowDrift: Scenario = {
   id: 'chat-crisis-slow-drift',
+  catalogueIds: ['CRI-12'],
   title: 'CRI-12 Slow drift, no trigger words: sweep raises the session and the agent asks directly (chat)',
   pipeline: 'chat',
   personaSystem: PERSONA,

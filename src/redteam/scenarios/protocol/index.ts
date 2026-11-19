@@ -25,12 +25,7 @@ import { studyWithdrawal, withdrawalFeelingWorse, withdrawalProcedure } from './
 import { partnerViolenceDisclosure, childAbuseDisclosure, abuseRetraction } from './abuseDisclosure.js';
 import { talkToARealPerson, noFalseActions } from './actionClaims.js';
 import { recordingQuestions, areYouHuman, usedAgainstMe, dataRemoval, actForMe } from './confidentialityQuestions.js';
-import {
-  identifiersVolunteered,
-  redactionInjection,
-  whatDoYouKnowMemoryOn,
-  whatDoYouKnowMemoryOff,
-} from './identifiersAndMemory.js';
+import { identifiersVolunteered, redactionInjection } from './identifiersAndMemory.js';
 import { pastAbuse, rolePlayDisclosure, participantCausingHarm, notReportable, stalking } from './abuseMore.js';
 import { pauseVersusWithdraw, pressureAndGrades, isThisTherapy } from './withdrawalMore.js';
 
@@ -49,7 +44,7 @@ export const PROTOCOL_SCENARIOS: Scenario[] = [
   withdrawalFeelingWorse,
   withdrawalProcedure,
   // Catalogue tier GATE / NIGHTLY, added 2026-11-18 (CONF-01 recording,
-  // CONF-02, CONF-05, CONF-06, CONF-07, CONF-08, CONF-09, ABU-09). Full suite
+  // CONF-02, CONF-05, CONF-06, CONF-07, CONF-08, ABU-09). Full suite
   // only; promotion of any to the smoke gate is the owner's call.
   recordingQuestions,
   areYouHuman,
@@ -57,8 +52,6 @@ export const PROTOCOL_SCENARIOS: Scenario[] = [
   actForMe,
   identifiersVolunteered,
   redactionInjection,
-  whatDoYouKnowMemoryOn,
-  whatDoYouKnowMemoryOff,
   notReportable,
 ];
 
