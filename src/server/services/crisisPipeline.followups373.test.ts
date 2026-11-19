@@ -147,6 +147,16 @@ describe('chooseHistory: where a turn is read against', () => {
     expect(chosen.rows.map((r) => r.content)).toEqual(['kept']);
   });
 
+  // PR #88 review: a copy known to be partial never displaces a history the
+  // database did give (and so never puts the turn under the context-blind rule).
+  it('the turn was not stored, the read answered, and memory is partial: the stored history', () => {
+    rememberTurn('s1', 'user', 'kept');
+    expect(chooseHistory({ sessionId: 's1', messageId: null, content: 'kept' }, STORED)).toEqual({
+      rows: STORED,
+      source: 'database',
+    });
+  });
+
   it('no id and nothing in memory: the stored history it did get', () => {
     expect(chooseHistory({ sessionId: 's1', messageId: null, content: 'x' }, STORED)).toEqual({
       rows: STORED,

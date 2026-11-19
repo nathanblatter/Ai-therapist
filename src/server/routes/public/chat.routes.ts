@@ -577,7 +577,25 @@ export default function chatRoutes(): Router {
     };
 
     try {
-      const session = await getSessionAccessInfo(sessionId);
+      let session: Awaited<ReturnType<typeof getSessionAccessInfo>>;
+      try {
+        session = await getSessionAccessInfo(sessionId);
+      } catch (readErr) {
+        // The session could not be read, so the turn is neither checked nor
+        // stored. When this browser started the session itself (it is in the
+        // cookie's own list, no database needed), its owner's words are still
+        // screened (PR #88 review): a database that cannot answer must not
+        // silence crisis detection. Anyone else's turn is not, as before:
+        // ownership cannot be verified, and screening it would let a request
+        // page about a session that is not theirs.
+        if ((req.session?.ownedSessions ?? []).includes(sessionId)) {
+          rememberTurn(sessionId, 'user', message);
+          void screen(null).catch((err) =>
+            log.error({ err }, '[ChatCrisis] pipeline for a turn whose session could not be read failed'),
+          );
+        }
+        throw readErr;
+      }
       if (!session) {
         return res.status(404).json({ error: 'Session not found' });
       }

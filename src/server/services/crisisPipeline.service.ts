@@ -192,6 +192,12 @@ export function chooseHistory(
   const databaseUsable = stored !== null && turn.messageId != null;
   if (databaseUsable) return { rows: stored, source: 'database' };
   const memory = rememberedHistory(turn.sessionId);
+  // The database answered and only this turn could not be stored: a copy this
+  // process knows to be partial (a session it did not see start) is not
+  // preferred over the stored history, which is complete up to this turn
+  // (PR #88 review). Preferring it would score the turn on fewer turns and
+  // put it under the context-blind rule although the history was read.
+  if (stored !== null && memory && !memory.complete) return { rows: stored, source: 'database' };
   if (memory && memory.rows.length > 0) {
     return { rows: memory.rows, source: memory.complete ? 'memory' : 'memory_partial' };
   }
