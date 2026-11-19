@@ -68,7 +68,7 @@ import {
 } from '../utils/sessionAutoTerminate.js';
 import { SCALE_MIN_INTERVAL_DAYS } from '../utils/scales.js';
 import { DEFAULT_VENDOR_CEILING_MINUTES } from '../../shared/systemConfig.js';
-import { LIVE_RECOVERY_SPEAK_FIRST_NUDGE, liveOpeningInstruction } from '../../shared/openingPrompt.js';
+import { liveOpeningInstruction } from '../../shared/openingPrompt.js';
 import {
   CHAT_SAFETY_PROTOCOL_GUIDANCE,
   CRISIS_WIND_DOWN_GUIDANCE,
@@ -92,8 +92,15 @@ import {
   MINOR_CONFIRM_PROMPT,
   MINOR_ELIGIBILITY_MESSAGE,
   REALTIME_MINOR_GUIDANCE,
+  REALTIME_MINOR_SPEAK_NOW,
   buildMinorConfirmUserMessage,
 } from '../services/minorSafeguard.service.js';
+import {
+  RECOVERY_INTERIM_SPOKEN_LINE,
+  RECOVERY_INTERIM_SPOKEN_LINE_NO_VOICE,
+  buildRecoverySpeakFirstNudge,
+} from '../../shared/recoveryPrompt.js';
+import { LIVE_STEER_KEEP_SPEAKING, LIVE_STEER_RESUME_COMMENTARY } from '../services/sidebandManager.service.js';
 import { REDACTION_BATCH_INSTRUCTIONS, REDACTION_MODEL, REDACTION_PROMPT } from '../services/redaction.service.js';
 import {
   SESSION_NAME_MODEL,
@@ -587,8 +594,29 @@ function buildItems(): Item[] {
       'configured text line (988 when none is configured).',
   );
   add('pre', buildLiveRecoveryInstructions({ languageName: '<language name>', crisisLine: '<crisis line>' }));
-  add('note', 'As the session starts, the server sends this instruction so the model speaks first:');
-  add('pre', LIVE_RECOVERY_SPEAK_FIRST_NUDGE);
+  add(
+    'note',
+    'So that the model speaks first, this instruction is placed in the replacement session when it is created and ' +
+      'sent again by the server as the session starts; the server re-sends it if the model has not spoken after 4 ' +
+      'and 8 seconds. <phone> and <text line> are the configured crisis contact (988 and HOME to 741741 when none ' +
+      'is configured):',
+  );
+  add('pre', buildRecoverySpeakFirstNudge({ enabled: true, phone: '<phone>', text: '<text line>' }));
+  add('h3', 'Voice recovery — what the participant hears and sees while reconnecting');
+  add(
+    'p',
+    "While the replacement session connects, the participant's browser shows the crisis lines and a message " +
+      'beginning "The call was cut off — that wasn\'t your fault, and nothing you said was wrong." In English ' +
+      "sessions it also speaks this fixed line aloud through the browser's own speech synthesis (not the AI model), " +
+      'stopping as soon as the replacement session can carry audio:',
+  );
+  add('pre', RECOVERY_INTERIM_SPOKEN_LINE);
+  add(
+    'note',
+    'When no replacement voice session follows (the voice attempts are used up and the conversation continues in ' +
+      'typed chat), the same line is spoken without its last sentence:',
+  );
+  add('pre', RECOVERY_INTERIM_SPOKEN_LINE_NO_VOICE);
   add('h3', 'Typed-chat continuation — guidance attached for the chat model');
   add(
     'p',
@@ -620,6 +648,20 @@ function buildItems(): Item[] {
       'mention or acknowledge them. In typed chat, guidance is attached to the next model call. The trigger ' +
       'conditions are stated with each text.',
   );
+
+  add(
+    'note',
+    'Delivery in GPT-Live voice sessions. Guidance in B.1 to B.5 reaches the voice model as an instruction that can ' +
+      'interrupt what it is saying. So that the participant is not left in silence, this sentence is appended to ' +
+      'each such instruction when it is delivered:',
+  );
+  add('pre', LIVE_STEER_KEEP_SPEAKING);
+  add(
+    'note',
+    'If the model has still said nothing 3 seconds (and again 7 seconds) after such an instruction, while a reply ' +
+      'was owed and the participant is not speaking, the server sends this:',
+  );
+  add('pre', LIVE_STEER_RESUME_COMMENTARY);
 
   add('h2', 'B.1 Risk-adaptive de-escalation steering');
   add(
@@ -678,6 +720,12 @@ function buildItems(): Item[] {
   );
   add('h3', 'Voice sessions — guidance injected to the model');
   add('pre', REALTIME_MINOR_GUIDANCE);
+  add(
+    'note',
+    'In voice sessions this sentence is appended to the guidance when it is delivered, so that the ' +
+      'model says the goodbye straight away instead of waiting for the participant to speak again:',
+  );
+  add('pre', REALTIME_MINOR_SPEAK_NOW);
   add('h3', 'Typed-chat sessions — fixed message shown to the participant');
   add('pre', MINOR_ELIGIBILITY_MESSAGE);
 

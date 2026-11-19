@@ -121,6 +121,50 @@ describe('executeGraduatedResponse — session timer (ai-therapist-281)', () => 
   });
 });
 
+describe('executeGraduatedResponse — crisis resources go first (ai-therapist-293)', () => {
+  it('sends the participant the resource card before the first intervention log, the page and the steer', async () => {
+    const order: string[] = [];
+    const emit = vi.fn((event: string) => {
+      order.push(`emit:${event}`);
+    });
+    (global as unknown as { io: unknown }).io = {
+      to: vi.fn((room: string) => ({ emit: room.startsWith('session:') ? emit : vi.fn() })),
+    };
+    logInterventionActionMock.mockImplementation(async (_id: string, action: string) => {
+      order.push(`log:${action}`);
+    });
+    sendCrisisAlertMock.mockImplementation(async () => {
+      order.push('page');
+    });
+    const { clearCrisisResourceState } = await import('./crisisResources.js');
+    clearCrisisResourceState();
+
+    await executeGraduatedResponse('sess-card', 'high', 92);
+    await waitForCall(sendCrisisAlertMock, 1, 'sendCrisisAlert');
+
+    expect(order[0]).toBe('emit:session:crisis-emergency');
+    expect(order).toContain('log:high_risk_emergency');
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith('session:crisis-emergency', {
+      sessionId: 'sess-card',
+      severity: 'high',
+      riskScore: 92,
+      reason: 'high_risk',
+    });
+  });
+
+  it('the card still goes out when the first intervention log throws', async () => {
+    const emit = vi.fn();
+    (global as unknown as { io: unknown }).io = { to: vi.fn(() => ({ emit })) };
+    logInterventionActionMock.mockRejectedValue(new Error('db down'));
+    const { clearCrisisResourceState } = await import('./crisisResources.js');
+    clearCrisisResourceState();
+
+    await expect(executeGraduatedResponse('sess-card-2', 'high', 92)).resolves.toBeUndefined();
+    expect(emit).toHaveBeenCalledWith('session:crisis-emergency', expect.objectContaining({ severity: 'high' }));
+  });
+});
+
 describe('executeGraduatedResponse — high-risk paging', () => {
   it('pages the on-call for a real session and logs crisis_sms_alert', async () => {
     await executeGraduatedResponse('sess-1', 'high', 90);

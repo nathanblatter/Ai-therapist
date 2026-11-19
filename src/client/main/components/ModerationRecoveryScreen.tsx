@@ -74,8 +74,12 @@ export default function ModerationRecoveryScreen({ stage, crisisContact, onRetry
             </h2>
           </div>
 
+          {/* "The call was cut off", not "the connection dropped": it was ended
+              by an automated system on the voice service, and the study answers
+              "no" to deception (Q-SYS2). Same wording the browser speaks aloud
+              (shared/recoveryPrompt.ts). */}
           <p className="text-sm text-gray-700 mb-2">
-            The connection dropped — that wasn&apos;t your fault, and nothing you said was wrong.
+            The call was cut off — that wasn&apos;t your fault, and nothing you said was wrong.
           </p>
 
           {stage === 'voice' && (

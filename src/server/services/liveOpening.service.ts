@@ -24,6 +24,14 @@ interface PendingOpening {
   text: string;
   /** Written to the messages table on delivery, as the browser used to log it. */
   logMessage: string;
+  /**
+   * How the text is sent. `commentary` is the documented way to have GPT-Live
+   * open a conversation and is what a crisis recovery session uses: with an
+   * instructions append 4 of 17 measured recovery starts stayed silent for
+   * 11 s or more (ai-therapist-293). The ordinary opening still goes as an
+   * instructions append, the documented way to ask for exact wording.
+   */
+  via?: 'instructions' | 'commentary';
   registeredAt: number;
   delivered: boolean;
 }
@@ -40,7 +48,10 @@ function purgeExpired(now: number): void {
 }
 
 /** Record the opening for a session that has just been created. */
-export function registerLiveOpening(sessionId: string, opening: { text: string; logMessage: string }): void {
+export function registerLiveOpening(
+  sessionId: string,
+  opening: { text: string; logMessage: string; via?: 'instructions' | 'commentary' },
+): void {
   const now = Date.now();
   purgeExpired(now);
   openings.set(sessionId, { ...opening, registeredAt: now, delivered: false });
@@ -60,7 +71,7 @@ export type LiveOpeningResult =
  */
 export async function deliverLiveOpening(
   sessionId: string,
-  inject: (text: string) => Promise<boolean>,
+  inject: (text: string, via: 'instructions' | 'commentary') => Promise<boolean>,
 ): Promise<LiveOpeningResult> {
   purgeExpired(Date.now());
   const entry = openings.get(sessionId);
@@ -71,7 +82,7 @@ export async function deliverLiveOpening(
   entry.delivered = true;
   let ok = false;
   try {
-    ok = await inject(entry.text);
+    ok = await inject(entry.text, entry.via ?? 'instructions');
   } catch {
     ok = false;
   }
@@ -88,8 +99,10 @@ export async function deliverLiveOpening(
  */
 export async function deliverLiveOpeningViaSideband(sessionId: string): Promise<LiveOpeningResult> {
   const { sidebandManager } = await import('./sidebandManager.service.js');
-  const result = await deliverLiveOpening(sessionId, (text) =>
-    sidebandManager.tryInject(sessionId, 'system', text, true),
+  const result = await deliverLiveOpening(sessionId, (text, via) =>
+    via === 'commentary'
+      ? sidebandManager.tryCommentary(sessionId, text)
+      : sidebandManager.tryInject(sessionId, 'system', text, true),
   );
   if (result.delivered && !result.already && result.logMessage) {
     // Server-authored text with no participant content, so the redacted column

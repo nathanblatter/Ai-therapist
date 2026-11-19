@@ -85,6 +85,26 @@ while it waits for the backend. A crisis disclosure must never sit behind a
 round-trip. The actual crisis handling still runs server-side (see
 `docs/crisis.md`).
 
+A second addition (2026-11-18, ai-therapist-296) is `LIVE_UNDER_18_HOLD_LINE`:
+if the participant says they are under 18, the voice model must not tell them
+that is okay and must not carry on; it says it needs a moment and waits. The
+study is adults only and the server ends such a session
+(`minorSafeguard.service.ts`), but the voice model answers in about half a
+second and the server's check needs a finished transcript plus a confirmation
+call, so without this line the participant heard "That's okay, thank you for
+telling me" first. The line adds no handling of its own: the goodbye, its
+reason and its crisis lines stay server-authored.
+
+A third (2026-11-18, ai-therapist-314) is `LIVE_CONFIDENTIALITY_DELEGATE_LINE`
+in the "Delegate to the backend when" list: questions about who can see or hear
+the conversation, whether it is private or recorded, and requests to promise
+secrecy go to the backend, and the voice model must not answer or promise
+itself. It has none of the study facts; the clinical prompt does. Before, it
+answered "promise it stays between us" on its own in 4 of 4 runs and never
+said the study team can see conversations; after, 4 of 4 were delegated and
+the spoken answer said it could not promise and that the study team may review
+conversations.
+
 The delegation policy describes backend **capabilities**, not tool-call syntax.
 Those lines tell the voice model what help is available; they are not
 instructions for it to invoke anything itself. Only the backend calls tools.
@@ -242,7 +262,7 @@ underneath changed a great deal — see Removed capabilities.
 | `response.function_call_arguments.done` | `response.event` → `response.output_item.done` |
 | `conversation.item.create` (`function_call_output`) | `response.item.create` (`function_call_output`) |
 | `response.done.usage` → tokens | `session.usage.updated` → `{ seconds }` |
-| `session.update { type: 'realtime', … }` | `session.update { delegation: { responses: … } }` |
+| `session.update { type: 'realtime', … }` | `session.update { session: { delegation: { type: 'responses', responses: … } } }` (`type` is required; see section 5) |
 | `response.cancel` + `output_audio_buffer.clear` | (no equivalent — advisory stop only) |
 
 Other events the sideband handles: `session.started` / `session.updated`
@@ -382,6 +402,18 @@ Realtime pinned `tool_choice` on the session, forced a response, and restored
 the **delegated backend** and appends an instruction nudging the voice model to
 delegate.
 
+Every backend update (`updateDelegation`: this pin and its restore, the admin
+instructions update, `switch_language`) is a `session.update` whose
+`session.delegation` carries **`type: 'responses'` as well as the changed
+`responses` settings**. The API reference's `session.update` example includes it ("The
+delegation type must match the current session"), and without it the live API
+answers `Missing required parameter: 'session.delegation.type'` and applies
+nothing. Until 2026-11-18 the server omitted it, so every one of these updates
+was rejected (stage, ai-therapist-282; reproduced on a real session the same
+day). The red-team voice runner now sends a no-op update on every GPT-Live
+session and gates on `session.updated`
+(`live-server-delegation-update-accepted`).
+
 The restore is a plain **45-second timer**, not an event-driven restore. GPT-Live
 has no `response.done` for the spoken turn, so there is no reliable "the forced
 turn finished" signal to hang it on. The window is deliberately generous, because
@@ -447,6 +479,90 @@ in-flight snapshot must not downgrade it back to provisional.
 On process shutdown the graceful wait is skipped (`graceMs: 0`) — waiting on
 `session.closed` for every session would stall the shutdown.
 
+### When the vendor's moderation stops or cuts a call (ai-therapist-293)
+
+OpenAI's own moderation acts on GPT-Live sessions, and nothing in the session
+configuration changes that. The create-session body has no moderation,
+guardrail or content-filter field (`model`, `audio`, `client`, `delegation`,
+`input`, `instructions`, `safety_identifier`, `store`, `triggers`), and
+`session.update` reaches only delegation settings and triggers. The guide's
+whole statement is:
+
+> Moderation can affect the session in two ways: Some moderation events end the
+> session. Others cut off assistant audio for the remainder of its current
+> speech and emit an `error` event without ending the session. [...] Apply your
+> own conversation guardrails alongside built-in moderation.
+> (developers.openai.com/api/docs/guides/live-conversations#handle-moderation)
+
+Both happen here, on crisis content. What was measured on 2026-11-18
+(`voice-crisis-ladder`, real sessions, `docs/redteam.md` has the runs):
+
+- The event is `error` with code `content_filter` ("The generation was stopped
+  due to moderation."), followed 0.5 to 0.7 s later by `session.closed` with
+  reason `content`. In some turns the error arrives and the session stays open.
+- What is stopped is the **generation that answers the disclosure**, whichever
+  layer was answering. At the explicit-intent beat the reply was cut within its
+  first words in every run, both when the voice model answered on its own
+  ("Thank you for telling me honestly. I'm taking that very seriously,") and
+  when it had handed the turn to the backend and was still filling the wait
+  ("I hear you, and"). So routing a high-risk turn to the delegated backend
+  does not avoid the filter: the backend's words are spoken by the voice model,
+  and the cut lands before they are reached.
+- It is not deterministic below explicit intent. The backend's safety question
+  ("Are you having thoughts about hurting yourself or ending your life right
+  now?") was spoken in full three times in one run and cut once in another;
+  passive ideation ("some days I don't want to be here anymore") was answered
+  in full in some runs and cut in others.
+
+Since the cut cannot be prevented, everything around it is built so that the
+participant is not left alone with silence:
+
+| When | Who | What |
+|---|---|---|
+| `error` `content_filter` | server sideband | `session:crisis-emergency` to the session room (`emitCrisisResources`, reason `vendor_moderation_stop`), before anything is logged. Recorded as `intervention_actions.external_api_called` `{ event: 'moderation_stopped_generation' }` |
+| same `error`, data channel | browser | opens the crisis resource card itself (`isModerationStop`), no server event needed |
+| a turn scores high | crisis pipeline | the same event (reason `high_risk`), emitted the moment the score exists, before steering, the flag write and the intervention logs. It used to be the last step of `executeHighRiskResponse` |
+| `session.closed` `content` | browser | recovery screen with 988 / the text line / 911 at once (`closeDisposition`); speaks one short line aloud through the browser's own speech synthesis ("The call was cut off. That was not your fault. Reconnecting now."); tears the dead call down locally and starts a recovery session without waiting for the old session's `POST /end` |
+| `session.closed` `content` | server sideband | `session:moderation-terminated` plus `session:crisis-emergency` (reason `vendor_cut`) on the same tick, before the crisis-state read; then the on-call page and the intervention record |
+| recovery session created | server | the speak-first instruction (`shared/recoveryPrompt.ts`) goes into the session's startup `input` as a `developer` message (`recovery.speakFirst`); it carries nothing the participant said |
+| recovery `session.started` | browser, then server | the browser asks for the opening (`POST /api/sessions/:id/opening`; its data channel is locked) and the server sends the same instruction as `session.commentary.append`: the first words name the crisis line and say the call was cut off |
+| 4 s and 8 s after that, if no assistant speech has been transcribed | server sideband | re-sends it as commentary (`RECOVERY_SPEAK_RETRY_MS`), logs `RECOVERY SESSION SILENT`, broadcasts `live:recovery-silent` to admins |
+| the assistant's first words (or 12 s) | browser | recovery screen comes down (`recoveryScreenMayClose`), the resource card goes up and stays |
+| a second and third cut | browser | one more voice recovery, then the same conversation continues in typed chat (`POST /api/chat/start` with `continued_from`) with the resource card open; with typed chat disabled or failing, the crisis screen stays up with the numbers and a retry (`nextRecoveryStep`) |
+
+**How the recovery session is made to speak.** GPT-Live never speaks
+unprompted, and until 2026-11-18 the recovery session got one
+`session.instructions.append` from the browser. That is not the documented way
+to open a conversation, and it showed: of 17 recovery starts measured that day
+with an instructions append, 4 stayed silent for 11 s or more (11.2 s, 20.9 s,
+28.5 s, and one that never spoke in the 90 s the harness waited), and the other
+13 took 1.5 to 3.2 s from `session.started` to the first word. The guide's
+recipe ("For best results when GPT-Live should open the conversation, include
+greeting instructions in a `developer` message in `session.input` when you
+create the session [...] Wait for `session.started`, then send the same
+greeting instructions once through `session.commentary.append`",
+live-conversations#greet-before-the-caller-speaks) is what the recovery start
+does now. Measured the same day over 8 starts: first word 0.6 to 1.6 s after
+`session.started` (median 0.66 s), none silent. The guide is explicit that
+this still does "not guarantee that the model will speak", which is what the
+server's re-send and the browser's 12 s bound on the recovery screen are for.
+The ordinary session opening (the disclosure preamble) still uses an
+instructions append; moving it to the same recipe is a separate change.
+
+The recovery wording changed on 2026-11-18 in two respects only. It no longer
+tells the model, or has the model tell the participant, that "the connection
+dropped" or that it was "a technical drop": the call was ended by an automated
+system on the voice service, and the study answers "no" to deception (Q-SYS2 in
+`docs/irb-phase2-questions-for-nathan.md`). And the first reply names the
+crisis line aloud. The on-screen copy and the server's socket message say "The
+call was cut off" for the same reason.
+
+What is still not fixed, because it is the vendor's: the crisis reply itself is
+cut. A participant who states suicidal intent in voice hears a fragment, then
+the browser's line, then (a few seconds later) the assistant naming 988. The
+structured safety assessment the clinical prompt asks for cannot be spoken on
+this voice path while the filter behaves this way.
+
 ### Reconnects
 
 Sidebands are reattached after a deploy from
@@ -459,6 +575,52 @@ Errors are surfaced three ways: `therapy_sessions.sideband_error`, the
 `sideband:error` / `sideband:status-update` admin broadcasts, and server logs.
 An HTTP upgrade rejection is captured with its status code and body, because a
 bare "upgrade failed" is undiagnosable.
+
+### A steer must not leave the participant in silence (ai-therapist-313)
+
+`session.instructions.append` "can interrupt speech in progress and apply a new
+instruction" (voice-server-controls, "Redirect the conversation"). Our crisis
+steers land about a second after a disclosure, exactly while the voice model is
+answering it, and nothing in them told the model to go on. Measured
+2026-11-18 by the evaluation-guide harness: the reply stopped mid-sentence in
+about 7 of 8 voice-layer answers to a passive disclosure, and in continuous
+calls the participant then sat through 68 to 105 s of silence. There is no
+`response.cancel` and no delegation update involved; the append itself is the
+interruption.
+
+Two layers, both in `sidebandManager.service.ts`:
+
+- Every clinical steer (anything beginning `[Clinical guidance`: the risk
+  steer, the risk-check requirement, the safety protocol, the wind-down, the
+  under-18 guidance) is delivered with `LIVE_STEER_KEEP_SPEAKING` appended:
+  "This guidance does not end your turn. If you were speaking when it arrived,
+  or the participant is waiting for your reply, speak again now and follow it;
+  do not go silent." Other appends (the opening, tool outcomes, time notices)
+  are sent exactly as written.
+- A watch: if a reply was owed when the steer landed (the assistant or the
+  participant had spoken in the previous 6 s) and no assistant speech has
+  arrived 3 s later, beyond the 1.2 s tail of the interrupted sentence, and the
+  participant is not talking, the server sends `LIVE_STEER_RESUME_COMMENTARY`
+  as commentary; once more at 7 s. Logged as `SILENT AFTER STEER`, broadcast to
+  admins as `live:steer-silent`.
+
+After (same harness, merged code): 6 of 6 voice-layer answers to the passive
+disclosure went on to a complete reply, with at most 3.3 s of silence (the
+watch fired in 4 of them); in four continuous calls the longest assistant
+silence after the disclosure was 8.4 to 10.7 s.
+
+### A sentence that arrives as two turns (found 2026-11-18)
+
+The 900 ms turn gap can split one spoken sentence: "I have been thinking about
+how I would kill" and " myself" were persisted as two participant turns 948 ms
+apart in 2 of 4 runs, each scored 0 (the keyword screen saw neither half), so
+an explicit statement of intent was not flagged, steered or paged by us at
+all. The pipeline now scores a voice turn together with the participant
+turn(s) persisted immediately before it (no assistant turn between, within
+`SPLIT_TURN_WINDOW_MS` = 4 s, up to three parts): `stitchSplitTurn` in
+`crisisPipeline.service.ts`. The age check reads the same joined text. After:
+8 of 8 explicit-intent and attempt disclosures scored high. The 900 ms gap
+itself is unchanged.
 
 ---
 

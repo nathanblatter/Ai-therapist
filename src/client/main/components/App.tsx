@@ -51,12 +51,17 @@ import {
 import type { ChatMessage } from './ChatLog';
 // Canonical crisis-contact blob shape is shared with the server (src/shared).
 import type { CrisisContact } from '../../../shared/systemConfig';
+import { LIVE_RECOVERY_NUDGE_LOG, liveOpeningInstruction, openingPreamble } from '../../../shared/openingPrompt';
+import { buildRecoverySpeakFirstNudge, recoveryInterimSpokenLine } from '../../../shared/recoveryPrompt';
 import {
-  LIVE_RECOVERY_NUDGE_LOG,
-  LIVE_RECOVERY_SPEAK_FIRST_NUDGE,
-  liveOpeningInstruction,
-  openingPreamble,
-} from '../../../shared/openingPrompt';
+  closeDisposition,
+  crisisEmergencyMarksCrisis,
+  eligibilityGoodbyeFinished,
+  isModerationStop,
+  nextRecoveryStep,
+  recoveryScreenMayClose,
+  startInterimSpeech,
+} from '../lib/crisisRecovery';
 
 interface Features {
   output_modalities: string[];
@@ -352,6 +357,20 @@ export default function App() {
   // Latest-ref (ai-therapist-113 family): the data-channel handler is attached
   // once at session start, so it must not close over that render's handler.
   const moderationHandlerRef = useRef<(terminatedSessionId: string | null) => Promise<void>>(async () => {});
+  // Stops the browser-spoken interim line ("The call was cut off...") that
+  // fills the silence while a recovery session connects (ai-therapist-293).
+  // Invoked the moment the new call can carry audio, so the browser's voice
+  // never talks over the returning assistant or into the new microphone.
+  const stopInterimSpeechRef = useRef<() => void>(() => {});
+  // The terminated session's flushLogs + POST /end, when a cut session's
+  // teardown let them finish in the background so the recovery start did not
+  // have to wait behind two round trips. The typed-chat fallback awaits it:
+  // /api/chat/start refuses while the old session still looks active.
+  const pendingVoiceEndRef = useRef<Promise<void> | null>(null);
+  // Arrival time (Date.now) of the most recent assistant transcript fragment
+  // on the live data channel. Read by the age-eligibility end to tell when
+  // the goodbye has finished (ai-therapist-296).
+  const lastAssistantSpeechAtRef = useRef<number | null>(null);
 
   // Start-flow feedback (ai-therapist-117): true from the moment the
   // participant confirms the check-in until the data channel opens (realtime)
@@ -964,6 +983,11 @@ export default function App() {
         },
       ]);
 
+      // The crisis lines stay on screen once the recovery screen comes down
+      // (ai-therapist-293): this conversation was cut during, or as, a crisis,
+      // and the card is the one thing here that does not depend on any model.
+      setToolUI({ kind: 'resource', resourceType: 'all' });
+
       moderationTakeoverRef.current = false;
       setModerationRecovery(null);
       console.log(`[Live] Voice session continued as chat session ${newSessionId}`);
@@ -1019,9 +1043,39 @@ export default function App() {
         throw new Error('Recovery voice session never reported session.started');
       }
 
+      // The call exists; the assistant is not back until it speaks. Keep the
+      // recovery screen (and its crisis lines) up until its first words arrive
+      // or the wait runs out (lib/crisisRecovery.ts recoveryScreenMayClose). A
+      // recovery session can stay silent after its speak-first instruction;
+      // the server re-sends it at 4 s and 8 s.
+      const recoverySessionId = liveSessionIdRef.current;
+      const sessionStartedAt = Date.now();
+      while (
+        liveSessionIdRef.current === recoverySessionId &&
+        liveStartedRef.current &&
+        !recoveryScreenMayClose({
+          now: Date.now(),
+          sessionStartedAt,
+          lastAssistantSpeechAt: lastAssistantSpeechAtRef.current,
+        })
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      if (liveSessionIdRef.current !== recoverySessionId || !liveStartedRef.current) {
+        // This recovery session was itself cut or ended while we waited; the
+        // flow that noticed (handleModerationTermination, on the new close)
+        // owns the screen now. Leave everything as it is.
+        return true;
+      }
+
       // Live again: drop the interstitial and hand the screen back to the normal
-      // voice UI. The agent re-greets on its own (see the speak-first nudge in
-      // the `session.started` branch), so there is no silence to explain.
+      // voice UI.
+      //
+      // The resource card goes up as the recovery screen comes down
+      // (ai-therapist-293): the terminated session's teardown cleared any card
+      // the server had opened, and the numbers must not leave the screen just
+      // because the call is back.
+      setToolUI({ kind: 'resource', resourceType: 'all' });
       moderationTakeoverRef.current = false;
       setModerationRecovery(null);
       console.log(`[Live] Voice recovery attempt ${attempt} is live as session ${String(liveSessionIdRef.current)}.`);
@@ -1064,6 +1118,18 @@ export default function App() {
     if (voiceTeardownInFlightRef.current) {
       console.warn('[Live] Voice teardown did not finish in time; starting recovery anyway.');
     }
+  }
+
+  /**
+   * Wait for a cut session's background flushLogs + POST /end (see stopSession)
+   * to land. Only the typed-chat fallback needs this: /api/chat/start refuses
+   * while the server still sees the old voice session as active, whereas a
+   * recovery voice start is exempt from that check server-side.
+   */
+  async function waitForPendingVoiceEnd(timeoutMs = 12_000): Promise<void> {
+    const pending = pendingVoiceEndRef.current;
+    if (!pending) return;
+    await Promise.race([pending, new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))]);
   }
 
   /**
@@ -1117,6 +1183,39 @@ export default function App() {
     setPostSessionData(null);
     setModerationRecovery('voice');
 
+    // Sound second, in the same tick (ai-therapist-293). A voice participant
+    // may not be looking at the screen, and the assistant needs a moment to
+    // come back (a couple of seconds on a good connection, measured headless;
+    // longer on a slow one), so the browser says one short, true line itself.
+    // It is stopped as soon as the recovery call can carry audio
+    // (startRealtimeSession), or when a voice start that was promised fails.
+    //
+    // Where next (lib/crisisRecovery.ts nextRecoveryStep): voice first, and
+    // again if the filter takes the recovery session too; then typed chat; and
+    // only when there is no typed chat, the crisis screen, which stays up.
+    // Decided before the line is spoken: "Reconnecting now." is said only when
+    // a voice call is about to come back.
+    const planNext = () =>
+      nextRecoveryStep({
+        voiceEnabled: features.voice_enabled !== false,
+        chatEnabled: features.chat_enabled !== false,
+        voiceAttemptsSpent: moderationVoiceAttemptsRef.current,
+        maxVoiceAttempts: MAX_VOICE_RECOVERY_ATTEMPTS,
+      });
+    const voiceReturning = planNext() === 'voice';
+    stopInterimSpeechRef.current();
+    stopInterimSpeechRef.current = startInterimSpeech(
+      {
+        synth: typeof window !== 'undefined' && 'speechSynthesis' in window ? window.speechSynthesis : null,
+        makeUtterance:
+          typeof window !== 'undefined' && 'SpeechSynthesisUtterance' in window
+            ? (text) => new SpeechSynthesisUtterance(text)
+            : null,
+      },
+      recoveryInterimSpokenLine(voiceReturning),
+      sessionSettings.language,
+    );
+
     if (isTearingDownRef.current) {
       // A stopSession() is already in flight (it asked for this close, or the
       // server ended the session first). Running teardown twice would fight it;
@@ -1132,21 +1231,33 @@ export default function App() {
       }
     }
 
-    // Voice first, and again if the filter takes the recovery session too.
-    if (features.voice_enabled !== false && moderationVoiceAttemptsRef.current < MAX_VOICE_RECOVERY_ATTEMPTS) {
+    if (voiceReturning) {
       if (await startRecoveryVoiceSession()) return;
+      // The voice start failed: the browser's line promised a call that is not
+      // coming, so it stops here; the screen and, in a moment, the chat carry
+      // it. (When no voice was planned, the shorter line made no such promise
+      // and is left to finish: there is no call for it to talk over.)
+      stopInterimSpeechRef.current();
     }
 
-    // Voice is spent. A failed voice attempt may have tripped the start path's
-    // own failsafe teardown, which is still landing its POST /end — wait it out,
-    // or /api/chat/start would reject the continuation as "active session
+    // A failed voice attempt may have tripped the start path's own failsafe
+    // teardown, which is still landing its POST /end, and the terminated
+    // session's own end may still be finishing in the background. Wait both
+    // out, or /api/chat/start would reject the continuation as "active session
     // already exists" and strand the participant on the failure screen.
     await waitForVoiceTeardown();
+    await waitForPendingVoiceEnd();
 
     // Text is the last resort — and if this deployment has no text modality
     // there is nowhere left to go, so stay on the screen with the resources
     // rather than dumping them onto the end screen.
-    if (features.chat_enabled === false) {
+    const fallback = nextRecoveryStep({
+      voiceEnabled: false, // a voice attempt that failed to start is not retried
+      chatEnabled: features.chat_enabled !== false,
+      voiceAttemptsSpent: moderationVoiceAttemptsRef.current,
+      maxVoiceAttempts: MAX_VOICE_RECOVERY_ATTEMPTS,
+    });
+    if (fallback === 'unavailable') {
       setModerationRecovery('unavailable');
       return;
     }
@@ -1215,8 +1326,10 @@ export default function App() {
     moderationHandledRef.current = false;
     // A recovery session is still the same crisis; a new session starts clear.
     crisisActiveRef.current = recovery;
+    lastAssistantSpeechAtRef.current = null;
     if (!recovery) {
       // A genuinely new conversation: the crisis that spent these is over.
+      stopInterimSpeechRef.current();
       moderationTakeoverRef.current = false;
       moderationVoiceSessionIdRef.current = null;
       moderationVoiceAttemptsRef.current = 0;
@@ -1360,6 +1473,7 @@ export default function App() {
         // Assistant speech. Its arrival also means the delegated work (if any)
         // has produced something to say.
         case 'session.output_transcript.delta':
+          lastAssistantSpeechAtRef.current = Date.now();
           markBackendThinking(false);
           appendTranscriptDelta(
             'assistant',
@@ -1415,7 +1529,10 @@ export default function App() {
           // recovery (ai-therapist-281): the server lifted our own timer so
           // this is the only clock left, and the model was told to expect a
           // brief reset. The server's socket backstop covers a flag we missed.
-          if (event.reason === 'content' || (event.reason === 'expired' && crisisActiveRef.current)) {
+          //
+          // Decided here, from the close itself (lib/crisisRecovery.ts): the
+          // crisis screen does not wait for, or depend on, any server event.
+          if (closeDisposition(event.reason, crisisActiveRef.current) === 'recover') {
             void moderationHandlerRef.current(liveSessionIdRef.current);
           } else if (!waiter && !isTearingDownRef.current) {
             // The session ended on its own (duration limit, safety filter,
@@ -1433,6 +1550,12 @@ export default function App() {
         case 'error': {
           const err = event.error as { code?: string; message?: string; client_event_id?: string } | undefined;
           console.error('[Live] API error:', err);
+          // Moderation stopped the assistant mid-reply (ai-therapist-293). In
+          // the measured runs this arrived 0.5 to 0.7 s before the close, and
+          // it can also arrive with no close at all; either way the
+          // participant just heard a reply stop partway, so the crisis lines
+          // go on screen now, without waiting for the server.
+          if (isModerationStop(err)) setToolUI({ kind: 'resource', resourceType: 'all' });
           reportClientEvent(
             'data_channel_error',
             {
@@ -1693,6 +1816,10 @@ export default function App() {
 
     // Apply the answer. The HTTP request already started the session — there is
     // deliberately no `session.start` on the data channel.
+    // The browser's own interim line stops BEFORE the answer is applied, i.e.
+    // before this call can carry audio in either direction: it must not be
+    // picked up by the new session's microphone or talk over the assistant.
+    if (recovery) stopInterimSpeechRef.current();
     await pc.setRemoteDescription({ type: 'answer', sdp: sdpAnswer });
 
     // If the answer applies but `session.started` never lands, the participant
@@ -2122,15 +2249,44 @@ export default function App() {
     // end-session flow (same family as the remote-termination notice above).
     socket.on('session:eligibility-end', () => {
       toast.warning('This study is only open to adults 18 and older, so this session is ending. Take good care.');
-      // Latest-ref for the same stale-closure reason as session:status above.
-      void stopSessionRef.current();
+      if (voiceBackendRef.current !== 'live') {
+        // Latest-ref for the same stale-closure reason as session:status above.
+        void stopSessionRef.current();
+        return;
+      }
+      // GPT-Live (ai-therapist-296): the goodbye is spoken by the voice model
+      // AFTER this event (the server sends the instruction and this signal
+      // together), so ending here hung up before its first word and the
+      // participant never heard the crisis lines in it. Hold the call open
+      // until the goodbye has been said (lib/crisisRecovery.ts), bounded at
+      // 30 s; the server force-ends at 60 s whatever the browser does.
+      const signalledAt = Date.now();
+      const endingSessionId = liveSessionIdRef.current;
+      const waitForGoodbye = setInterval(() => {
+        if (liveSessionIdRef.current !== endingSessionId || isTearingDownRef.current || !liveStartedRef.current) {
+          clearInterval(waitForGoodbye); // already ending, ended, or a different session
+          return;
+        }
+        if (
+          eligibilityGoodbyeFinished({
+            now: Date.now(),
+            signalledAt,
+            lastAssistantSpeechAt: lastAssistantSpeechAtRef.current,
+          })
+        ) {
+          clearInterval(waitForGoodbye);
+          void stopSessionRef.current();
+        }
+      }, 250);
     });
 
     // Deterministic crisis-resource surfacing: a high-severity flag must not
     // depend on the model choosing to call show_resource_card — the server's
-    // crisis-emergency event opens the resource card directly.
-    socket.on('session:crisis-emergency', () => {
-      crisisActiveRef.current = true;
+    // crisis-emergency event opens the resource card directly. The server also
+    // sends it when the vendor stops or cuts a reply; only our own high flag
+    // marks the session as in crisis (lib/crisisRecovery.ts).
+    socket.on('session:crisis-emergency', (data: { severity?: unknown } | undefined) => {
+      if (crisisEmergencyMarksCrisis(data)) crisisActiveRef.current = true;
       setToolUI({ kind: 'resource', resourceType: 'all' });
     });
 
@@ -2307,7 +2463,11 @@ export default function App() {
 
   async function stopSession() {
     setActiveExercise(null);
-    setToolUI(null);
+    // A vendor cut (ai-therapist-293) keeps the crisis resource card: this
+    // teardown runs underneath the recovery screen, and clearing the card here
+    // is how a card the server had just opened used to vanish with the call.
+    // Any other overlay still closes.
+    setToolUI(moderationTakeoverRef.current ? { kind: 'resource', resourceType: 'all' } : null);
     setMicLocked(false);
     setIsConnecting(false);
     markBackendThinking(false);
@@ -2430,18 +2590,39 @@ export default function App() {
 
     logConversation({ sessionId: sessionId, role: 'system', type: 'session_end', message: 'Session ended' });
     stopPeriodicFlush();
-    await flushLogs();
 
-    // Call the API to mark the session as ended and trigger session name generation
-    if (sessionId) {
+    // Flush the logs, then mark the session ended (which also triggers session
+    // name generation).
+    const endedSessionId = sessionId;
+    const finishOnServer = async (): Promise<void> => {
+      await flushLogs();
+      if (!endedSessionId) return;
       try {
-        await fetch(`/api/sessions/${sessionId}/end`, {
+        await fetch(`/api/sessions/${endedSessionId}/end`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
         });
       } catch (error) {
         console.error('Failed to end session:', error);
       }
+    };
+    if (moderationTakeoverRef.current) {
+      // The vendor cut this call and the participant is waiting in silence for
+      // the assistant to come back (ai-therapist-293). These two round trips
+      // only tidy up a session that is already dead, so they finish in the
+      // background and the local teardown below runs now. A recovery voice
+      // start does not need them (the server exempts it from the
+      // one-active-session check); the typed-chat fallback does, and awaits
+      // this promise (waitForPendingVoiceEnd).
+      const pending = finishOnServer().catch((error) => {
+        console.error('[Live] Background end of the terminated session failed:', error);
+      });
+      pendingVoiceEndRef.current = pending;
+      void pending.finally(() => {
+        if (pendingVoiceEndRef.current === pending) pendingVoiceEndRef.current = null;
+      });
+    } else {
+      await finishOnServer();
     }
 
     // Disconnect Socket.io
@@ -2818,7 +2999,10 @@ export default function App() {
       // Timing only, none of the previous conversation: restating the
       // disclosure that tripped the filter is the most likely way to trip it
       // again.
-      sendInvisiblePrompt(LIVE_RECOVERY_SPEAK_FIRST_NUDGE, LIVE_RECOVERY_NUDGE_LOG);
+      // Same wording the server delivers (shared/recoveryPrompt.ts): it names
+      // the crisis line and says the call was cut off, never that the
+      // connection dropped.
+      sendInvisiblePrompt(buildRecoverySpeakFirstNudge(crisisContact), LIVE_RECOVERY_NUDGE_LOG);
       return;
     }
     const opening = liveOpeningInstruction(sessionSettings.language, crisisContact, leadConversationRef.current);

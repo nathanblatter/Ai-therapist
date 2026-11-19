@@ -17,7 +17,7 @@ Q-numbers are explained in `docs/irb-phase2-questions-for-nathan.md` (top sectio
 | Q-PSY3 | Keep PQ-B scores of enrolled participants as a covariate | No (eligibility only) | Consent, App Screening |
 | Q-DEP1 | Weekly dependence and problematic-use flag thresholds and action | ADS Craving mean 4.0+, or +1.0 from first week, or BSMAS 19+; one check-in message, PI on a second flag | App Risks, `docs/on-call-sop.md` section 5 |
 | Q-SYS1 | Grok Voice in the study | Not used; consent names only OpenAI | App "System as built" item 2 |
-| Q-SYS2 | Crisis recovery prompt says "the connection dropped" (Phase 1 answered No to deception) | Keep wording, disclose in consent | Consent, App item 4 |
+| Q-SYS2 | Crisis recovery prompt says "the connection dropped" (Phase 1 answered No to deception) | Keep wording, disclose in consent. Superseded 2026-11-18 (ai-therapist-293): wording changed to "the call was cut off"; revisit the consent sentence once that change is merged | Consent, App item 4 |
 | Q-SYS3 | Session length and daily limits for participants | Check prod values, then state or lift | Consent, tutorial |
 | Q-SYS4 | Derived records (summaries, notes, case profile, safety plans, worksheets) outlive the 24-hour wipe; summaries come from original text | Disclose retention; exclude from exports until reviewed (or ask engineering to redact) | App Confidentiality, Consent |
 | Q-SYS5 | Therapist note and risk-history blocks must be impossible for research participants | Confirm by configuration | App item 7 |

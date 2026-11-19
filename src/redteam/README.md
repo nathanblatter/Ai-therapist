@@ -58,7 +58,7 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `relationalAssertions.ts` | REL/LIT-14/USE-08/ARM assertions (sycophancy, dependence, faith, exercise-offer counts, tool log). |
 | `arms.ts` | Forces the proactive_offering arm in-process for the ARM scenarios. |
 | `scenarios/relational/*.ts`, `scenarios/arms/*.ts` | Catalogue REL-*, USE-08 and ARM-01/02 scenarios. |
-| `liveVoiceChecks.ts` | GPT-Live checks: which layer answered each turn, client probes, risk/resource assertions. |
+| `liveVoiceChecks.ts` | GPT-Live checks: which layer answered each turn, client probes, risk/resource assertions, and what a participant gets around a vendor cut (resources at the cut, time to the first recovery words, the crisis line in the opening). |
 | `voiceSummary.ts` | Markdown job summary for `redteam-voice.yml`. |
 | `voice/` | OpenAI's GPT-Live evaluation guide, our implementation: `timeline.ts` (one clock for audio and events), `metrics.ts` / `aggregate.ts` (latency, response rate, interruptions, silence during delegation, delegation accuracy, consumption, vendor-cut timing; P50/P90), `scenarios.ts` (CRAWL / WALK / RUN suites), `sessionInput.ts` (seeded history), `acoustics.ts` (WALK conditions), `callerPeer.ts` + `runMode.ts` (RUN simulated participant). See docs/redteam.md "GPT-Live evaluation guide". |
 | `assertions.ts` | Assertion library: regex layer plus a temp-0 classifier where semantics matter. |

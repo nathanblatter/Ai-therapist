@@ -41,8 +41,17 @@ describe('deliverLiveOpening', () => {
 
     const result = await deliverLiveOpening(ID, inject);
 
-    expect(inject).toHaveBeenCalledWith(OPENING.text);
+    expect(inject).toHaveBeenCalledWith(OPENING.text, 'instructions');
     expect(result).toEqual({ delivered: true, already: false, logMessage: OPENING.logMessage });
+  });
+
+  it('delivers a recovery opening as commentary, the documented greeting mechanism (ai-therapist-293)', async () => {
+    registerLiveOpening(ID, { ...OPENING, via: 'commentary' });
+    const inject = vi.fn().mockResolvedValue(true);
+
+    await deliverLiveOpening(ID, inject);
+
+    expect(inject).toHaveBeenCalledWith(OPENING.text, 'commentary');
   });
 
   it('never speaks the disclosure twice', async () => {

@@ -69,11 +69,11 @@ import {
 import {
   DEFAULT_CRISIS_CONTACT,
   LIVE_RECOVERY_NUDGE_LOG,
-  LIVE_RECOVERY_SPEAK_FIRST_NUDGE,
   liveOpeningInstruction,
   type OpeningCrisisContact,
 } from '../../../shared/openingPrompt.js';
 import { sidebandManager } from '../../services/sidebandManager.service.js';
+import { buildRecoverySpeakFirstNudge, type RecoveryCrisisContact } from '../../../shared/recoveryPrompt.js';
 import { registerLiveOpening, scheduleLiveOpeningFallback } from '../../services/liveOpening.service.js';
 
 import { createLogger } from '../../utils/logger.js';
@@ -329,7 +329,9 @@ export default function liveSessionRoutes(): Router {
             backendModel,
           ),
           storable: isDemoSession,
-          recovery: isRecovery ? { crisisLine } : undefined,
+          recovery: isRecovery
+            ? { crisisLine, speakFirst: buildRecoverySpeakFirstNudge(crisisContact as RecoveryCrisisContact) }
+            : undefined,
           psychoeducationCue: psychoeducationCue === true,
           leadConversation,
           allowClientSteering: !sidebandEnabled,
@@ -546,7 +548,14 @@ export default function liveSessionRoutes(): Router {
           registerLiveOpening(
             sessionId,
             isRecovery
-              ? { text: LIVE_RECOVERY_SPEAK_FIRST_NUDGE, logMessage: LIVE_RECOVERY_NUDGE_LOG }
+              ? {
+                  // The same text is already in the session's startup input
+                  // (recovery.speakFirst); delivered as commentary, the
+                  // documented way to have GPT-Live open a conversation.
+                  text: buildRecoverySpeakFirstNudge(crisisContact as RecoveryCrisisContact),
+                  logMessage: LIVE_RECOVERY_NUDGE_LOG,
+                  via: 'commentary' as const,
+                }
               : liveOpeningInstruction(
                   userLanguage,
                   (systemConfig.crisis_contact as OpeningCrisisContact | undefined) || DEFAULT_CRISIS_CONTACT,

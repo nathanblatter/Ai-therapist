@@ -1289,17 +1289,42 @@ interface TrajectoryResult {
  * @param {string} sessionId - Session ID
  * @returns {object} { trajectoryScore: number, trend: string }
  */
-async function trackEmotionalTrajectory(sessionId: string): Promise<TrajectoryResult> {
+async function trackEmotionalTrajectory(
+  sessionId: string,
+  excludeMessageIds: ReadonlyArray<string | number> = [],
+): Promise<TrajectoryResult> {
   try {
-    // Get risk score history for this session
-    const historyResult = await pool.query<{ risk_score: number; calculated_at: Date }>(
-      `SELECT risk_score, calculated_at
+    // Get risk score history for this session.
+    //
+    // `excludeMessageIds` are the earlier parts of the sentence being scored
+    // now (a voice turn stitched to the fragment(s) before it; see
+    // stitchSplitTurnParts in crisisPipeline.service.ts). Their rows are this
+    // message, not its run-up: left in, a sentence that was already scored
+    // once as its first part becomes its own "sudden spike" when it is scored
+    // again with a trailing fragment. Measured 2026-11-18 on the real
+    // assessor: "some days I don't want to be here anymore." scored 70
+    // (medium); the same sentence stitched to a following " you know?" scored
+    // 75 (high, a page), with the assessor answering 55 both times.
+    const exclude = excludeMessageIds.map((id) => String(id));
+    const historyResult =
+      exclude.length > 0
+        ? await pool.query<{ risk_score: number; calculated_at: Date }>(
+            `SELECT risk_score, calculated_at
+       FROM risk_score_history
+       WHERE session_id = $1
+         AND (message_id IS NULL OR NOT (message_id::text = ANY($2::text[])))
+       ORDER BY calculated_at DESC
+       LIMIT 5`,
+            [sessionId, exclude],
+          )
+        : await pool.query<{ risk_score: number; calculated_at: Date }>(
+            `SELECT risk_score, calculated_at
        FROM risk_score_history
        WHERE session_id = $1
        ORDER BY calculated_at DESC
        LIMIT 5`,
-      [sessionId],
-    );
+            [sessionId],
+          );
 
     const history = historyResult.rows.reverse(); // Chronological order
 
@@ -1346,6 +1371,13 @@ interface MessageInput {
   content: string;
   session_id: string;
   message_id?: string | number;
+  /**
+   * Voice only: ids of the participant turn(s) whose text is already included
+   * at the start of `content` (one spoken sentence that reached us as several
+   * turns). Their risk rows are left out of the trajectory run-up so the
+   * sentence is not counted twice.
+   */
+  stitched_message_ids?: ReadonlyArray<string | number>;
 }
 
 interface RiskAnalysisResult {
@@ -1411,7 +1443,7 @@ export async function analyzeMessageRisk(
     // message's insert, so it reflects the run-up, not the current message),
     // and what the session already knows about this participant's risk.
     const [trajectory, sessionContext] = await Promise.all([
-      trackEmotionalTrajectory(message.session_id),
+      trackEmotionalTrajectory(message.session_id, message.stitched_message_ids ?? []),
       getSessionRiskContext(message.session_id),
     ]);
     const contextSignals = keywordAnalysis.keywordScore === 0 ? detectContextSignals(message.content) : [];

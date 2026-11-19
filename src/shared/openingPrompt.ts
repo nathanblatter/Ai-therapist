@@ -90,12 +90,6 @@ export function liveOpeningInstruction(language: string, crisis: OpeningCrisisCo
   };
 }
 
-/**
- * Speak-first nudge for a content-filter recovery session. Timing only: it
- * carries none of the previous conversation, because restating the disclosure
- * that tripped the filter is the most likely way to trip it again.
- */
-export const LIVE_RECOVERY_SPEAK_FIRST_NUDGE =
-  'The voice connection just dropped and has reconnected. Speak first, immediately, before the participant says anything: reconnect warmly in one or two sentences, make clear it was a technical drop and not their fault, and stay with them.';
-
+// The recovery speak-first instruction itself lives in shared/recoveryPrompt.ts
+// (buildRecoverySpeakFirstNudge); this is only its log label.
 export const LIVE_RECOVERY_NUDGE_LOG = 'Recovery session: speak-first nudge';
