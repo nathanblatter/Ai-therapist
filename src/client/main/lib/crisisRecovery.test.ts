@@ -3,16 +3,28 @@ import {
   closeDisposition,
   crisisEmergencyMarksCrisis,
   eligibilityGoodbyeFinished,
+  handoffReasonFromClose,
   isModerationStop,
   nextRecoveryStep,
+  readHandoffStart,
   recoveryScreenMayClose,
+  runVoiceReturn,
   startInterimSpeech,
+  VOICE_RETURN_FAILED_NOTICE,
+  VOICE_RETURN_REFUSED_NOTICE,
   RECOVERY_FIRST_WORDS_WAIT_MS,
   ELIGIBILITY_GOODBYE_MAX_WAIT_MS,
   ELIGIBILITY_GOODBYE_MIN_WAIT_MS,
   ELIGIBILITY_GOODBYE_QUIET_MS,
   ELIGIBILITY_GOODBYE_START_WAIT_MS,
 } from './crisisRecovery';
+import {
+  HANDOFF_CEILING_FIRST_MESSAGE,
+  HANDOFF_CHECKIN_FIRST_MESSAGE,
+  HANDOFF_CRISIS_FIRST_MESSAGE,
+  HANDOFF_NEUTRAL_FIRST_MESSAGE,
+  HANDOFF_NEUTRAL_FIRST_MESSAGE_NO_VOICE,
+} from '../../../shared/textHandoff';
 
 // The participant app's decisions around a vendor cut (ai-therapist-293) and an
 // age-eligibility end (ai-therapist-296). App.tsx has no test harness of its
@@ -61,30 +73,255 @@ describe('crisisEmergencyMarksCrisis', () => {
   });
 });
 
-describe('nextRecoveryStep: the terminal ladder never ends on a dead screen', () => {
+describe('nextRecoveryStep: a vendor cut goes straight to typed chat, and never ends on a dead screen', () => {
   const base = { voiceEnabled: true, chatEnabled: true, maxVoiceAttempts: 2 };
 
-  it('voice first, and again after a second cut', () => {
-    expect(nextRecoveryStep({ ...base, voiceAttemptsSpent: 0 })).toBe('voice');
-    expect(nextRecoveryStep({ ...base, voiceAttemptsSpent: 1 })).toBe('voice');
-  });
-
-  it('typed chat once the voice attempts are spent', () => {
+  it('typed chat first: no new voice session on the vendor that just ended the call', () => {
+    expect(nextRecoveryStep({ ...base, voiceAttemptsSpent: 0 })).toBe('text');
+    expect(nextRecoveryStep({ ...base, voiceAttemptsSpent: 1 })).toBe('text');
     expect(nextRecoveryStep({ ...base, voiceAttemptsSpent: 2 })).toBe('text');
-    expect(nextRecoveryStep({ ...base, voiceAttemptsSpent: 5 })).toBe('text');
   });
 
-  it('typed chat straight away when voice is disabled', () => {
+  it('typed chat when voice is disabled too', () => {
     expect(nextRecoveryStep({ ...base, voiceEnabled: false, voiceAttemptsSpent: 0 })).toBe('text');
   });
 
-  it('the crisis screen (which stays up) only when there is no typed chat to fall back to', () => {
+  it('a deployment with no typed chat keeps the recovery voice session, up to the cap', () => {
+    expect(nextRecoveryStep({ ...base, chatEnabled: false, voiceAttemptsSpent: 0 })).toBe('voice');
+    expect(nextRecoveryStep({ ...base, chatEnabled: false, voiceAttemptsSpent: 1 })).toBe('voice');
+  });
+
+  it('the crisis screen (which stays up) only when there is nothing left to continue in', () => {
     expect(nextRecoveryStep({ ...base, chatEnabled: false, voiceAttemptsSpent: 2 })).toBe('unavailable');
     expect(
       nextRecoveryStep({ voiceEnabled: false, chatEnabled: false, voiceAttemptsSpent: 0, maxVoiceAttempts: 2 }),
     ).toBe('unavailable');
-    // Voice still comes first even then.
-    expect(nextRecoveryStep({ ...base, chatEnabled: false, voiceAttemptsSpent: 1 })).toBe('voice');
+  });
+});
+
+describe('handoffReasonFromClose', () => {
+  it("names the vendor's session ceiling; everything else is its content filter", () => {
+    expect(handoffReasonFromClose('expired')).toBe('expired');
+    // session.closed says 'content'; the socket backstop says 'content_filter'.
+    expect(handoffReasonFromClose('content')).toBe('content');
+    expect(handoffReasonFromClose('content_filter')).toBe('content');
+    expect(handoffReasonFromClose(undefined)).toBe('content');
+    expect(handoffReasonFromClose(42)).toBe('content');
+  });
+});
+
+describe('readHandoffStart: what the participant sees after the hand-off chat start', () => {
+  const crisisBody = {
+    sessionId: 'chat_1',
+    opening: HANDOFF_CRISIS_FIRST_MESSAGE,
+    handoff: {
+      kind: 'crisis',
+      severity: 'high',
+      reason: 'content',
+      quickReplies: ['Yes', 'No', 'Not sure'],
+      voiceReturnAllowed: false,
+      spokenBridge: 'spoken line from the server',
+      seededFrom: ['live_A'],
+    },
+  };
+
+  it('crisis cut: the chat, with the server-authored first message and the one-tap answers', () => {
+    expect(readHandoffStart(200, crisisBody)).toEqual({
+      screen: 'chat',
+      sessionId: 'chat_1',
+      firstMessage: HANDOFF_CRISIS_FIRST_MESSAGE,
+      serverAuthored: true,
+      handoff: {
+        kind: 'crisis',
+        quickReplies: ['Yes', 'No', 'Not sure'],
+        voiceReturnAllowed: false,
+        spokenBridge: 'spoken line from the server',
+      },
+      fallback: null,
+    });
+  });
+
+  it('no-risk cut: the neutral message, no quick replies, the voice offer as the server gave it', () => {
+    const outcome = readHandoffStart(200, {
+      sessionId: 'chat_2',
+      opening: HANDOFF_NEUTRAL_FIRST_MESSAGE,
+      handoff: { kind: 'neutral', quickReplies: [], voiceReturnAllowed: true, spokenBridge: 'neutral line' },
+    });
+    expect(outcome).toMatchObject({
+      screen: 'chat',
+      firstMessage: HANDOFF_NEUTRAL_FIRST_MESSAGE,
+      handoff: { kind: 'neutral', quickReplies: [], voiceReturnAllowed: true },
+    });
+    if (outcome.screen === 'chat') expect(outcome.firstMessage).not.toMatch(/ending your life/);
+  });
+
+  it('vendor ceiling: the chat, no quick replies', () => {
+    const outcome = readHandoffStart(200, {
+      sessionId: 'chat_3',
+      opening: 'ceiling message',
+      handoff: { kind: 'ceiling', quickReplies: [], voiceReturnAllowed: false },
+    });
+    expect(outcome).toMatchObject({ screen: 'chat', handoff: { kind: 'ceiling', quickReplies: [] } });
+    // No spoken line from the server: the shared one for that kind is used.
+    if (outcome.screen === 'chat') expect(outcome.handoff.spokenBridge).toMatch(/moved us to writing/);
+  });
+
+  it.each([
+    ['a server error', 500, { error: 'Failed to start chat session' }],
+    ['a rate limit', 429, { error: 'Session limit exceeded' }],
+    ['no response at all (network failure or timeout)', 0, null],
+    ['a session the server handed back instead of a new one', 200, { sessionId: 'other', alreadyActive: true }],
+    ['a response with no session id', 200, { success: true }],
+    ['an empty body', 200, null],
+  ])('chat start failure (%s): the retry screen, never a blank one', (_name, status, body) => {
+    const outcome = readHandoffStart(status, body);
+    expect(outcome.screen).toBe('failed');
+    if (outcome.screen === 'failed') expect(outcome.reason.length).toBeGreaterThan(0);
+  });
+
+  it('says why there was no response', () => {
+    expect(readHandoffStart(0, null, 'The operation was aborted')).toEqual({
+      screen: 'failed',
+      reason: 'no response: The operation was aborted',
+    });
+  });
+
+  // PR #77 review, item 3: no client failure path may choose calm wording. The
+  // browser knows the vendor cut the call; without the server's reading the
+  // risk is unknown, and unknown is a crisis.
+  const cut = { voiceSessionId: 'live_A', reason: 'content' as const };
+
+  it('a chat session with no hand-off from the server: crisis wording, pinned card, quick replies, and the server is told', () => {
+    const outcome = readHandoffStart(200, { sessionId: 'chat_4', opening: null, handoff: null }, undefined, cut);
+    expect(outcome).toEqual({
+      screen: 'chat',
+      sessionId: 'chat_4',
+      firstMessage: HANDOFF_CRISIS_FIRST_MESSAGE,
+      serverAuthored: false,
+      handoff: {
+        kind: 'crisis',
+        quickReplies: ['Yes', 'No', 'Not sure'],
+        voiceReturnAllowed: false,
+        spokenBridge: expect.stringMatching(/call or text 988/),
+      },
+      fallback: { continued_from: 'live_A', reason: 'content' },
+    });
+    if (outcome.screen === 'chat') {
+      expect(outcome.firstMessage).not.toBe(HANDOFF_NEUTRAL_FIRST_MESSAGE_NO_VOICE);
+      expect(outcome.firstMessage).not.toMatch(/ended unexpectedly/);
+    }
+  });
+
+  it('the same after the vendor time limit, in the time-limit wording', () => {
+    const outcome = readHandoffStart(200, { sessionId: 'chat_5', opening: 'x' }, undefined, {
+      voiceSessionId: 'live_B',
+      reason: 'expired',
+    });
+    expect(outcome).toMatchObject({
+      screen: 'chat',
+      firstMessage: HANDOFF_CEILING_FIRST_MESSAGE,
+      handoff: { kind: 'ceiling', quickReplies: [], voiceReturnAllowed: false },
+      fallback: { continued_from: 'live_B', reason: 'expired' },
+    });
+  });
+
+  it('a server hand-off needs no fallback', () => {
+    const outcome = readHandoffStart(200, crisisBody, undefined, cut);
+    expect(outcome).toMatchObject({ serverAuthored: true, fallback: null });
+  });
+
+  it('reads the check-in kind', () => {
+    const outcome = readHandoffStart(200, {
+      sessionId: 'chat_6',
+      opening: HANDOFF_CHECKIN_FIRST_MESSAGE,
+      handoff: { kind: 'checkin', quickReplies: [], voiceReturnAllowed: false },
+    });
+    expect(outcome).toMatchObject({ screen: 'chat', serverAuthored: true, handoff: { kind: 'checkin' } });
+  });
+
+  it('ignores a hand-off kind it does not know (unknown risk, crisis wording), and junk quick replies', () => {
+    expect(
+      readHandoffStart(200, { sessionId: 'c', opening: 'x', handoff: { kind: 'party' } }, undefined, cut),
+    ).toMatchObject({
+      screen: 'chat',
+      serverAuthored: false,
+      handoff: { kind: 'crisis' },
+      fallback: { continued_from: 'live_A' },
+    });
+    const outcome = readHandoffStart(200, {
+      sessionId: 'c',
+      opening: 'x',
+      handoff: { kind: 'crisis', quickReplies: ['Yes', 7, '', '  ', 'No'] },
+    });
+    if (outcome.screen === 'chat') expect(outcome.handoff.quickReplies).toEqual(['Yes', 'No']);
+  });
+});
+
+// PR #77 review, item 6: start the voice call first, end the chat only once it
+// is established; a failure leaves the participant in the chat.
+describe('runVoiceReturn', () => {
+  function steps(over: Partial<Parameters<typeof runVoiceReturn>[0]> = {}) {
+    const order: string[] = [];
+    const s = {
+      checkAllowed: vi.fn(async () => (order.push('check'), true)),
+      startVoice: vi.fn(async () => (order.push('start'), true)),
+      abandonVoice: vi.fn(() => void order.push('abandon')),
+      endChat: vi.fn(async () => void order.push('endChat')),
+      ...over,
+    };
+    return { s, order };
+  }
+
+  it('established: the voice call starts BEFORE the chat is ended', async () => {
+    const { s, order } = steps();
+    expect(await runVoiceReturn(s)).toBe('started');
+    expect(order).toEqual(['check', 'start', 'endChat']);
+    expect(s.abandonVoice).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['the start resolves false (refusal, no session.started)', async () => false],
+    [
+      'the start throws (microphone refused)',
+      async () => {
+        throw new DOMException('denied', 'NotAllowedError');
+      },
+    ],
+  ])('failure (%s): the chat is never ended, the half-started call is released', async (_name, startVoice) => {
+    const { s } = steps({ startVoice: vi.fn(startVoice) });
+    expect(await runVoiceReturn(s)).toBe('failed');
+    expect(s.endChat).not.toHaveBeenCalled();
+    expect(s.abandonVoice).toHaveBeenCalledTimes(1);
+  });
+
+  it('refused by the server (risk not cleared, quiet hours) or the check failing: nothing is started or ended', async () => {
+    for (const checkAllowed of [
+      vi.fn(async () => false),
+      vi.fn(async () => {
+        throw new Error('offline');
+      }),
+    ]) {
+      const { s } = steps({ checkAllowed });
+      expect(await runVoiceReturn(s)).toBe('refused');
+      expect(s.startVoice).not.toHaveBeenCalled();
+      expect(s.endChat).not.toHaveBeenCalled();
+    }
+  });
+
+  it('a chat end that fails does not undo a call that is up', async () => {
+    const { s } = steps({
+      endChat: vi.fn(async () => {
+        throw new Error('network');
+      }),
+    });
+    expect(await runVoiceReturn(s)).toBe('started');
+  });
+
+  it('the participant-facing lines are plain and offer the chat', () => {
+    expect(VOICE_RETURN_FAILED_NOTICE).toBe(
+      "The voice call couldn't be started. We can keep going right here in writing.",
+    );
+    expect(VOICE_RETURN_REFUSED_NOTICE).toMatch(/keep going right here in writing/);
   });
 });
 

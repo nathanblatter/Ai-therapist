@@ -35,6 +35,8 @@ export * from './crisisAdjudications.queries.js';
 export * from './pairwiseEvals.queries.js';
 export * from './driftAlerts.queries.js';
 export * from './caseProfile.queries.js';
+// Forget requests and the safety-continuity read (ai-therapist-341, 344).
+export * from './memorySuppressions.queries.js';
 export * from './returningContext.queries.js';
 export * from './consent.queries.js';
 export * from './adverseEvents.queries.js';

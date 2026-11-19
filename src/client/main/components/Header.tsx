@@ -13,6 +13,17 @@ interface HeaderProps {
   onOpenMessages?: () => void;
   messagesOpen?: boolean;
   messagesUnread?: number;
+  /**
+   * One compact bar (title and Menu) instead of the full header. Only while a
+   * text hand-off chat is on screen (ai-therapist-356): its pinned crisis card
+   * carries Call 988 / Text 988 / Call 911, and with the keyboard open on a
+   * phone the full header (session id, the distress paragraph, a second Call
+   * 988 button) left about 100 px for the conversation. The distress
+   * paragraph is an IRB-described element of the ordinary session screen, so
+   * nothing else turns this on and the participant's own collapse preference
+   * is neither read nor changed by it. The session id moves into the menu.
+   */
+  compact?: boolean;
 }
 
 // localStorage key for the header collapse preference (persists across sessions).
@@ -24,6 +35,7 @@ const Header = ({
   onOpenMessages,
   messagesOpen = false,
   messagesUnread = 0,
+  compact = false,
 }: HeaderProps) => {
   const [username, setUsername] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
@@ -133,6 +145,25 @@ const Header = ({
       console.error('Logout failed:', error);
     }
   };
+
+  if (compact) {
+    // Text hand-off: one bar. The crisis lines are in the pinned card right
+    // under it; the session id and every navigation item are in the menu.
+    return (
+      <header
+        className="bg-navy text-white font-sans py-1 px-3 pt-[max(0.25rem,env(safe-area-inset-top))]"
+        role="banner"
+        data-testid="header-compact"
+      >
+        <div className="max-w-5xl mx-auto flex items-center gap-3">
+          <h1 className="text-base font-bold whitespace-nowrap truncate">AI Therapist Assistant</h1>
+          <nav className="ml-auto" role="navigation" aria-label="Main navigation">
+            {renderMenu('', true)}
+          </nav>
+        </div>
+      </header>
+    );
+  }
 
   return (
     <header
@@ -314,85 +345,102 @@ const Header = ({
               </div>
 
               {/* Compact menu on mobile */}
-              <div className="relative sm:hidden" ref={menuRef}>
-                <button
-                  onClick={() => setIsMenuOpen(!isMenuOpen)}
-                  className="bg-royal hover:bg-blue-700 px-4 py-2 rounded-full text-sm font-semibold min-h-[44px] min-w-[44px] flex items-center justify-center gap-2"
-                  aria-label={isMenuOpen ? 'Close menu' : 'Open menu'}
-                  aria-expanded={isMenuOpen}
-                  aria-haspopup="true"
-                >
-                  {isMenuOpen ? <X size={18} /> : <Menu size={18} />}
-                  <span>Menu</span>
-                </button>
-                {isMenuOpen && (
-                  <div
-                    className="absolute right-0 mt-2 w-52 bg-white rounded-xl shadow-lg border border-gray-200 py-1 z-50 text-left"
-                    role="menu"
-                  >
-                    <a
-                      href="https://988lifeline.org"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-100"
-                      role="menuitem"
-                      onClick={() => setIsMenuOpen(false)}
-                    >
-                      Crisis Resources
-                    </a>
-                    {(userRole === 'researcher' || userRole === 'therapist') && (
-                      <a
-                        href="/admin/"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="block px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-100"
-                        role="menuitem"
-                        onClick={() => setIsMenuOpen(false)}
-                      >
-                        Admin Portal
-                      </a>
-                    )}
-                    {onOpenMessages && (
-                      <button
-                        onClick={() => {
-                          setIsMenuOpen(false);
-                          onOpenMessages();
-                        }}
-                        className="block w-full text-left px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-100"
-                        role="menuitem"
-                      >
-                        {messagesOpen ? 'Home' : `Messages${messagesUnread > 0 ? ` (${messagesUnread})` : ''}`}
-                      </button>
-                    )}
-                    <button
-                      onClick={() => {
-                        setIsMenuOpen(false);
-                        navigate('/profile');
-                      }}
-                      className="block w-full text-left px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-100"
-                      role="menuitem"
-                    >
-                      Profile
-                    </button>
-                    <button
-                      onClick={() => {
-                        setIsMenuOpen(false);
-                        handleLogout();
-                      }}
-                      className="block w-full text-left px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-50"
-                      role="menuitem"
-                    >
-                      Logout
-                    </button>
-                  </div>
-                )}
-              </div>
+              {renderMenu('sm:hidden', false)}
             </nav>
           </>
         )}
       </div>
     </header>
   );
+
+  function renderMenu(visibility: string, withSessionId: boolean) {
+    return (
+      <div className={`relative ${visibility}`} ref={menuRef}>
+        <button
+          onClick={() => setIsMenuOpen(!isMenuOpen)}
+          className="bg-royal hover:bg-blue-700 px-4 py-2 rounded-full text-sm font-semibold min-h-[44px] min-w-[44px] flex items-center justify-center gap-2"
+          aria-label={isMenuOpen ? 'Close menu' : 'Open menu'}
+          aria-expanded={isMenuOpen}
+          aria-haspopup="true"
+        >
+          {isMenuOpen ? <X size={18} /> : <Menu size={18} />}
+          <span>Menu</span>
+        </button>
+        {isMenuOpen && (
+          <div
+            className={`absolute right-0 mt-2 ${withSessionId ? 'w-64' : 'w-52'} bg-white rounded-xl shadow-lg border border-gray-200 py-1 z-50 text-left`}
+            role="menu"
+          >
+            {withSessionId && sessionId && (
+              <div className="px-4 py-3 text-xs text-gray-600 border-b border-gray-100" role="none">
+                <span className="block font-medium text-gray-700">Session ID</span>
+                <span className="flex items-center gap-2 mt-1">
+                  <code className="text-gray-900 break-all" aria-label={`Session ID: ${sessionId}`}>
+                    {sessionId}
+                  </code>
+                  <CopyButton textToCopy={sessionId} />
+                </span>
+              </div>
+            )}
+            <a
+              href="https://988lifeline.org"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-100"
+              role="menuitem"
+              onClick={() => setIsMenuOpen(false)}
+            >
+              Crisis Resources
+            </a>
+            {(userRole === 'researcher' || userRole === 'therapist') && (
+              <a
+                href="/admin/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                role="menuitem"
+                onClick={() => setIsMenuOpen(false)}
+              >
+                Admin Portal
+              </a>
+            )}
+            {onOpenMessages && (
+              <button
+                onClick={() => {
+                  setIsMenuOpen(false);
+                  onOpenMessages();
+                }}
+                className="block w-full text-left px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                role="menuitem"
+              >
+                {messagesOpen ? 'Home' : `Messages${messagesUnread > 0 ? ` (${messagesUnread})` : ''}`}
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setIsMenuOpen(false);
+                navigate('/profile');
+              }}
+              className="block w-full text-left px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-100"
+              role="menuitem"
+            >
+              Profile
+            </button>
+            <button
+              onClick={() => {
+                setIsMenuOpen(false);
+                handleLogout();
+              }}
+              className="block w-full text-left px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-50"
+              role="menuitem"
+            >
+              Logout
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
 };
 
 export default Header;

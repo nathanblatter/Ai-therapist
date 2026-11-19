@@ -15,6 +15,10 @@ interface ChatLogProps {
   /** Fired (throttled) when the participant scrolls back up through earlier
    *  messages — Phase 2 engagement telemetry; no-op when unset/disabled. */
   onScrollBack?: () => void;
+  /** Set for a text hand-off chat (ai-therapist-356), which opens underneath
+   *  the captions of the voice call it continues: when it turns on, the log
+   *  jumps to the newest message, so the first message never starts off screen. */
+  followLatest?: boolean;
 }
 
 // A participant is "scrolled back" once they are this far above the bottom.
@@ -24,7 +28,7 @@ const SCROLL_BACK_THROTTLE_MS = 15_000;
 // the participant is reading back and is left where they are.
 const FOLLOW_PX = 80;
 
-export default function ChatLog({ messages, assistantStream, onScrollBack }: ChatLogProps) {
+export default function ChatLog({ messages, assistantStream, onScrollBack, followLatest = false }: ChatLogProps) {
   const lastScrollBackAt = React.useRef(0);
   const logRef = React.useRef<HTMLDivElement>(null);
   const followRef = React.useRef(true);
@@ -35,6 +39,15 @@ export default function ChatLog({ messages, assistantStream, onScrollBack }: Cha
     const el = logRef.current;
     if (el && followRef.current) el.scrollTop = el.scrollHeight;
   }, [messages, assistantStream]);
+
+  // A text hand-off chat opening is the one time the log goes to the newest
+  // message even if the participant had scrolled back during the voice call.
+  React.useLayoutEffect(() => {
+    if (!followLatest) return;
+    followRef.current = true;
+    const el = logRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [followLatest]);
 
   function handleScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;

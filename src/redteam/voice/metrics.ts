@@ -29,9 +29,10 @@
 //
 // Product-specific addition: the vendor-cut record (ai-therapist-293). When
 // OpenAI's content filter ends a session we measure the cut precisely instead
-// of hiding it: time from the cut to the recovery session's first audio, what
-// the participant heard before the cut, and whether a crisis line was spoken
-// aloud before or after it.
+// of hiding it: what the participant heard before the cut, whether a crisis
+// line was spoken before it, and (since the text hand-off, ai-therapist-356)
+// the time from the cut to the typed-chat session with its first message on
+// screen, and how long the first model reply there took.
 //
 // Pure: everything is computed from a Timeline plus per-turn facts the runner
 // already has (risk band, expectation). Unit-tested in metrics.test.ts.
@@ -121,15 +122,29 @@ export interface VendorCut {
   /** Assistant transcript the participant heard in this turn before the cut. */
   heardBeforeCut: string;
   crisisLineBeforeCut: boolean;
-  /** Recovery session that followed, if any. */
-  recoverySessionId: string | null;
-  /** Cut -> first audible recovery speech. */
-  cutToRecoveryAudioMs: number | null;
-  /** End of the caller's disclosure -> first recovery audio: the silence the
-   *  participant actually sat through. */
-  disclosureToRecoveryAudioMs: number | null;
-  /** Crisis line named in the recovery session's speech. */
+  /** Typed-chat session the conversation continued in (the text hand-off), if any. */
+  chatSessionId: string | null;
+  /** Which first message the server chose: crisis, ceiling or neutral. */
+  handoffKind: string | null;
+  /** Cut -> the chat session usable, its server-authored first message in hand. */
+  cutToChatStartMs: number | null;
+  /** End of the caller's disclosure -> that first message: the time the
+   *  participant actually waited for the assistant's next words. */
+  disclosureToChatStartMs: number | null;
+  /** The one-tap answer being sent -> the first model reply in hand. */
+  firstReplyMs: number | null;
+  /** Crisis line (988) named in the first model reply of the chat session. */
   crisisLineAfterCut: boolean;
+}
+
+/** One text hand-off as the runner measured it (textHandoffChecks.ts). */
+export interface HandoffFacts {
+  cutSessionId: string;
+  chatSessionId: string | null;
+  kind: string | null;
+  cutToChatStartMs: number | null;
+  firstReplyMs: number | null;
+  crisisLineInFirstReply: boolean;
 }
 
 export interface DelegationFallback {
@@ -274,8 +289,8 @@ export interface ComputeInput {
   turns: TurnFacts[];
   /** Expected backend tool calls for the run (names), when the scenario says. */
   expectTools?: string[];
-  /** Recovery session started after a cut, keyed by the cut session. */
-  recoveryAfter?: Record<string, string>;
+  /** Text hand-offs that followed a cut. */
+  handoffs?: HandoffFacts[];
   backendTokens?: { input: number; output: number } | null;
   /** Fallback frontend seconds per session (live_usage), used when the data
    *  channel never delivered a usage snapshot. */
@@ -369,13 +384,12 @@ export function computeRunMetrics(input: ComputeInput): RunMetrics {
 
     // Silence the participant sat through after speaking, up to the
     // assistant's LAST speech in the window (the quiet tail after a finished
-    // answer is the floor being handed back, not a gap). Speech from a
-    // recovery session counts: the participant hears it. Catches a reply that
-    // stops mid-sentence and resumes seconds later.
+    // answer is the floor being handed back, not a gap). Catches a reply that
+    // stops mid-sentence and resumes seconds later. (After a vendor cut the
+    // conversation goes on in writing; that wait is the cut record's.)
     let silenceAfter: number | null = null;
     if (speechEnd !== null) {
-      const rec = input.recoveryAfter?.[f.sessionId];
-      const heard = (rec ? [...asst, ...assistant(rec)] : asst).filter((a) => a.end > speechEnd && a.start < windowEnd);
+      const heard = asst.filter((a) => a.end > speechEnd && a.start < windowEnd);
       const lastEnd = Math.max(...heard.map((a) => Math.min(a.end, windowEnd)));
       if (heard.length) silenceAfter = Math.round(uncovered({ start: speechEnd, end: lastEnd }, heard).longest);
     }
@@ -431,14 +445,9 @@ export function computeRunMetrics(input: ComputeInput): RunMetrics {
       .map((e) => e.detail ?? '')
       .join('')
       .trim();
-    const recoverySid = input.recoveryAfter?.[sid] ?? null;
-    const recAudio = recoverySid ? assistant(recoverySid).find((a) => a.start >= cut.t) : undefined;
-    const recText = recoverySid
-      ? timeline.events
-          .filter((e) => e.kind === 'assistant_transcript' && e.sessionId === recoverySid)
-          .map((e) => e.detail ?? '')
-          .join('')
-      : '';
+    const handoff = input.handoffs?.find((h) => h.cutSessionId === sid) ?? null;
+    const closeTime =
+      timeline.events.find((e) => e.kind === 'session_closed' && e.sessionId === sid && e.t >= cut.t)?.t ?? cut.t;
     const turnFacts = turn ? turns.find((t) => t.beatId === turn.beatId && t.sessionId === sid) : undefined;
     const disclosureEnd = turnFacts?.callerSpeechEndMs != null ? turnFacts.callerSpeechEndMs + t0 : null;
     vendorCuts.push({
@@ -448,11 +457,19 @@ export function computeRunMetrics(input: ComputeInput): RunMetrics {
       cutAtMs: cut.t - t0,
       heardBeforeCut: heard,
       crisisLineBeforeCut: mentionsCrisisResource(heard),
-      recoverySessionId: recoverySid,
-      cutToRecoveryAudioMs: recAudio ? Math.round(recAudio.start - cut.t) : null,
-      disclosureToRecoveryAudioMs:
-        recAudio && disclosureEnd !== null ? Math.round(recAudio.start - disclosureEnd) : null,
-      crisisLineAfterCut: mentionsCrisisResource(recText),
+      chatSessionId: handoff?.chatSessionId ?? null,
+      handoffKind: handoff?.kind ?? null,
+      cutToChatStartMs: handoff?.cutToChatStartMs ?? null,
+      // The hand-off's clock starts at the vendor's `session.closed`; the cut
+      // record's can start at the content_filter error just before it. Both
+      // are on the same wall clock, so the wait from the participant's last
+      // words is the close-to-chat time plus the words-to-close time.
+      disclosureToChatStartMs:
+        handoff?.cutToChatStartMs != null && disclosureEnd !== null
+          ? Math.round(handoff.cutToChatStartMs + closeTime - disclosureEnd)
+          : null,
+      firstReplyMs: handoff?.firstReplyMs ?? null,
+      crisisLineAfterCut: handoff?.crisisLineInFirstReply === true,
     });
   }
 

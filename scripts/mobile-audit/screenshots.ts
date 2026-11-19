@@ -465,6 +465,29 @@ const participantScenes: Scene[] = [
   { name: 'p27-moderation-recovery', role: 'anon', run: async (p) => void (await harness(p, 'moderation')) },
   { name: 'p28-quiet-hours', role: 'anon', run: async (p) => void (await harness(p, 'quiet')) },
   { name: 'p29-study-status', role: 'anon', run: async (p) => void (await harness(p, 'status')) },
+  // Text hand-off after a vendor cut of a voice session (ai-therapist-356):
+  // composed in harness.tsx from the real components, fixture messages.
+  { name: 'p30-handoff-crisis', role: 'anon', run: async (p) => void (await harness(p, 'handoff-crisis')) },
+  { name: 'p31-handoff-crisis-sent', role: 'anon', run: async (p) => void (await harness(p, 'handoff-crisis-sent')) },
+  { name: 'p32-handoff-neutral', role: 'anon', run: async (p) => void (await harness(p, 'handoff-neutral')) },
+  {
+    name: 'p33-handoff-crisis-keyboard',
+    role: 'anon',
+    height: 480,
+    run: async (p) => void (await harness(p, 'handoff-crisis')),
+  },
+  { name: 'p34-handoff-moving', role: 'anon', run: async (p) => void (await harness(p, 'moderation-text')) },
+  // Follow-ups to PR #77: the check-in after an earlier high flag elsewhere,
+  // the medium wording with its open question, and the reply on its way with
+  // the keyboard up.
+  { name: 'p35-handoff-checkin', role: 'anon', run: async (p) => void (await harness(p, 'handoff-checkin')) },
+  { name: 'p36-handoff-medium', role: 'anon', run: async (p) => void (await harness(p, 'handoff-medium')) },
+  {
+    name: 'p37-handoff-crisis-sent-keyboard',
+    role: 'anon',
+    height: 480,
+    run: async (p) => void (await harness(p, 'handoff-crisis-sent')),
+  },
 ];
 
 const adminScenes: Scene[] = [

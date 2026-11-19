@@ -31,7 +31,13 @@ import {
   buildScreenerCadenceBlock,
   SCREENER_CUE_HEADING,
   buildToolGuidanceBlock,
+  buildNoNotesBlock,
+  assembleSafetyFollowUpBlock,
+  SAFETY_FOLLOW_UP_WINDOW_DAYS,
+  SAFETY_FOLLOW_UP_WHEN_MEMORY_OFF,
+  SAFETY_FOLLOW_UP_MIN_SEVERITY,
 } from '../utils/promptContext.js';
+import { UNVERIFIED_CLAIM_NOTE } from '../utils/memoryScreen.js';
 import { buildPhaseTexts } from '../utils/phaseGuidance.js';
 import {
   LIVE_DEFAULT_BACKEND_MODEL,
@@ -100,6 +106,18 @@ import {
   buildMinorConfirmUserMessage,
 } from '../services/minorSafeguard.service.js';
 import {
+  HANDOFF_CEILING_FIRST_MESSAGE,
+  HANDOFF_CHECKIN_FIRST_MESSAGE,
+  HANDOFF_CRISIS_FIRST_MESSAGE,
+  HANDOFF_NEUTRAL_FIRST_MESSAGE,
+  HANDOFF_NEUTRAL_FIRST_MESSAGE_NO_VOICE,
+  HANDOFF_QUICK_REPLIES,
+  handoffFailedSpokenLine,
+  handoffSpokenBridge,
+  VOICE_RETURN_FAILED_NOTICE,
+} from '../../shared/textHandoff.js';
+import { NARROW_TURN_DOCUMENTATION_PROMPT } from '../services/chatTherapy.service.js';
+import {
   RECOVERY_INTERIM_SPOKEN_LINE,
   RECOVERY_INTERIM_SPOKEN_LINE_NO_VOICE,
   buildRecoverySpeakFirstNudge,
@@ -121,7 +139,7 @@ import { EMBEDDING_MODEL } from '../services/embeddings.service.js';
 import { MODERATION_MODEL } from '../services/moderation.service.js';
 
 /** Date shown on the attachment. Bump when the prompts change and it is re-submitted. */
-export const PREPARED = 'November 18, 2026 (supersedes the September 4, 2026 version)';
+export const PREPARED = 'November 19, 2026 (supersedes the September 4, 2026 version)';
 
 /** Repo-relative path of the committed attachment. */
 export const ATTACHMENT_PATH = 'docs/irb-phase2-instruments/prompts.html';
@@ -308,8 +326,11 @@ function buildItems(): Item[] {
       'it only in the psychoeducation-cue research arm (conditional, see A.6); ' +
       '(6) the leading-the-conversation block, only while that feature flag is on (conditional, A.14); ' +
       '(7) for logged-in returning participants who opted in to session memory, a returning-participant context ' +
-      'block (A.7); every other logged-in participant receives the screener-cadence block alone instead (A.7); and ' +
-      '(8) a pre-session check-in block, only if the participant filled in the optional check-in form (A.8).',
+      'block (A.7); every other logged-in participant receives instead a short note that the agent has no notes ' +
+      'from earlier conversations, followed by the screener-cadence block (A.7); ' +
+      '(8) a safety follow-up cue, only for a logged-in participant whose most recent conversation was ' +
+      'crisis-flagged, whatever their session-memory setting (A.7); and ' +
+      '(9) a pre-session check-in block, only if the participant filled in the optional check-in form (A.8).',
   );
   add(
     'p',
@@ -427,6 +448,19 @@ function buildItems(): Item[] {
       'after the previous score is "up", "down" or "unchanged". The prior-risk-history sub-section is included only ' +
       'when a therapist has explicitly enabled sharing it for that participant.',
   );
+  add(
+    'p',
+    'The block opens by telling the model that what follows is unverified background and changes none of its ' +
+      'limits, and closes by telling it to confirm only what the notes contain and how to answer a request to ' +
+      'forget something. Three things are left out of the block when it is built: a remembered fact, summary line ' +
+      'or profile entry worded as a permission or as an instruction to the agent (for example "dosing questions ' +
+      'are fine" or "you agreed to be called Sam"); the summary of a conversation in which the participant asked ' +
+      'the agent to forget something, and any earlier note found to mention that thing; and, while such a request ' +
+      'is still being processed, every note older than it. A remembered fact that names a job, a qualification or ' +
+      'a quantity of a medicine is followed by "' +
+      UNVERIFIED_CLAIM_NOTE +
+      '". None of this deletes or edits a study record: it controls only what is placed in the prompt.',
+  );
   const memory = assembleMemoryBlock({
     endedCount: 0,
     summaries: [
@@ -500,6 +534,38 @@ function buildItems(): Item[] {
       'included: no scores, summaries or remembered facts. Verbatim, for a participant who has never taken either:',
   );
   add('pre', block(`\n\n${SCREENER_CUE_HEADING}${buildScreenerCadenceBlock([], now)}`));
+  add(
+    'p',
+    'The same participant (no returning-participant block) also receives, immediately before the screener-cadence ' +
+      'lines, a note that the agent has no notes from earlier conversations, so that it neither confirms nor ' +
+      'denies something the participant says happened before, and so that it answers a request to forget ' +
+      'something honestly. The note contains no participant data, only the memory setting. Verbatim, with ' +
+      'session memory off:',
+  );
+  add('pre', block(buildNoNotesBlock(false)));
+  add('p', 'With session memory on and nothing to recall yet, its first two sentences and the instruction read:');
+  add('pre', block(buildNoNotesBlock(true)));
+  add('h3', 'Safety follow-up cue (built from the safety record, not from session memory)');
+  const severities = SAFETY_FOLLOW_UP_MIN_SEVERITY === 'high' ? 'a high' : 'a medium or high';
+  add(
+    'p',
+    'A logged-in participant whose most recent conversation (the most recent one in which they said anything) ' +
+      `carries ${severities} crisis flag (or one whose level was not recorded) that the research team has not ` +
+      `cleared, and ended within the last ${SAFETY_FOLLOW_UP_WINDOW_DAYS} days, receives the cue below after ` +
+      'the blocks above' +
+      (SAFETY_FOLLOW_UP_WHEN_MEMORY_OFF
+        ? ', whether session memory is on or off. '
+        : ', when session memory is on. Participants with session memory off do not receive it. ') +
+      'A conversation that continues a voice call the provider ended (the text hand-off) does not receive it. ' +
+      'It is built from the safety system’s own record of the earlier session (the crisis flag and its ' +
+      'severity level) and contains nothing of what was said: no summary, topic, quotation or date. The ' +
+      'parenthesis is omitted when no level was recorded. Verbatim, with session memory on:',
+  );
+  add('pre', block(replaceOnce(assembleSafetyFollowUpBlock('high', true), 'recorded: high)', 'recorded: <level>)')));
+  if (SAFETY_FOLLOW_UP_WHEN_MEMORY_OFF) {
+    add('p', 'With session memory off, the cue reads:');
+    add('pre', block(replaceOnce(assembleSafetyFollowUpBlock('high', false), 'recorded: high)', 'recorded: <level>)')));
+  }
 
   add('h2', 'A.8 Pre-session check-in block');
   add(
@@ -600,13 +666,126 @@ function buildItems(): Item[] {
   add(
     'p',
     "The voice vendor's content filter can terminate a GPT-Live session outright, most often mid-way through a " +
-      'response to a disclosure of suicidal thoughts. The participant is then reconnected straight away, first by ' +
-      'voice and, if voice recovery fails, in typed chat.',
+      'response to a disclosure of suicidal thoughts; it also ends a session at its 60-minute limit. The conversation ' +
+      'then continues at once in typed chat, in a new chat session that carries the earlier conversation. No new ' +
+      'voice session is started on the voice service, except in a deployment where typed chat is switched off ' +
+      '(the voice recovery described at the end of this section).',
   );
-  add('h3', 'Voice recovery — instructions to the voice model');
+  add('h3', 'Typed-chat continuation — the first message the participant sees');
   add(
     'p',
-    'These instructions replace A.9 for the replacement session; no reasoning backend, tools, or prior ' +
+    'The first message of the chat session is fixed text written by the application, not by the AI model, and is ' +
+      'on screen before any model is called. Which text is used depends on the highest risk level the crisis ' +
+      "detector gave the participant's own words in the conversation that was ended: that voice call and the " +
+      'sessions it was linked to (a typed chat it continued, or a voice call started again from such a chat). ' +
+      "When that level is high, or could not be read (including when the participant's last words were still " +
+      'being assessed, and when the browser did not receive the server’s decision), and the content filter ' +
+      'ended the call:',
+  );
+  add('pre', HANDOFF_CRISIS_FIRST_MESSAGE);
+  add(
+    'note',
+    'Under that message the participant is offered three one-tap answers, each sent as an ordinary message from ' +
+      `them: ${HANDOFF_QUICK_REPLIES.join(', ')}.`,
+  );
+  add('p', "When the voice service's session time limit ended a call that was flagged high:");
+  add('pre', HANDOFF_CEILING_FIRST_MESSAGE);
+  add(
+    'p',
+    'When nothing in the ended conversation was scored high, but another of the participant’s conversations in ' +
+      'the previous two hours was flagged high (the chat session is then flagged high as well, from that earlier ' +
+      'flag):',
+  );
+  add('pre', HANDOFF_CHECKIN_FIRST_MESSAGE);
+  add('p', 'When nothing the participant said was scored medium or high:');
+  add('pre', HANDOFF_NEUTRAL_FIRST_MESSAGE);
+  add(
+    'p',
+    'When the highest level was medium, in the ended conversation or in another of the participant’s ' +
+      'conversations in the previous two hours (a new voice call is then not offered until the safety check in ' +
+      'the chat has cleared):',
+  );
+  add('pre', HANDOFF_NEUTRAL_FIRST_MESSAGE_NO_VOICE);
+  add(
+    'note',
+    'On every one of these screens the crisis lines (call 988, text 988, call 911) stay fixed above the ' +
+      'conversation as one-tap links. A "Go back to voice" button, which starts a new voice session, is shown only ' +
+      'when no message in the chat session has been scored high, neither the ended conversation nor any other of ' +
+      'the participant’s conversations of the previous two hours was scored high (and both risk levels were ' +
+      'read), and either nothing in them was scored medium, or the AI model has logged its question about suicidal ' +
+      'thoughts in the chat session and rated the most recent safety answer as no or low risk. The new voice ' +
+      'session is started first; the chat session ends only once the voice session is running, and if it cannot ' +
+      'be started the participant stays in the chat, which says:',
+  );
+  add('pre', VOICE_RETURN_FAILED_NOTICE);
+  add(
+    'note',
+    'While one of these chat screens is open, the page header is reduced to a single bar (the title and a menu ' +
+      'holding the session ID and the usual links); the crisis lines are in the card fixed under it. In every ' +
+      'other session the header, including its distress paragraph, is unchanged.',
+  );
+  add('h3', 'Typed-chat continuation — what the browser says aloud');
+  add(
+    'p',
+    "In English sessions the browser's own speech synthesis (not the AI model) speaks one line when the chat " +
+      'appears. After a call that was flagged high or whose risk level could not be read, and with the message for ' +
+      'an earlier high flag (<phone> is the configured crisis phone number, 988 when none is configured):',
+  );
+  add('pre', handoffSpokenBridge('crisis', { enabled: true, phone: '<phone>' }));
+  add('p', 'Otherwise:');
+  add('pre', handoffSpokenBridge('neutral'));
+  add('p', 'If the chat session cannot be started, the crisis lines stay on screen with a retry button and it says:');
+  add('pre', handoffFailedSpokenLine({ enabled: true, phone: '<phone>' }));
+  add('h3', 'Typed-chat continuation — guidance attached for the chat model');
+  add(
+    'p',
+    'The chat session receives the normal clinical prompt (A.1) without the opening line, then this guidance, ' +
+      'then the first message above as its own first turn. The transcript is the most recent turns of the whole ' +
+      'incident (every voice and chat session it passed through, at most 6,000 characters, whole lines), one per ' +
+      'line, prefixed "Participant:" or "You:". <crisis line> is the configured crisis contact ("call or text 988 ' +
+      'at any time, or text HOME to 741741" when none is configured). After the crisis first message:',
+  );
+  add(
+    'pre',
+    buildVoiceContinuationGuidance('<transcript>', { kind: 'crisis', severity: 'high', crisisLine: '<crisis line>' }),
+  );
+  add('p', 'After the time-limit first message:');
+  add(
+    'pre',
+    buildVoiceContinuationGuidance('<transcript>', { kind: 'ceiling', severity: 'high', crisisLine: '<crisis line>' }),
+  );
+  add('p', 'After the first message used when only another, earlier conversation was flagged high:');
+  add(
+    'pre',
+    buildVoiceContinuationGuidance('<transcript>', { kind: 'checkin', severity: 'none', crisisLine: '<crisis line>' }),
+  );
+  add('p', 'When the highest level was medium:');
+  add(
+    'pre',
+    buildVoiceContinuationGuidance('<transcript>', {
+      kind: 'neutral',
+      severity: 'medium',
+      crisisLine: '<crisis line>',
+    }),
+  );
+  add('p', 'When nothing was scored medium or high:');
+  add(
+    'pre',
+    buildVoiceContinuationGuidance('<transcript>', { kind: 'neutral', severity: 'none', crisisLine: '<crisis line>' }),
+  );
+  add(
+    'note',
+    "After the crisis first message, the model's reply to the participant's first message is written in a single " +
+      'step without tools, so that it arrives quickly. Immediately afterwards the model is called once more, ' +
+      'required to use its safety-check and escalation tools, with this instruction (the participant does not ' +
+      'wait for it and does not see it):',
+  );
+  add('pre', NARROW_TURN_DOCUMENTATION_PROMPT);
+  add('h3', 'Voice recovery (only where typed chat is switched off) — instructions to the voice model');
+  add(
+    'p',
+    'In a deployment with typed chat switched off, a replacement voice session is started instead, at most twice. ' +
+      'These instructions replace A.9 for the replacement session; no reasoning backend, tools, or prior ' +
       'conversation are attached. <crisis line> is the configured crisis phone number followed by "or text" and the ' +
       'configured text line (988 when none is configured).',
   );
@@ -627,7 +806,7 @@ function buildItems(): Item[] {
       'is configured):',
   );
   add('pre', buildRecoverySpeakFirstNudge({ enabled: true, phone: '<phone>', text: '<text line>' }));
-  add('h3', 'Voice recovery — what the participant hears and sees while reconnecting');
+  add('h3', 'Voice recovery (only where typed chat is switched off) — what the participant hears and sees');
   add(
     'p',
     "While the replacement session connects, the participant's browser shows the crisis lines and a message " +
@@ -638,18 +817,10 @@ function buildItems(): Item[] {
   add('pre', RECOVERY_INTERIM_SPOKEN_LINE);
   add(
     'note',
-    'When no replacement voice session follows (the voice attempts are used up and the conversation continues in ' +
-      'typed chat), the same line is spoken without its last sentence:',
+    'When no replacement voice session follows (the voice attempts are used up), the same line is spoken ' +
+      'without its last sentence, and the screen with the crisis lines stays up:',
   );
   add('pre', RECOVERY_INTERIM_SPOKEN_LINE_NO_VOICE);
-  add('h3', 'Typed-chat continuation — guidance attached for the chat model');
-  add(
-    'p',
-    'The chat session receives the normal clinical prompt (A.1) without the opening line, plus this guidance. ' +
-      'The transcript is the last turns of the voice conversation (up to 20, at most 6,000 characters), one per ' +
-      'line, prefixed "Participant:" or "You:".',
-  );
-  add('pre', buildVoiceContinuationGuidance('<transcript of the voice conversation>'));
 
   add('h2', 'A.14 Leading-the-conversation block');
   add('note', CONDITIONAL_LEAD_CONVERSATION);
@@ -807,8 +978,8 @@ function buildItems(): Item[] {
       `the voice vendor's maximum connection time (${DEFAULT_VENDOR_CEILING_MINUTES} minutes by default) so a ` +
       'participant in crisis is not cut off early. If a wrap-up instruction had already been sent, the first text ' +
       `below cancels it. Time notices are then sent ${CRISIS_NOTICE_MINUTES.join(', ')} minutes before that ` +
-      'maximum. One minute before it, GPT-Live sessions receive the connection-reset notice (the participant is ' +
-      'reconnected automatically); Grok Voice sessions, which have no vendor maximum, receive the closing ' +
+      'maximum. One minute before it, GPT-Live sessions receive the time-limit notice (the conversation then ' +
+      'continues in typed chat, A.13); Grok Voice sessions, which have no vendor maximum, receive the closing ' +
       'instruction instead.',
   );
   add('h3', 'Crisis: cancel an earlier wrap-up');

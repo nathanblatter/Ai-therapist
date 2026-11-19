@@ -164,6 +164,8 @@ export async function getUserMemories(userId: number, limit = 10): Promise<strin
 }
 
 export interface UserMemoryFact {
+  /** Present on rows read from the table; lets a forget request name a fact. */
+  memory_id?: number;
   fact: string;
   session_id: string | null;
   created_at: Date;
@@ -172,13 +174,14 @@ export interface UserMemoryFact {
 /** Same rows as getUserMemories but with provenance (when/where each fact was stored). */
 export async function getUserMemoriesWithDates(userId: number, limit = 10): Promise<UserMemoryFact[]> {
   const result = await pool.query<UserMemoryFact>(
-    'SELECT fact, session_id, created_at FROM user_memories WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
+    'SELECT memory_id, fact, session_id, created_at FROM user_memories WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
     [userId, limit],
   );
   return result.rows;
 }
 
 export interface RelevantMemory {
+  memory_id?: number;
   fact: string;
   created_at: Date;
   similarity: number;
@@ -192,7 +195,7 @@ export async function searchUserMemories(
 ): Promise<RelevantMemory[]> {
   const vec = `[${embedding.join(',')}]`;
   const result = await pool.query<RelevantMemory>(
-    `SELECT fact, created_at, 1 - (embedding <=> $2::vector) AS similarity
+    `SELECT memory_id, fact, created_at, 1 - (embedding <=> $2::vector) AS similarity
      FROM user_memories
      WHERE user_id = $1 AND embedding IS NOT NULL
      ORDER BY embedding <=> $2::vector

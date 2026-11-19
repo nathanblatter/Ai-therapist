@@ -65,3 +65,10 @@ export async function crisisFlagDate(pool: DbLike, sessionId: string): Promise<s
   const at = rows[0]?.crisis_flagged_at;
   return at ? new Date(at as string).toISOString().slice(0, 10) : null;
 }
+
+/** A remembered fact, as remember_this stores it (tools.queries.ts
+ *  insertUserMemory, without the embedding). Used to put back rows the tool
+ *  stored before it screened its writes (ai-therapist-343). */
+export async function seedRememberedFact(pool: DbLike, userId: number, fact: string): Promise<void> {
+  await pool.query(`INSERT INTO user_memories (user_id, fact, session_id) VALUES ($1, $2, NULL)`, [userId, fact]);
+}

@@ -109,6 +109,23 @@ export const INCIDENT_CHAIN_BACKSTOP_MS = 12 * 60 * 60 * 1000;
  * before it is not followed further back) and the depth is capped, so a
  * pathological history cannot make this slow or pull in last week.
  * Always contains `sessionId`, including for a row that does not exist yet.
+ *
+ * EXPLICIT LINKS FIRST (ai-therapist-356 follow-up). Since the text hand-off,
+ * the app writes the link itself: a typed chat that continues a cut voice
+ * call, and a voice call started again from such a chat, each carry an
+ * intervention_actions row (action_details.event 'voice_cut_text_handoff' or
+ * 'voice_resumed_from_text') naming the session they continue under `from`
+ * (db/textHandoff.queries). Where such a row exists it IS the predecessor,
+ * whatever the stamp or the start order say: it is the only record written at
+ * the moment the two sessions were joined, it also covers an anonymous
+ * participant (same user, or both without one), and it covers a voice call
+ * started again from a chat, which carries no stamp. The stamp-and-start-order
+ * walk above remains only for a session with no link row (the recovery voice
+ * sessions of a deployment with typed chat switched off, sessions from before
+ * the hand-off, a link row whose write failed). This function is the one
+ * source of truth for "the sessions of this incident": the paging policy
+ * (resolveIncidentPeak) and the hand-off's wording and seeding
+ * (textHandoff.service) both read it. Ordered from `sessionId` backwards.
  */
 export async function getIncidentChainSessionIds(sessionId: string, backstop: Date): Promise<string[]> {
   const result = await pool.query<{ session_id: string }>(
@@ -120,31 +137,52 @@ export async function getIncidentChainSessionIds(sessionId: string, backstop: Da
        SELECT prev.session_id, prev.user_id, prev.created_at, c.depth + 1
          FROM chain c
          CROSS JOIN LATERAL (
-           SELECT p.session_id, p.user_id, p.created_at
-             FROM therapy_sessions p
-            WHERE p.user_id = c.user_id
-              AND p.session_id <> c.session_id
-              AND p.created_at < c.created_at
-            ORDER BY EXISTS (SELECT 1 FROM intervention_actions ia
-                              WHERE ia.session_id = p.session_id
-                                AND ia.action_details #>> '{paging,kind}' IN ('vendor_cut', 'vendor_ceiling')
-                                AND ia.performed_at >= c.created_at - interval '15 minutes'
-                                AND ia.performed_at <= c.created_at + interval '1 minute') DESC,
-                     p.created_at DESC
+           SELECT cand.session_id, cand.user_id, cand.created_at
+             FROM (
+               -- 1. The link row the hand-off wrote (newest first).
+               (SELECT p.session_id, p.user_id, p.created_at, 0 AS pref
+                  FROM intervention_actions ia
+                  JOIN therapy_sessions p ON p.session_id = ia.action_details->>'from'
+                 WHERE ia.session_id = c.session_id
+                   AND ia.action_type = 'external_api_called'
+                   AND ia.action_details->>'event' IN ('voice_cut_text_handoff', 'voice_resumed_from_text')
+                   AND p.session_id <> c.session_id
+                   AND p.created_at <= c.created_at
+                   AND p.user_id IS NOT DISTINCT FROM c.user_id
+                 ORDER BY ia.performed_at DESC
+                 LIMIT 1)
+               UNION ALL
+               -- 2. No link row: a stamped session continues the participant's
+               --    session cut just before it, else the one started last.
+               (SELECT p.session_id, p.user_id, p.created_at, 1 AS pref
+                  FROM therapy_sessions p
+                 WHERE c.user_id IS NOT NULL
+                   AND p.user_id = c.user_id
+                   AND p.session_id <> c.session_id
+                   AND p.created_at < c.created_at
+                   AND EXISTS (SELECT 1 FROM crisis_events ce
+                                WHERE ce.session_id = c.session_id
+                                  AND ce.event_type = 'flagged'
+                                  AND ce.risk_factors @> '["recovery_continuation"]'::jsonb)
+                 ORDER BY EXISTS (SELECT 1 FROM intervention_actions ia
+                                   WHERE ia.session_id = p.session_id
+                                     AND ia.action_details #>> '{paging,kind}' IN ('vendor_cut', 'vendor_ceiling')
+                                     AND ia.performed_at >= c.created_at - interval '15 minutes'
+                                     AND ia.performed_at <= c.created_at + interval '1 minute') DESC,
+                          p.created_at DESC
+                 LIMIT 1)
+             ) cand
+            ORDER BY cand.pref
             LIMIT 1
          ) prev
-        WHERE c.user_id IS NOT NULL
-          AND c.depth < 25
+        WHERE c.depth < 25
           AND c.created_at >= $2
-          AND EXISTS (SELECT 1 FROM crisis_events ce
-                       WHERE ce.session_id = c.session_id
-                         AND ce.event_type = 'flagged'
-                         AND ce.risk_factors @> '["recovery_continuation"]'::jsonb)
      )
-     SELECT session_id FROM chain`,
+     SELECT session_id FROM chain ORDER BY depth`,
     [sessionId, backstop],
   );
-  const ids = result.rows.map((row) => row.session_id);
+  // Ordered, without repeats (a loop of link rows cannot repeat a session).
+  const ids = [...new Set(result.rows.map((row) => row.session_id))];
   return ids.includes(sessionId) ? ids : [sessionId, ...ids];
 }
 

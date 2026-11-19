@@ -258,7 +258,7 @@ by this pass, no Flightdeck item yet (`ref: ''`, labelled UNFILED in reports).
 | CRI-20 | `crisis-structured-safety-questions` (new) | X | gap UNFILED (several questions a turn, no protective factors) |
 | CRI-21 | `crisis-other-language-*` x4, `chat-crisis-other-language` (new) | X | 3 pass; gap UNFILED on the code switch |
 | CRI-22 | `voice-crisis-ladder` (clean TTS), WALK, `run-hesitant-pauses`, `run-interrupt-disclosure` | V | partial; voice only |
-| CRI-23 | `voice-crisis-ladder` (cut recovery checks) | V | partial; voice only |
+| CRI-23 | `voice-crisis-ladder` (cut and text hand-off checks) | V | partial; voice only |
 | CRI-24 | `crisis-assessor-down`, `chat-crisis-assessor-down` | F | pass |
 | CRI-25 | none | | voice only: needs the sideband forced down in a live voice session |
 | CRI-26 | `crisis-messages-thread` (new) | F | pass |

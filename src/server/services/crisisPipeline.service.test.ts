@@ -404,6 +404,27 @@ describe('a high turn the re-flag rule let pass (handleHighTurnWithoutReflag)', 
     expect(pageHighRiskMock).toHaveBeenCalledTimes(1);
     expect(enqueueWorkItemMock).not.toHaveBeenCalled();
   });
+
+  // The text hand-off stamps a chat high with NO score when the incident's
+  // risk could not be read (textHandoff.service). Seen live in the PR #77
+  // review: "Not sure" scored 65/medium and the +10 clause rewrote the session
+  // to medium.
+  it('never lowers the severity: a medium turn under a high flag stored without a score', async () => {
+    getSessionCrisisStateMock.mockResolvedValue({
+      crisis_flagged: true,
+      crisis_severity: 'high',
+      crisis_risk_score: null,
+    });
+    risk(65, 'medium');
+    const r = await runCrisisPipeline(TURN, 'chat');
+    expect(r.flagged).toBe(false);
+    expect(flagSessionCrisisMock).not.toHaveBeenCalled();
+    // A high turn under the same stamp still flags (and pages) for real.
+    risk(80, 'high');
+    const high = await runCrisisPipeline(TURN, 'chat');
+    expect(high.flagged).toBe(true);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 80);
+  });
 });
 
 describe('runCrisisPipeline — steering delivery per channel', () => {

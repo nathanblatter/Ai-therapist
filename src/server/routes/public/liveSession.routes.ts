@@ -191,8 +191,25 @@ export default function liveSessionRoutes(): Router {
         // already spent their quota on, not a new session.
         const isRecovery = req.body?.recovery === true;
 
+        // RETURN TO VOICE from a text hand-off (ai-therapist-356). A vendor
+        // cut now continues in typed chat, and once the risk check there has
+        // cleared the participant may start a new voice call. Like a recovery
+        // start it continues a session they already spent their quota on (and
+        // the chat's own end has just reset the cooldown clock), so it is not
+        // rate limited. The exemption is granted only when the server itself
+        // finds the chat session theirs, a hand-off, and cleared; a request
+        // that fails the check is an ordinary start under the ordinary rules.
+        let resumedFromChat: string | null = null;
+        if (!isRecovery && typeof req.body?.resume_from === 'string') {
+          const { verifyVoiceReturn } = await import('../../services/textHandoff.service.js');
+          const { canAccessSession } = await import('../../utils/sessionOwnership.js');
+          const chatId: string = req.body.resume_from;
+          if (await verifyVoiceReturn(chatId, (row, id) => canAccessSession(req, row, id))) resumedFromChat = chatId;
+        }
+        const isContinuation = isRecovery || resumedFromChat !== null;
+
         const limitCheck = await checkSessionLimits(userId, userRole);
-        if (!limitCheck.allowed && !isRecovery) {
+        if (!limitCheck.allowed && !isContinuation) {
           log.info({ reason: limitCheck.reason }, `Session limit exceeded for user ${userId}`);
           return res.status(429).json(await sessionLimitRefusalFor(limitCheck));
         }
@@ -202,7 +219,7 @@ export default function liveSessionRoutes(): Router {
         // Recovery skips this too: the terminated session may not have finished
         // its teardown yet, and returning "you already have a session" would
         // block the assistant's return with a message about session hygiene.
-        if (userId && !isRecovery) {
+        if (userId && !isContinuation) {
           const existing = await getActiveSessionForUser(userId);
           if (existing) {
             return res.status(200).json({
@@ -582,6 +599,14 @@ export default function liveSessionRoutes(): Router {
         // A recovery session continues a crisis the platform cut. Its own row
         // must say so, or every server-side crisis path (vendor-ceiling
         // recovery, on-call wording, the end_session guard) runs blind on it.
+        if (resumedFromChat) {
+          // Linked, so a later vendor cut of this call is seeded from the
+          // whole incident. Not flagged: the risk check cleared.
+          const { recordVoiceReturn } = await import('../../services/textHandoff.service.js');
+          await recordVoiceReturn(sessionId, resumedFromChat);
+          log.info(`Voice session ${sessionId} started from hand-off chat ${resumedFromChat} (risk check cleared)`);
+        }
+
         if (isRecovery) {
           try {
             const { markSessionCrisisContinuation } = await import('../../db/index.js');

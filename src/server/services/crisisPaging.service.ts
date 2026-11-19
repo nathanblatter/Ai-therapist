@@ -573,7 +573,8 @@ export function buildVendorCutMessage(
         (subject === 'third_party' ? ' (third party)' : subject === 'harm_to_others' ? ' (risk to others)' : ''),
       `Why: VENDOR CUT, not a new risk score. The participant lost the assistant mid-conversation; ` +
         whoseRiskBeforeCut(peak, score),
-      `Session ${shortId(sessionId)}. The app tries to reconnect them under a new session id; ` +
+      `Session ${shortId(sessionId)}. The app moves them to typed chat (a new voice call if chat is off) ` +
+        'under a new session id; ' +
         'further cuts in the next 15 minutes are recorded, not paged.',
       followUpLine(ctx),
       'Review the transcript and consider reaching out.',
@@ -587,8 +588,9 @@ export function buildVendorCutMessage(
           "threshold. The filter often cuts the assistant's screening question, so the participant's answer " +
           'may be what was lost.'
       : 'Why: VENDOR CUT. The risk level for this session could NOT be read, so treat it as possibly serious.',
-    `Session ${shortId(sessionId)}. The participant lost the assistant mid-conversation; the app tries to ` +
-      'reconnect them under a new session id. You are paged again at once if their risk rises.',
+    `Session ${shortId(sessionId)}. The participant lost the voice call mid-conversation; the app moves them ` +
+      'to typed chat (a new voice call if chat is off) under a new session id. You are paged again at once if ' +
+      'their risk rises.',
     followUpLine(ctx),
     'Review the transcript and consider reaching out.',
     adminLink(sessionId),
@@ -670,7 +672,8 @@ export function buildVendorCeilingMessage(
 ): string {
   return lines(
     'URGENT: AI-Therapist voice session hit the vendor session ceiling during a HIGH crisis flag',
-    'Why: VENDOR SESSION LIMIT, not a new risk score. The app is reconnecting them automatically.',
+    'Why: VENDOR SESSION LIMIT, not a new risk score. The app moves them to typed chat (a new voice call if ' +
+      'chat is off) under a new session id.',
     `Session ${shortId(sessionId)}`,
     followUpLine(ctx),
     'Review the transcript and consider reaching out.',
