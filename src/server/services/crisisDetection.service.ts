@@ -15,7 +15,7 @@ import {
   type OpenAIErrorInfo,
 } from '../utils/openaiErrors.js';
 import { assessorIncidentOpen, noteAssessorSuccess, noteAssessorFailure } from './riskAssessorHealth.service.js';
-import { RISK_BANDS, riskSeverityForScore } from '../../shared/riskBands.js';
+import { riskSeverityForScore } from '../../shared/riskBands.js';
 
 const log = createLogger('crisisDetection');
 
