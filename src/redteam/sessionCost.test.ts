@@ -145,9 +145,18 @@ describe('applySessionUsage with recorded rows', () => {
     expect(b.totalUsd).toBeCloseTo(
       priceTokens('gpt-5.2', 25_800, 1_120) +
         priceTokens('gpt-4o-mini', 6_400 + 3_100, 240 + 700) +
-        priceTokens('gpt-5', 4_200, 3_600),
+        priceTokens('gpt-5', 4_200, 3_600, { flex: true }),
       6,
     );
+  });
+
+  it('prices the post-session gpt-5 redaction at the flex rate (half), not gpt-4o-mini insights (not flex-eligible) (ai-therapist-383)', () => {
+    const p = plan();
+    applySessionUsage(p, RECORDED, SYSTEM_PROMPT_CHARS);
+    const post = p.cost.breakdown().byCategory['post-session']!.usd;
+    const standardRedaction = priceTokens('gpt-5', 4_200, 3_600);
+    expect(standardRedaction).toBeCloseTo((4_200 / 1e6) * 1.25 + (3_600 / 1e6) * 10, 9);
+    expect(post).toBeCloseTo(standardRedaction / 2 + priceTokens('gpt-4o-mini', 3_100, 700), 9);
   });
 
   it('is several times the old 700-token assumption for the same session', () => {

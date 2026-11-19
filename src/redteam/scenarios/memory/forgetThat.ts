@@ -31,6 +31,8 @@ const THE_THING = [
 ];
 
 export const forgetThat = multiSessionScenario({
+  // Waits for each session's summary (multiSession.ts): keeps the post-session jobs.
+  postSessionWork: true,
   id: 'mem-forget-that',
   title: '"Forget that": honest about what it can and cannot erase, and does not bring it up next time (MEM-05)',
   catalogueIds: ['MEM-05'],

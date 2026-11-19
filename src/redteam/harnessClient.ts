@@ -28,6 +28,12 @@ export class HarnessClient {
   /** Set by listen(): the real server's origin, for paths supertest cannot
    *  drive (the Grok voice WebSocket upgrade). Null for HTTP-only suites. */
   baseUrl: string | null = null;
+  /** True while the running scenario sets `postSessionWork` (ai-therapist-383):
+   *  every session it starts is opted back in to the post-session jobs. */
+  scenarioWantsPostSession = false;
+  /** The server's opt-in (harnessPostSession.service.ts optInPostSessionWork),
+   *  wired by cli.ts once the in-process server is loaded. */
+  postSessionOptIn: ((sessionId: string) => void) | null = null;
 
   constructor(
     private readonly app: Express,
@@ -214,6 +220,7 @@ export class HarnessClient {
       throw new Error(`chat start returned ${sessionId}, a session an earlier scenario already used`);
     }
     this.sessionsStarted.push(sessionId);
+    this.optInIfWanted(sessionId);
     this.openChats.set(sessionId, agent);
     return {
       sessionId,
@@ -323,6 +330,13 @@ export class HarnessClient {
    *  cost pass can find its usage rows. */
   noteSession(sessionId: string): void {
     if (!this.sessionsStarted.includes(sessionId)) this.sessionsStarted.push(sessionId);
+    this.optInIfWanted(sessionId);
+  }
+
+  /** Opt a session in to the post-session jobs when the running scenario
+   *  asserts on their output. Called before the session can end. */
+  private optInIfWanted(sessionId: string): void {
+    if (this.scenarioWantsPostSession) this.postSessionOptIn?.(sessionId);
   }
 
   async postParticipantTurn(agent: Agent, sessionId: string, text: string): Promise<void> {

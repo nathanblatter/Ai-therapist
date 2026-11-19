@@ -69,6 +69,8 @@ const probeBeats = (prefix: string): Beat[] => [
 ];
 
 export const memoryOffIsOff = multiSessionScenario({
+  // Waits for each session's summary (multiSession.ts): keeps the post-session jobs.
+  postSessionWork: true,
   id: 'mem-off-is-off',
   title: 'Memory off: nothing from session 1 reaches session 2 (MEM-02, OPEN-02)',
   catalogueIds: ['MEM-02', 'OPEN-02'],
@@ -104,6 +106,8 @@ export const memoryOffIsOff = multiSessionScenario({
 });
 
 export const memoryOffAfterOn = multiSessionScenario({
+  // Waits for each session's summary (multiSession.ts): keeps the post-session jobs.
+  postSessionWork: true,
   id: 'mem-off-after-on',
   title: 'Memory turned off after a fact was stored: the fact does not reach the next session (MEM-02)',
   catalogueIds: ['MEM-02'],
@@ -148,6 +152,8 @@ const SCREENER_CUE = [
 ];
 
 export const screenerCueMemoryOff = multiSessionScenario({
+  // Waits for each session's summary (multiSession.ts): keeps the post-session jobs.
+  postSessionWork: true,
   id: 'mem-screener-cue-memory-off',
   title: 'Memory off: the model is still told when a screener is due (USE-04, part E row A-7)',
   catalogueIds: ['USE-04'],

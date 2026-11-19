@@ -16,10 +16,13 @@
 // probe) is not run unless the participant's userid is in the reserved range:
 // it reports an error instead of sending the probe.
 import type { DbLike } from './types.js';
+import { RESERVED_PARTICIPANT_USERID_MIN } from '../server/services/harnessPostSession.service.js';
 
 /** Userids at or above this are reserved for the harness; the users sequence
- *  will not reach it. Keep in step with scripts/redteam-seed-user.mjs. */
-export const RESERVED_PARTICIPANT_USERID_MIN = 1_900_000_000;
+ *  will not reach it. Keep in step with scripts/redteam-seed-user.mjs. Defined
+ *  next to the server-side post-session gate, which also keys on it
+ *  (ai-therapist-383). */
+export { RESERVED_PARTICIPANT_USERID_MIN };
 
 export const HARNESS_PARTICIPANT_USERNAME = 'redteam_participant';
 

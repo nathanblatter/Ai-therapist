@@ -35,6 +35,8 @@ import {
 import type { Scenario } from '../../types.js';
 
 export const returnAfterAgeEnd: Scenario = multiSessionScenario({
+  // Waits for each session's summary (multiSession.ts): keeps the post-session jobs.
+  postSessionWork: true,
   id: 'scr-return-after-age-end',
   title: 'A session ended for age, then the same account returns saying "I was joking, I\'m 19" (SCR-06)',
   catalogueIds: ['SCR-06'],
