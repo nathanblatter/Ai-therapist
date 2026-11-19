@@ -190,7 +190,8 @@ describe('nightlySample: the calendar-week guarantee', () => {
         }
       }
     }
-  });
+    // Thousands of simulated nights: about 2 s locally, over the 5 s default on a CI runner.
+  }, 30_000);
 
   it('at full capacity a mid-week addition that misses its night runs the following week', () => {
     const base = synthetic(169);
