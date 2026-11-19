@@ -187,8 +187,9 @@ export class HarnessClient {
    *  (ai-therapist-307), so a pre-existing session is an error here, as is a
    *  session id this client has handed out before. Scenarios start through
    *  startFreshChat, which clears a leaked session first. */
-  async startChat(agent: Agent): Promise<{ sessionId: string; opening: string | null }> {
-    let res = await agent.post('/api/chat/start').send({ language: 'en' });
+  async startChat(agent: Agent, opts: ChatStartOptions = {}): Promise<{ sessionId: string; opening: string | null }> {
+    const body = { language: 'en', ...(opts.checkin ? { checkin: opts.checkin } : {}) };
+    let res = await agent.post('/api/chat/start').send(body);
     // chat.routes' chatStartLimiter allows 20 starts per 15 minutes per IP, and
     // every in-process scenario shares one IP. A full suite with 20+ chat
     // scenarios can trip it; the limiter's own 429 carries no body (a session-
@@ -198,7 +199,7 @@ export class HarnessClient {
     if (res.status === 429 && !res.body?.error && Number.isFinite(resetSeconds) && resetSeconds <= 16 * 60) {
       console.warn(`[redteam] chat start rate-limited; waiting ${resetSeconds}s for the limiter window`);
       await sleep((resetSeconds + 1) * 1000);
-      res = await agent.post('/api/chat/start').send({ language: 'en' });
+      res = await agent.post('/api/chat/start').send(body);
     }
     if (res.status !== 200 || !res.body?.sessionId) {
       throw new Error(`chat start failed: ${res.status} ${JSON.stringify(res.body)}`);
@@ -220,9 +221,12 @@ export class HarnessClient {
    *  still has open (a previous scenario that never reached its teardown) is
    *  ended through the normal /api/chat/end route and reported loudly, then the
    *  start is retried once; a second pre-existing session throws. */
-  async startFreshChat(agent: Agent): Promise<{ sessionId: string; opening: string | null }> {
+  async startFreshChat(
+    agent: Agent,
+    opts: ChatStartOptions = {},
+  ): Promise<{ sessionId: string; opening: string | null }> {
     try {
-      return await this.startChat(agent);
+      return await this.startChat(agent, opts);
     } catch (err) {
       if (!(err instanceof StaleChatSessionError)) throw err;
       console.error(
@@ -231,7 +235,7 @@ export class HarnessClient {
       );
       this.staleSessionsEnded.push(err.sessionId);
       await this.endChat(agent, err.sessionId);
-      return this.startChat(agent);
+      return this.startChat(agent, opts);
     }
   }
 
@@ -375,6 +379,12 @@ export class HarnessClient {
     }
     return e.room === `session:${sessionId}` || e.room.includes(sessionId);
   }
+}
+
+/** What a scenario can send with /api/chat/start besides the language. */
+export interface ChatStartOptions {
+  /** The pre-session check-in, as the client's check-in form posts it. */
+  checkin?: { mood?: number; topic?: string; goal?: string };
 }
 
 /** /api/chat/start handed back a session the participant already had open. */

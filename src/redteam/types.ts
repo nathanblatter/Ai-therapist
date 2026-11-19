@@ -60,6 +60,9 @@ export interface Turn {
   role: 'user' | 'assistant';
   text: string;
   beatId?: string;
+  /** Multi-session scenarios only: the `SessionSpec.id` this turn belongs to,
+   *  so the combined transcript in summary.json can be read session by session. */
+  session?: string;
   /** GPT-Live voice runs only: which layer produced this assistant turn, read
    *  from the data channel. `voice` = the voice model answered on its own (no
    *  delegation started in the turn's window); `delegated` = the voice model
@@ -131,6 +134,11 @@ export interface AssertionContext {
   lastMessageBody?: unknown;
   /** Set on the assistant pipeline only. */
   assistant?: AssistantTurnState;
+  /** Multi-session scenarios only (multiSession.ts): every session the
+   *  scenario has started so far, in order, the current one last. `sessionId`
+   *  and `transcript` above are the CURRENT session's, so single-session
+   *  assertions work unchanged inside any one session. */
+  sessions?: SessionRecord[];
   pool: DbLike;
   classify: ClassifyFn;
   dryRun: boolean;
@@ -173,10 +181,100 @@ export interface Beat {
   voice?: { delegate?: 'required' | 'forbidden' | 'optional'; crisis?: boolean };
 }
 
+/** A fresh account a multi-session scenario runs as. Created per run with a
+ *  reserved userid (participantIdentity.ts), so nothing carries over between
+ *  runs and no probe is attributable to a real participant's identifier. */
+export interface ParticipantSpec {
+  /** users.memory_enabled at creation (the participant's own consent to
+   *  cross-session memory; the product default is off). */
+  memoryEnabled: boolean;
+  /** users.risk_context_share_enabled (a therapist's opt-in to share prior
+   *  crisis history with the AI; research participants do not have it). */
+  riskContextShare?: boolean;
+}
+
+/** What a session hook can reach. Hooks seed state a scenario needs (a
+ *  clinician note, a memory toggle through the real route) or act as the
+ *  participant's browser would (posting a completed screener). */
+export interface SessionHookEnv {
+  pool: DbLike;
+  dryRun: boolean;
+  /** Every participant the scenario declared, by key. */
+  participants: Record<string, { userId: number; username: string }>;
+  /** The participant this session belongs to. */
+  userId: number;
+  /** Unset in `before` (the session has not started yet). */
+  sessionId?: string;
+  /** Sessions so far, the current one last once it has started. */
+  sessions: SessionRecord[];
+  /** An authenticated request as this session's participant. */
+  request: (method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown) => Promise<{ status: number; body: unknown }>;
+  /** Record something for assertions to read (`SessionRecord.observations`).
+   *  In `before` it lands on the session about to start. */
+  observe: (key: string, value: unknown) => void;
+}
+
+/** One session of a multi-session chat scenario. */
+export interface SessionSpec {
+  id: string;
+  /** Key into `Scenario.participants`. Default: the first one declared. */
+  participant?: string;
+  /** Days between this participant's previous activity and this session. The
+   *  harness cannot move the server's clock, so it moves the past instead:
+   *  every row belonging to this participant is aged by this many days before
+   *  the session starts (multiSession.ts `ageParticipantHistory`). Everything
+   *  the server computes against now() (dates in the memory block, the
+   *  seven-day screener window, "since last session") then sees the gap. */
+  daysSincePrevious?: number;
+  /** Pre-session check-in, sent with /api/chat/start as the client sends it. */
+  checkin?: { mood?: number; topic?: string; goal?: string };
+  beats: Beat[];
+  /** Runs before the session starts (after any ageing). */
+  before?: (env: SessionHookEnv) => Promise<void>;
+  /** Runs after the last beat while the session is still active. */
+  beforeEnd?: (env: SessionHookEnv) => Promise<void>;
+  /** Run once the session has ended and its post-session jobs (summary, case
+   *  profile) have settled, so they can read what the next session will get. */
+  assertAfter?: AssertionSpec[];
+}
+
+/** What the harness recorded about one session of a multi-session scenario. */
+export interface SessionRecord {
+  /** `SessionSpec.id`. */
+  id: string;
+  sessionId: string;
+  /** Key into `Scenario.participants`. */
+  participant: string;
+  userId: number;
+  username: string;
+  /** The server-authored opening line, as /api/chat/start returned it. */
+  opening: string | null;
+  /** The assembled system prompt the session ran on
+   *  (session_configurations.instructions): base prompt plus memory block
+   *  plus check-in. This is what was BUILT for the participant. */
+  systemPrompt: string;
+  transcript: Turn[];
+  /** session_insights.summary once the post-session job has written it
+   *  (null in dry-run and until the session has ended). */
+  summary: Record<string, unknown> | null;
+  /** Whatever the scenario's hooks recorded with `observe`. */
+  observations: Record<string, unknown>;
+}
+
 export interface Scenario {
   id: string;
   title: string;
   pipeline: Pipeline;
+  /** IDs in docs/eval-scenario-catalogue.md this scenario covers (e.g.
+   *  `MEM-02`). */
+  catalogueIds?: string[];
+  /** Chat pipeline: the scenario spans these sessions, in order
+   *  (multiSession.ts). `beats` must then be the sessions' beats flattened
+   *  (use `multiSessionScenario`), so everything that walks `beats` still
+   *  sees every assertion. */
+  sessions?: SessionSpec[];
+  /** Accounts `sessions` run as, by key. Required with `sessions`. */
+  participants?: Record<string, ParticipantSpec>;
   modality?: string;
   /** Test-only fault or fixture installed around the run and undone after it,
    *  pass or fail (e.g. the risk assessor made unreachable). Lives in the

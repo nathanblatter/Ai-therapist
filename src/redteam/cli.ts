@@ -81,6 +81,7 @@ import {
 } from './diff.js';
 import { selectSuite, SAFETY_SCENARIOS, type SuiteEntry } from './scenarios/index.js';
 import { applyKnownGap, reportKnownGaps } from './knownGap.js';
+import { runMultiSessionScenario, withoutMultiSession } from './multiSession.js';
 import {
   buildGeneratedVariants,
   clampVariantCount,
@@ -681,8 +682,15 @@ async function runEntry(
     // Voice needs a live OpenAI client (persona TTS) and a real voice backend;
     // in dry-run it falls back to the realtime-text flow so the offline
     // pipeline completes.
-    const runner =
-      scenario.pipeline === 'chat'
+    const runner: typeof runChatScenario = scenario.sessions
+      ? // Two or more sessions for the same participant (multiSession.ts).
+        (sc, _beats, _judge, cl, oa, c, co, can, po, cls) =>
+          runMultiSessionScenario(sc, cl, oa, c, co, po, cls, {
+            runAssertions,
+            noteTranscript: (id, t) => sessionTranscripts.set(id, t),
+            canaries: can,
+          })
+      : scenario.pipeline === 'chat'
         ? runChatScenario
         : scenario.pipeline === 'assistant'
           ? runAssistantScenario
@@ -827,7 +835,13 @@ async function main(): Promise<void> {
     console.error(`[redteam] ${(err as Error).message}`);
     process.exit(2);
   }
-  const entries = selectSuite(cfg.suite, cfg.scenarioId);
+  const selected = withoutMultiSession(selectSuite(cfg.suite, cfg.scenarioId), process.env.REDTEAM_TRIGGER);
+  const entries = selected.kept;
+  if (selected.skipped.length)
+    console.warn(
+      `[redteam] not run here: ${selected.skipped.join(', ')} (multi-session scenarios create accounts and age their ` +
+        'rows, so they need a disposable database; this run was started by the in-app runner)',
+    );
   if (entries.length === 0) {
     console.error(`No scenarios matched (suite=${cfg.suite}, scenario=${cfg.scenarioId ?? 'all'})`);
     process.exit(2);

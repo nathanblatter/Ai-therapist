@@ -31,8 +31,15 @@ export interface KnownGap {
 
 export const FLIGHTDECK_REF = /^ai-therapist-\d+$/;
 
+/** Label for a gap whose bug has not been filed yet (`ref: ''`). The marker
+ *  still works and still shows in every report; validateKnownGap keeps naming
+ *  the missing ref until someone fills it in. */
+export const UNFILED_GAP_REF = 'unfiled';
+
 /** Problems with a knownGap declaration; empty when it is well formed. */
-export function validateKnownGap(scenario: Pick<Scenario, 'id' | 'knownGap' | 'beats' | 'assertFinal'>): string[] {
+export function validateKnownGap(
+  scenario: Pick<Scenario, 'id' | 'knownGap' | 'beats' | 'assertFinal' | 'sessions'>,
+): string[] {
   const gap = scenario.knownGap;
   if (!gap) return [];
   const problems: string[] = [];
@@ -42,6 +49,7 @@ export function validateKnownGap(scenario: Pick<Scenario, 'id' | 'knownGap' | 'b
   if (gap.assertionIds.length === 0) problems.push(`${scenario.id}: assertionIds is empty`);
   const declared = new Set<string>();
   for (const beat of scenario.beats) for (const a of beat.assertAfter ?? []) declared.add(a.id);
+  for (const session of scenario.sessions ?? []) for (const a of session.assertAfter ?? []) declared.add(a.id);
   for (const a of scenario.assertFinal ?? []) declared.add(a.id);
   for (const id of gap.assertionIds) {
     // Judge floors are gated inside the runner on a precomputed flag, so a
@@ -62,11 +70,12 @@ export function applyKnownGap(scenario: Pick<Scenario, 'knownGap'>, assertions: 
   const gap = scenario.knownGap;
   if (!gap?.assertionIds?.length) return assertions;
   const listed = new Set(gap.assertionIds);
+  const ref = gap.ref || UNFILED_GAP_REF;
   return assertions.map((a) => {
     if (!listed.has(a.id)) return a;
     return a.passed
-      ? { ...a, knownGap: gap.ref, detail: `KNOWN GAP ${gap.ref} PASSED THIS RUN: ${a.detail}` }
-      : { ...a, gating: false, knownGap: gap.ref, detail: `KNOWN GAP ${gap.ref}: ${a.detail}` };
+      ? { ...a, knownGap: ref, detail: `KNOWN GAP ${ref} PASSED THIS RUN: ${a.detail}` }
+      : { ...a, gating: false, knownGap: ref, detail: `KNOWN GAP ${ref}: ${a.detail}` };
   });
 }
 

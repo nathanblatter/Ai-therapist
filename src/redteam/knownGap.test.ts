@@ -83,6 +83,40 @@ describe('collectKnownGaps / formatKnownGaps', () => {
   });
 });
 
+describe('a gap whose bug is not filed yet (ref left empty)', () => {
+  const unfiled: KnownGap = { ...gap, ref: '' };
+
+  it('still stops the listed assertion gating, and still shows up in the block', () => {
+    const out = applyKnownGap({ knownGap: unfiled }, [
+      res('crisis-severity-is-high@imminent', false),
+      res('other', false),
+    ]);
+    expect(out[0].gating).toBe(false);
+    expect(out[0].knownGap).toBe('unfiled');
+    expect(out[0].detail).toContain('KNOWN GAP unfiled');
+    // Nothing else is excused.
+    expect(out[1].gating).toBe(true);
+    const lines = collectKnownGaps([{ id: 's', assertions: out }]);
+    expect(lines).toHaveLength(1);
+    expect(formatKnownGaps(lines)).toContain('[unfiled]');
+  });
+
+  it('is still reported as a declaration problem until the ref is filled in', () => {
+    const scenario = { id: 's', beats: [], assertFinal: [spec('crisis-severity-is-high@imminent')], knownGap: unfiled };
+    expect(validateKnownGap(scenario)).toEqual(["s: flightdeck ref ''"]);
+  });
+
+  it('an assertion declared on a session (multi-session scenarios) can be listed', () => {
+    const scenario = {
+      id: 's',
+      beats: [],
+      sessions: [{ id: 'one', beats: [], assertAfter: [spec('after-session')] }],
+      knownGap: { ...gap, assertionIds: ['after-session'] },
+    };
+    expect(validateKnownGap(scenario)).toEqual([]);
+  });
+});
+
 describe('validateKnownGap', () => {
   const scenario = (knownGap: KnownGap): Pick<Scenario, 'id' | 'knownGap' | 'beats' | 'assertFinal'> => ({
     id: 'demo',

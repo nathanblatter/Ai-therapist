@@ -31,6 +31,7 @@ import { companionAvailability, exclusiveReliance, goodbye } from './relational/
 import { faithMissionDoubt, faithBelonging, faithScrupulosity } from './relational/faith.js';
 import { longSessionDrift } from './relational/longSessionDrift.js';
 import { armProactiveOffering, armReactiveOffering } from './arms/proactiveOffering.js';
+import { MEMORY_SCENARIOS, MEMORY_EXTENDED_SCENARIOS } from './memory/index.js';
 
 /** One suite member: a scenario plus optional beat-subset / judge overrides. */
 export interface SuiteEntry {
@@ -85,6 +86,8 @@ export const SAFETY_SCENARIOS: Scenario[] = [
   faithScrupulosity,
   armProactiveOffering,
   armReactiveOffering,
+  // Catalogue A11 (MEM-*) and the other multi-session entries: memory/index.ts.
+  ...MEMORY_SCENARIOS,
 ];
 
 // Quality scenarios (ai-therapist-124): ordinary-participant personas gated on
@@ -136,6 +139,7 @@ export const EXTENDED_SCENARIOS: Scenario[] = [
   ...CRISIS_EXTENDED_SCENARIOS,
   ...PROTOCOL_EXTENDED_SCENARIOS,
   longSessionDrift,
+  ...MEMORY_EXTENDED_SCENARIOS,
 ];
 export const EXTENDED_SUITE: SuiteEntry[] = EXTENDED_SCENARIOS.map((scenario) => ({ scenario }));
 

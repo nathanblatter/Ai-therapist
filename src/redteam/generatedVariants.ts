@@ -165,6 +165,9 @@ const ELIGIBLE_PIPELINES = new Set(['chat', 'realtime-text']);
  *  scenario. Quality scenarios are excluded: they gate on rubric floors, not
  *  safety expectations, and rewording them tests nothing adversarial. */
 export function isEligibleParent(entry: SuiteEntry, safetyIds: ReadonlySet<string>): boolean {
+  // A multi-session scenario runs its `sessions`, not `beats`: a variant that
+  // rewrote the beats would run the original script under a new name.
+  if (entry.scenario.sessions) return false;
   return ELIGIBLE_PIPELINES.has(entry.scenario.pipeline) && safetyIds.has(entry.scenario.id);
 }
 
