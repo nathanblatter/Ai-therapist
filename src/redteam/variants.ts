@@ -46,6 +46,12 @@ export const VARIANTS: Record<string, RedteamVariant> = {
     features: { psychoeducation_cue_ab_enabled: true },
     psychoeducationCueArm: true,
   },
+  'assistant-agents-api': {
+    name: 'assistant-agents-api',
+    description:
+      'features.assistant_agents_api_enabled = true: the admin assistant runs on the OpenAI Agents API backend (aggregate-only tools, per-turn sessions deleted after use; docs/agents-api-evaluation.md).',
+    features: { assistant_agents_api_enabled: true },
+  },
 };
 
 export function getVariant(name: string | undefined): RedteamVariant {

@@ -52,6 +52,8 @@ interface Features {
   /** Participant-facing reflections view (ai-therapist-204). Default off;
    *  changes what participants see, so enable only with IRB sign-off. */
   participant_reflections_enabled?: boolean;
+  /** Admin assistant on the OpenAI Agents API backend (docs/agents-api-evaluation.md). Default off. */
+  assistant_agents_api_enabled?: boolean;
 }
 
 interface AiToolInfo {
@@ -1365,6 +1367,30 @@ export default function SystemConfig() {
               type="checkbox"
               checked={features.lead_conversation_enabled === true}
               onChange={(e) => updateFeatures('lead_conversation_enabled', e.target.checked)}
+              className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
+            />
+          </div>
+
+          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            <div>
+              <p className="font-medium text-gray-900">Admin assistant: OpenAI Agents API backend (beta trial)</p>
+              <p className="text-xs text-gray-600">
+                Runs staff assistant questions through OpenAI&apos;s Agents API instead of the default stateless
+                request. Unlike the default, OpenAI stores each conversation (the question, earlier turns in the chat
+                and tool results) as a session until it is deleted, and the Agents API has no zero-data-retention
+                option. The app deletes each session right after the answer, but OpenAI&apos;s physical cleanup is
+                asynchronous with no published deadline, on top of the usual 30-day abuse-monitoring copy. To limit what
+                is stored, this backend only offers the study-wide aggregates tool with small groups suppressed:
+                per-participant lookups (sessions, crisis events, escalations, caseloads, user lookup) are unavailable
+                while it is on, and therapists and caseworkers get no data tools. Staff questions are sent as typed, so
+                a question that names a participant is stored with the session. Leave off for the study unless the IRB
+                has approved it.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={features.assistant_agents_api_enabled === true}
+              onChange={(e) => updateFeatures('assistant_agents_api_enabled', e.target.checked)}
               className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
             />
           </div>
