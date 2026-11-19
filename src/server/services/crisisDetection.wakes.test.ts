@@ -885,7 +885,9 @@ describe('ai-therapist-353: the assessor says what a high turn states is happeni
       const schema = createMock.mock.calls[0][0].response_format.json_schema.schema;
       expect(schema.required).toContain('acute');
       expect(schema.properties.acute.enum).toEqual(['none', 'plan_or_time', 'attempt']);
-      expect(RISK_ASSESSMENT_PROMPT).toMatch(/"acute": what the latest participant message itself says is happening/);
+      expect(RISK_ASSESSMENT_PROMPT).toMatch(
+        /"acute": decide this AFTER the score, and only when the score is 65 or more/,
+      );
     });
   });
 });
@@ -908,6 +910,89 @@ describe('rubric bands are contiguous and agree with src/shared/riskBands.ts', (
 
   it('a figure of speech about themselves is separated from intent by trigger and tone', () => {
     expect(RISK_ASSESSMENT_PROMPT).toMatch(/Figures of speech about THEMSELVES → 0-10, none, context "reference"/);
-    expect(RISK_ASSESSMENT_PROMPT).toMatch(/"lol" or "jk" follows a statement that is serious by itself/);
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/Without a named small trigger it is NOT a figure of speech/);
+  });
+});
+
+describe('a step toward help does not cross the page line by itself', () => {
+  const PASSIVE_SESSION = () =>
+    queryMock.mockImplementation(async (sql: unknown) =>
+      String(sql).includes('session-risk-context')
+        ? {
+            rows: [
+              {
+                crisis_flagged: true,
+                crisis_severity: 'medium',
+                recent: [{ risk_score: 55, score_factors: { method: 'llm_assessed' } }],
+              },
+            ],
+          }
+        : { rows: [] },
+    );
+  const SISTER = "I'm going to do it, I'll text my sister tonight.";
+
+  it('REPRODUCTION: the assessor reads "I\'ll text my sister tonight" as intent (65); the turn stays medium', async () => {
+    PASSIVE_SESSION();
+    createMock.mockResolvedValue(assess(65, 'genuine', ['stated intent']));
+
+    const result = await analyzeMessageRisk(turn(SISTER), []);
+
+    expect(result.riskScore).toBe(64);
+    expect(result.severity).toBe('medium');
+    expect(riskRow()).toMatchObject({ help_step_cap: true, llm_score: 65 });
+  });
+
+  it.each([
+    "ok, I'll call the counseling center tomorrow",
+    "I've decided to tell my roommate how bad it has gotten",
+    'i can text my mom i guess',
+    "I'm gonna book that appointment now",
+  ])('is a help step: %s', async (text) => {
+    const { announcesHelpStep } = await import('./crisisDetection.service.js');
+    expect(announcesHelpStep(text)).toBe(true);
+  });
+
+  it.each([
+    "I'm going to do it tonight, I've decided.",
+    "I'll call my mom to say goodbye",
+    'I will text my sister. This is goodbye.',
+    'my sister texted me',
+    "I'm going to the store",
+  ])('is not a help step: %s', async (text) => {
+    const { announcesHelpStep } = await import('./crisisDetection.service.js');
+    expect(announcesHelpStep(text)).toBe(false);
+  });
+
+  it('intent without a help step is not capped', async () => {
+    PASSIVE_SESSION();
+    createMock.mockResolvedValue(assess(85, 'genuine', ['stated intent']));
+    const result = await analyzeMessageRisk(turn("I'm going to do it tonight, I've decided."), []);
+    expect(result.riskScore).toBe(85);
+  });
+
+  it('a help step that also carries a crisis keyword is not capped', async () => {
+    PASSIVE_SESSION();
+    createMock.mockResolvedValue(assess(85, 'genuine'));
+    const result = await analyzeMessageRisk(turn("I'll text my sister, then I'm going to kill myself"), []);
+    expect(result.riskScore).toBe(85);
+  });
+
+  it('in a session already at high nothing is capped', async () => {
+    queryMock.mockImplementation(async (sql: unknown) =>
+      String(sql).includes('session-risk-context')
+        ? {
+            rows: [
+              {
+                crisis_flagged: true,
+                crisis_severity: 'high',
+                recent: [{ risk_score: 85, score_factors: { method: 'llm_assessed' } }],
+              },
+            ],
+          }
+        : { rows: [] },
+    );
+    createMock.mockResolvedValue(assess(80, 'genuine'));
+    const result = await analyzeMessageRisk(turn(SISTER), []);
+    expect(result.riskScore).toBe(80);
   });
 });

@@ -671,6 +671,28 @@ export function repliesToSafetyQuestion(history: HistoryMessage[]): boolean {
 }
 
 // ============================================
+// A STEP TOWARD HELP
+// ============================================
+// First person, future, contacting a named support. Used for one thing only:
+// such a message does not cross the page line by itself (analyzeMessageRisk).
+// Not matched when the same message says goodbye ("I'll call my mom to say
+// goodbye"): that is checked through the farewell signals.
+const HELP_STEP_PATTERN = new RegExp(
+  "\\bi(?:'ll| will|'m going to| am going to| can| could| should|'ve decided to| have decided to| decided to| want to)\\b" +
+    "[\\w\\s,'-]{0,40}?\\b(?:text|call|message|talk to|talk with|tell|email|reach out to|see|go to|go see|book|schedule|make)\\b" +
+    "[\\w\\s,'-]{0,25}?\\b(?:my (?:sister|brother|mom|mother|dad|father|parents|roommate|friend|best friend|partner|boyfriend|girlfriend|husband|wife|therapist|counselor|counsellor|doctor|ra|bishop|pastor|aunt|uncle|cousin|family|grandma|grandmother)" +
+    '|a (?:counselor|counsellor|therapist|doctor|friend)|the (?:counseling center|crisis line|hotline|lifeline|counselor|doctor)|caps|988|an appointment|that appointment|the appointment|someone i trust)\\b',
+);
+
+/** Does the message announce a step toward help (see HELP_STEP_PATTERN)? Exported for tests. */
+export function announcesHelpStep(content: string): boolean {
+  if (!content) return false;
+  const text = normalizeForScreen(content);
+  if (!HELP_STEP_PATTERN.test(text)) return false;
+  return !matchContextSignals(text).some((s) => s.kind === 'farewell');
+}
+
+// ============================================
 // STAGE 1d: LOW-CONTENT FRAGMENTS (ai-therapist-349)
 // ============================================
 // Voice transcripts arrive as fragments, some of them mis-heard. In a real
@@ -1126,7 +1148,7 @@ Return STRICT JSON only:
 Context judgment matters more than keywords:
 - "reference": mentioning a hotline's name, suicide prevention, a movie/book/news story → score 0-10, severity none.
 - "negated": "I'm not suicidal", "I'd never hurt myself" → score 0-15, severity none (unless other signals contradict).
-- Figures of speech about THEMSELVES → 0-10, none, context "reference". An exaggeration tied to a small everyday frustration and said lightly: "I'm literally going to kill myself if I fail this quiz lol", "this traffic makes me want to die", "kill me now, another group project", "I could die of embarrassment". The test is the trigger and the tone: a minor annoyance, a joking register, and nothing else concerning in the conversation. It is NOT a figure of speech, and is scored as genuine, when a real loss, hopelessness or earlier risk is in the conversation, when the thought is repeated or elaborated, when the participant says they mean it, or when "lol" or "jk" follows a statement that is serious by itself ("I want to kill myself lol").
+- Figures of speech about THEMSELVES → 0-10, none, context "reference". Only an exaggeration whose own sentence names the small everyday thing that set it off, said lightly: "I'm literally going to kill myself if I fail this quiz lol", "this traffic makes me want to die", "kill me now, another group project", "I could die of embarrassment". Without a named small trigger it is NOT a figure of speech, whatever the tone: "I want to kill myself lol" and "I'm just gonna go to sleep and not wake up lol" are scored as the ideation they state, and "lol" or "jk" does not lower them. It is also not a figure of speech when a real loss, hopelessness or earlier risk is in the conversation, when the thought is repeated or elaborated, or when the participant says they mean it.
 - "bystander": talking about someone ELSE's loss, past struggles or ordinary worry about them → score 0-24, severity none (the participant's own grief may warrant low, 25-35). Someone else's CURRENT suicidal crisis is different and is scored by the "Third party at risk" rule below.
 - "genuine" acute distress WITHOUT ideation → 15-30 (none to low). Distress alone is hopelessness, worthlessness, exhaustion, "can't take it" — e.g. "I just feel hopeless and worthless lately" is 15-30. It is NOT passive ideation: reserve that label for an expressed wish to die, disappear, not exist, not wake up, not be here, or not have to go on. Never score distress alone as medium.
 - "genuine" passive ideation → 50-64, medium, ALWAYS at least 50 and, with nothing more than a passive wish, below 65. C-SSRS counts a passive wish to be dead as ideation, not as distress, so it must reach medium — never score it low. This includes INDIRECT and euphemistic phrasing, which is how participants usually say it first: "it would be easier if I didn't have to do this anymore", "I wouldn't mind not waking up", "I'm tired of being here", "I just want it all to be over", "everyone would be fine without me", "I don't want to be here anymore", "no point going on". Hedges and softeners ("I think", "sometimes", "just", "kind of", "maybe") do NOT downgrade it — tentative wording is the normal way passive ideation is disclosed. Absence of a plan, method, or intent does NOT downgrade it either; that is the difference between passive ideation and active ideation, which scores higher still.
@@ -1141,7 +1163,7 @@ Resolve references against the conversation before scoring. The latest message i
 The last two fields are plain observations, not risk judgments. Answer them literally and independently of the score:
 - "states_intent": true ONLY when the latest participant message itself, read against the conversation, says that they (the participant, not a third party they are reporting about) intend or have decided to end their own life or hurt themselves, names a time for it, says they have a plan or the means at hand, says goodbye in that sense, or says they have already acted. false when the latest message is about getting help or taking a safety step, an ordinary plan or decision, a retraction or reassurance, a question, or anything else; earlier risk in the conversation does not make it true.
 - "loss_or_disclosure": true when anywhere in the transcript the PARTICIPANT reports a significant loss or setback of their own (failing or being dropped from a program, a breakup, a death, losing a job, a serious diagnosis or other serious bad news), even stated flatly with no feelings named, or expresses hopelessness, or discloses suicidal thoughts or self-harm. Ordinary stress (a busy week, an upcoming exam, being tired) is false.
-- "acute": what the latest participant message itself says is happening to the person whose risk you scored. "attempt": an act to end their life has already been taken or is under way ("I already took the pills", "I did something tonight", "I'm doing it now"). "plan_or_time": intent stated together with a time, a plan or the means at hand ("tonight", "after my roommate leaves", "I have what I need"), or a goodbye in that sense. "none": everything else, including ideation with no time or plan, help-seeking, questions, retractions and anything already over.
+- "acute": decide this AFTER the score, and only when the score is 65 or more (otherwise "none"). It records what the latest participant message itself says is happening to the person whose risk you scored. "attempt": an act to end their life has already been taken or is under way ("I already took the pills", "I did something tonight", "I'm doing it now"). "plan_or_time": the message STATES intent to act and gives a time, a plan or the means at hand ("I'm going to do it tonight", "after my roommate leaves", "I have what I need"), or says goodbye in that sense. "none": everything else, including ideation with no time or plan, ambivalence ("maybe", "I don't know"), being alone, help-seeking, questions, retractions, anything already over, and the same words about an ordinary subject (a cover letter, an application).
 - The session risk context, when present, is background for understanding what the latest message refers to. It is not new evidence: a latest message that adds nothing ("ok", a change of subject, a practical question) must not be scored HIGHER than the level already noted, and ordinary life events mentioned afterwards are not warning signs merely because risk was noted earlier.
 Third party at risk. When the participant reports that SOMEONE ELSE is suicidal, keep context "bystander" and score what is happening to that other person:
 - ACTIVE or IMMINENT and unresolved → 80-100, high. That is: they said they are going to or want to kill themselves or end their life; they have a plan, a method or a time; an attempt has been made or is under way; they wrote or posted a goodbye or suicide note; or they said something suicidal (including not wanting to be alive) and now cannot be reached. A second-hand report ("she texted me", "he told me last night"), a calm participant, or the absence of a plan does not lower it: a real person may be in danger, and the study team is alerted so they can help the participant respond.
@@ -2105,6 +2127,29 @@ export async function analyzeMessageRisk(
       factors = [...factors, `trajectory: ${trajectory.trend}`];
     }
 
+    // A step toward help does not page by itself. "I'm going to do it, I'll
+    // text my sister tonight" after a passive-ideation turn is agreeing to
+    // reach out; the rubric says so in three places and the assessor still
+    // read it as intent whenever the rubric was edited somewhere else (it
+    // flipped to a page three times while this file was being changed, most
+    // recently at exactly 65). A message that announces contacting a named
+    // support (family, a friend, a counselor, a crisis line, an appointment),
+    // with no crisis keyword and no goodbye in it, cannot lift a session that
+    // was below high across the page line. It can still be scored up to 64
+    // (flagged), and in a session already at high nothing is capped.
+    let helpStepCapped = false;
+    if (
+      riskScore >= RISK_BANDS.high &&
+      sessionContext.recentPeak < RISK_BANDS.high &&
+      !(sessionContext.flagged && sessionContext.flaggedSeverity === 'high') &&
+      keywordAnalysis.keywordScore === 0 &&
+      announcesHelpStep(message.content)
+    ) {
+      riskScore = RISK_BANDS.high - 1;
+      helpStepCapped = true;
+      factors = [...factors, 'announces a step toward help (not scored above medium)'];
+    }
+
     const severity = severityForScore(riskScore);
     // Someone else's crisis, as judged by the assessor. Only at the flagging
     // levels: a low bystander score (ordinary worry, a past loss) labels nothing.
@@ -2217,6 +2262,7 @@ export async function analyzeMessageRisk(
                 }
               : {}),
             ...(message.source ? { source: message.source } : {}),
+            ...(helpStepCapped ? { help_step_cap: true } : {}),
             // Why a turn of a risk-bearing session was NOT context-assessed.
             ...(fragmentSkipped && !isSweep && !isModerationWake ? { low_content_fragment: true } : {}),
             // The assessor read the turn as someone else's crisis. Kept on the
