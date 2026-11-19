@@ -279,7 +279,8 @@ async function sendViaAwsSms(phone: string, message: string): Promise<AlertChann
       timeout.promise,
     ]);
     result.ok = result.partsAccepted === parts.length;
-    if (result.ok) log.info(`[alert] page accepted by AWS SMS (${parts.length} message${parts.length === 1 ? '' : 's'})`);
+    if (result.ok)
+      log.info(`[alert] page accepted by AWS SMS (${parts.length} message${parts.length === 1 ? '' : 's'})`);
   } catch (err) {
     abort.abort();
     result.error = errorCode(err);

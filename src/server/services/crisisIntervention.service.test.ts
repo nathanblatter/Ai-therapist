@@ -38,7 +38,9 @@ const {
 
 vi.mock('../config/db.js', () => ({ pool: { query: poolQueryMock } }));
 vi.mock('./crisisDetection.service.js', () => ({ logInterventionAction: logInterventionActionMock }));
-vi.mock('./crisisAlert.service.js', () => ({ sendCrisisAlert: sendCrisisAlertMock }));
+vi.mock('./crisisAlert.service.js', async () =>
+  (await import('../testing/alertMock.js')).alertModuleMock(sendCrisisAlertMock),
+);
 vi.mock('./sidebandManager.service.js', () => ({ sidebandManager: sidebandManagerMock }));
 vi.mock('../utils/sessionAutoTerminate.js', () => ({ liftLimitForCrisis: liftLimitForCrisisMock }));
 vi.mock('../utils/sessionHelpers.js', () => ({

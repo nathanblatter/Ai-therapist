@@ -33,14 +33,14 @@ const TRUNCATED_NOTE = ' [more on the dashboard]';
 const GSM_EXTENSION = new Set(['^', '{', '}', '\\', '[', '~', ']', '|']);
 
 const REPLACEMENTS: Array<[RegExp, string]> = [
-  [/[‘’‚′]/g, "'"],
-  [/[“”„″]/g, '"'],
-  [/[‐-―−]/g, '-'],
-  [/…/g, '...'],
-  [/[•·‣◦]/g, '-'],
-  [/[→⇒]/g, '->'],
-  [/[  -  ]/g, ' '],
-  [/[​-‍﻿]/g, ''],
+  [/[\u2018\u2019\u201A\u2032]/g, "'"],
+  [/[\u201C\u201D\u201E\u2033]/g, '"'],
+  [/[\u2010-\u2015\u2212]/g, '-'],
+  [/\u2026/g, '...'],
+  [/[\u2022\u00B7\u2023\u25E6]/g, '-'],
+  [/[\u2192\u21D2]/g, '->'],
+  [/[\u00A0\u2002-\u200A\u202F]/g, ' '],
+  [/[\u200B-\u200D\uFEFF]/g, ''],
   [/\r\n?/g, '\n'],
   [/\t/g, ' '],
   // Not in GSM-7 although it is ASCII.
@@ -57,8 +57,8 @@ const REPLACEMENTS: Array<[RegExp, string]> = [
 export function toGsm7(text: string): string {
   let out = text;
   for (const [pattern, replacement] of REPLACEMENTS) out = out.replace(pattern, replacement);
-  out = out.normalize('NFKD').replace(/[̀-ͯ]/g, '');
-  return out.replace(/[^\n\x20-\x7E]/g, '?');
+  out = out.normalize('NFKD').replace(/[\u0300-\u036F]/g, '');
+  return out.replace(/[^\n\x20-\x7E]/gu, '?');
 }
 
 /** Length in GSM-7 septets (extension characters count twice). */

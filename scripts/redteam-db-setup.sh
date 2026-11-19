@@ -36,6 +36,8 @@ fi
 # Strip any inherited paging config before any app code can read it.
 unset IMESSAGE_API_KEY || true
 unset CRISIS_ALERT_PHONE || true
+unset CRISIS_SMS_AWS_REGION || true
+unset CRISIS_SMS_ORIGINATION_IDENTITY || true
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 

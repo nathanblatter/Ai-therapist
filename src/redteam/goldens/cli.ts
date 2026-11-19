@@ -47,6 +47,9 @@ import 'dotenv/config';
 // person or reach a live dashboard.
 process.env.IMESSAGE_API_KEY = '';
 process.env.CRISIS_ALERT_PHONE = '';
+// The second paging channel (AWS SMS, ai-therapist-355) is blanked the same way.
+process.env.CRISIS_SMS_AWS_REGION = '';
+process.env.CRISIS_SMS_ORIGINATION_IDENTITY = '';
 process.env.SOCKET_PG_ADAPTER = 'off';
 process.env.NODE_ENV = 'test';
 // Quiet hours (when a deployment enables them) block new participant sessions

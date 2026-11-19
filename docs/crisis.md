@@ -372,6 +372,22 @@ Responses are tiered by severity/score:
     risk pipeline scored a turn; when the flag was raised by the model's `escalate_to_human`
     tool it says the score was set by the assistant asking for a human, and that it is the
     fixed score for that request.
+  - **Two paging channels, in parallel** (ai-therapist-355; `crisisAlert.service.ts`,
+    `docs/on-call-paging-setup.md`): the iMessage bridge and, once
+    `CRISIS_SMS_AWS_REGION` and `CRISIS_SMS_ORIGINATION_IDENTITY` are set, a carrier SMS
+    through AWS End User Messaging (`SendTextMessage`). With either variable unset the second
+    channel does not exist and nothing changes. Both go to the same on-call phone and obey
+    the same `crisis_alert.enabled` switch. **Delivered, for the folding rule above, means at
+    least one channel accepted the page.** Each channel has its own 5 s timeout, so one that
+    hangs never delays the other. The page's row records every channel attempted, whether it
+    accepted, an error code and the provider message ids (`paging.channels`; no phone number,
+    no message text). If every channel fails the row says `not_delivered`, the server logs
+    `ON-CALL PAGE NOT DELIVERED` at error level, emits `system:on-call-paging-failed` to the
+    researcher room and a `session:page-decision` notice ("Page NOT delivered") to Live
+    Monitoring; a single failed channel is reported the same way as degraded paging. The SMS
+    copy is the same text: plain 7-bit, one SMS up to 320 characters, otherwise numbered parts
+    (`(1/2) ...`) with the `Why:` line in the first. `npm run page:test` sends a labelled TEST
+    page through each configured channel; no route, socket event or tool can.
   Not covered (unchanged): system alerts (assessor outage, spend cap, lost monitoring
   connection, eval drift) and thread-message alerts, which have their own throttles or none.
 - **Risk score >= 25 (low and up)**: the system injects hidden de-escalation steering

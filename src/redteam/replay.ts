@@ -19,6 +19,9 @@ import 'dotenv/config';
 // ---- env guards (MUST run before importing server modules) ----------------
 process.env.IMESSAGE_API_KEY = '';
 process.env.CRISIS_ALERT_PHONE = '';
+// The second paging channel (AWS SMS, ai-therapist-355) is blanked the same way.
+process.env.CRISIS_SMS_AWS_REGION = '';
+process.env.CRISIS_SMS_ORIGINATION_IDENTITY = '';
 process.env.SOCKET_PG_ADAPTER = 'off'; // never fan emissions to live admin dashboards
 // ALWAYS test env (see cli.ts): production-mode secure cookies break the
 // in-process supertest login over plain HTTP.
