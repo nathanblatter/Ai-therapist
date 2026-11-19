@@ -17,8 +17,10 @@
 //
 // Nothing is reworded: the SMS says exactly what the other channel says.
 
-/** A page up to this many characters is sent as one SMS (two segments). */
-export const SMS_SINGLE_MAX = 320;
+/** A page up to this many GSM-7 septets is sent as one SMS: two concatenated
+ *  segments of 153 (the 7 that make 160 carry the concatenation header).
+ *  320 would have been three segments. */
+export const SMS_SINGLE_MAX = 306;
 
 /** Longest a numbered part may be, label included: two concatenated GSM-7
  *  segments are 306 characters. */

@@ -35,7 +35,7 @@ phone (System Config → `crisis_alert.phone`, else `CRISIS_ALERT_PHONE`).
 
 The SMS says exactly what the bridge message says; nothing is reworded per channel. Pages are
 plain 7-bit text (no participant name, no transcript text; a session id prefix, scores and the
-admin link, as before). A page of up to 320 characters is one SMS. A longer one is deliberately
+admin link, as before). A page of up to 306 characters (two GSM-7 segments) is one SMS. A longer one is deliberately
 split at line and sentence boundaries into numbered parts, `(1/2) ...`, each within two SMS
 segments, sent in order; the headline and the `Why:` line are always in part 1. Today's
 participant pages are 1 to 3 parts. The SMS channel counts as accepted only when every part was.
@@ -75,7 +75,11 @@ per region). Console: **AWS End User Messaging → SMS**.
    user whose credentials the app's AWS SDK already resolves) a policy with the single action
    `sms-voice:SendTextMessage`, with `Resource` set to the ARN of the toll-free number. No
    describe, no account or number management. The app reads credentials through the standard
-   AWS provider chain; do not add new key variables for this.
+   AWS provider chain; do not add new key variables for this. The IAM reference lists five
+   resource types for this action (phone number, pool, sender ID, configuration set, protect
+   configuration). If the account has a default configuration set or protect configuration,
+   the call is also authorized against that resource; if the test page fails with
+   `AccessDeniedException` and the number ARN is in the policy, add that resource's ARN too.
 6. **For testing before verification lands:** while the account is in the sandbox, add the
    on-call phone as a *verified destination number* (Sandbox → Add destination, confirm the
    code). That lets the test page below go through.

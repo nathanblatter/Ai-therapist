@@ -390,7 +390,7 @@ Responses are tiered by severity/score:
     `ON-CALL PAGE NOT DELIVERED` at error level, emits `system:on-call-paging-failed` to the
     researcher room and a `session:page-decision` notice ("Page NOT delivered") to Live
     Monitoring; a single failed channel is reported the same way as degraded paging. The SMS
-    copy is the same text: plain 7-bit, one SMS up to 320 characters, otherwise numbered parts
+    copy is the same text: plain 7-bit, one SMS up to 306 characters (two segments), otherwise numbered parts
     (`(1/2) ...`) with the `Why:` line in the first. `npm run page:test` sends a labelled TEST
     page through each configured channel; no route, socket event or tool can.
   Not covered (unchanged): system alerts (assessor outage, spend cap, lost monitoring

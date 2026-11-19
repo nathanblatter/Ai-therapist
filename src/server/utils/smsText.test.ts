@@ -32,6 +32,10 @@ describe('toGsm7', () => {
 });
 
 describe('splitForSms', () => {
+  it('one message is at most two concatenated GSM-7 segments (2 x 153 septets)', () => {
+    expect(SMS_SINGLE_MAX).toBe(2 * 153);
+  });
+
   it('a page that fits goes as one message, unlabelled', () => {
     const text = 'x'.repeat(SMS_SINGLE_MAX);
     expect(splitForSms(text)).toEqual([text]);
@@ -40,7 +44,7 @@ describe('splitForSms', () => {
   });
 
   it('one character over is split into labelled parts that fit two segments', () => {
-    const text = `${'word '.repeat(64)}x`;
+    const text = `${'word '.repeat(61)}x`.padEnd(SMS_SINGLE_MAX + 1, 'y');
     expect(text.length).toBe(SMS_SINGLE_MAX + 1);
     const parts = splitForSms(text);
     expect(parts.length).toBe(2);

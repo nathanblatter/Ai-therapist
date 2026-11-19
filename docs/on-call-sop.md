@@ -81,6 +81,8 @@ record as a crisis flag of its own, with its score; if the incident had no
 adverse-event draft yet, one is drafted then.
 
 A text counts as delivered when at least one channel accepts it (see below).
+"Accepted" means the bridge or AWS took the message; neither can confirm it
+reached your handset.
 If your phone was off or out of coverage, texts for that participant may have
 been folded for up to 15 minutes: on coming back into coverage, check the
 dashboard.

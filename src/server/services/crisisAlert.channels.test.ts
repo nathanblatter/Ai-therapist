@@ -252,6 +252,42 @@ describe('both channels configured', () => {
     ]);
   });
 
+  it('a credentials error from the SDK is contained: the bridge delivers, only the error name is kept', async () => {
+    const alert = await load({ imessage: true, aws: true });
+    const err = Object.assign(new Error('Could not load credentials from any providers'), {
+      name: 'CredentialsProviderError',
+    });
+    awsSend.mockRejectedValue(err);
+    const delivery = await alert.sendCrisisAlertDetailed(PAGE);
+    expect(delivery.delivered).toBe(true);
+    expect(delivery.channels.find((c) => c.channel === 'aws_sms')).toMatchObject({
+      ok: false,
+      error: 'CredentialsProviderError',
+    });
+  });
+
+  it('if shaping the SMS text throws, the bridge result still stands (delivered, not hidden by the AWS side)', async () => {
+    vi.doMock('../utils/smsText.js', () => ({
+      splitForSms: () => {
+        throw new TypeError('boom');
+      },
+      toE164: (p: string) => p,
+    }));
+    try {
+      const alert = await load({ imessage: true, aws: true });
+      const delivery = await alert.sendCrisisAlertDetailed(PAGE);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(awsSend).not.toHaveBeenCalled();
+      expect(delivery.delivered).toBe(true);
+      expect(delivery.channels.map((c) => [c.channel, c.ok])).toEqual([
+        ['imessage', true],
+        ['aws_sms', false],
+      ]);
+    } finally {
+      vi.doUnmock('../utils/smsText.js');
+    }
+  });
+
   it('the admin switch turns both channels off', async () => {
     getSystemConfigMock.mockResolvedValue({ crisis_alert: { enabled: false, phone: PHONE } });
     const alert = await load({ imessage: true, aws: true });
@@ -341,7 +377,7 @@ describe('sendTestPage', () => {
       expect(text).toMatch(/^TEST PAGE: AI-Therapist on-call paging check\. This is NOT a participant event/);
       expect(text).toContain('2026-11-19T18:00:00.000Z');
       expect(text).not.toMatch(/URGENT|crisis flag|RISK SCORE|Session /);
-      expect(text.length).toBeLessThanOrEqual(320);
+      expect(text.length).toBeLessThanOrEqual(306);
     }
     expect(bridgeText).toContain('Channel: iMessage bridge.');
     expect(smsText).toContain('Channel: AWS SMS.');

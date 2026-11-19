@@ -233,17 +233,33 @@ async function getSmsClient(): Promise<NonNullable<typeof smsClient>> {
  *  only when every part was accepted. */
 async function sendViaAwsSms(phone: string, message: string): Promise<AlertChannelResult> {
   const started = Date.now();
-  const parts = splitForSms(message);
   const result: AlertChannelResult = {
     channel: 'aws_sms',
     ok: false,
     error: null,
     messageIds: [],
-    parts: parts.length,
+    parts: 0,
     partsAccepted: 0,
     ms: 0,
   };
-  const destination = toE164(phone);
+  // Shaping is inside the "never throws" contract too: a rejection here would
+  // fail Promise.all in sendCrisisAlertDetailed and record a page the bridge
+  // DID deliver as undelivered.
+  let parts: string[];
+  let destination: string | null;
+  try {
+    parts = splitForSms(message);
+    destination = toE164(phone);
+  } catch (err) {
+    result.error = errorCode(err) === 'error' ? 'text_shaping_failed' : errorCode(err);
+    log.error(
+      { error: result.error },
+      '[alert] AWS SMS: could not shape the page for SMS; nothing sent on this channel',
+    );
+    result.ms = Date.now() - started;
+    return result;
+  }
+  result.parts = parts.length;
   if (!destination) {
     result.error = 'invalid_destination';
     log.error('[alert] AWS SMS: the on-call phone is not a valid E.164 number; nothing sent on this channel');
@@ -351,15 +367,37 @@ export async function sendCrisisAlertDetailed(message: string): Promise<AlertDel
       return { delivered: false, skipped: 'disabled', channels: [] };
     }
     const sends: Array<Promise<AlertChannelResult>> = [];
-    if (phone && imessageConfigured()) sends.push(sendViaImessage(phone, message));
-    if (phone && awsSmsConfigured()) sends.push(sendViaAwsSms(phone, message));
+    const sendNames: AlertChannelName[] = [];
+    if (phone && imessageConfigured()) {
+      sends.push(sendViaImessage(phone, message));
+      sendNames.push('imessage');
+    }
+    if (phone && awsSmsConfigured()) {
+      sends.push(sendViaAwsSms(phone, message));
+      sendNames.push('aws_sms');
+    }
     if (sends.length === 0) {
       log.warn(
         '[alert] on-call paging not configured (no on-call phone, or neither IMESSAGE_API_KEY nor CRISIS_SMS_*); skipping',
       );
       return { delivered: false, skipped: 'not_configured', channels: [] };
     }
-    const channels = await Promise.all(sends);
+    // Each sender is written never to reject; allSettled makes sure one that
+    // does anyway cannot hide what the other channel did.
+    const channels = (await Promise.allSettled(sends)).map(
+      (settled, i): AlertChannelResult =>
+        settled.status === 'fulfilled'
+          ? settled.value
+          : {
+              channel: sendNames[i],
+              ok: false,
+              error: errorCode(settled.reason),
+              messageIds: [],
+              parts: 0,
+              partsAccepted: 0,
+              ms: 0,
+            },
+    );
     const delivery: AlertDelivery = { delivered: channels.some((c) => c.ok), skipped: null, channels };
     reportChannelFailures(delivery);
     return delivery;
