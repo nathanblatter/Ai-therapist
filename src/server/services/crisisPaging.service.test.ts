@@ -230,6 +230,14 @@ import {
   _resetPagingStateForTests,
 } from './crisisPaging.service.js';
 import * as pagingQueries from '../db/paging.queries.js';
+// crisisPaging loads these two with a dynamic import() on its first page. The
+// first load is real I/O that fake time does not move: under --sequence.shuffle,
+// when a "lookups hanging" test below ran first, the import finished after its
+// advanceTimersByTimeAsync, so the page had not gone yet (and then went in the
+// next test). Loaded here, every test's import resolves within the clock
+// advances it makes.
+import './crisisAlert.service.js';
+import './suppression.js';
 
 const T0 = new Date('2026-11-18T22:27:00-07:00').getTime();
 const MIN = 60_000;

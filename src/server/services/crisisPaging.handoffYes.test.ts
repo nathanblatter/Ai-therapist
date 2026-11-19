@@ -80,6 +80,14 @@ vi.mock('./suppression.js', () => ({ sessionSuppressesCrisisPaging: vi.fn(async 
 vi.mock('../utils/adminBroadcast.js', () => ({ broadcastAdminEventForSession: vi.fn(async () => undefined) }));
 
 import { pageHighRisk, pageVendorTermination, _resetPagingStateForTests } from './crisisPaging.service.js';
+// crisisPaging loads these two with a dynamic import() on its first page. The
+// first load is real I/O that fake time does not move: when the 4.5 s pager
+// test ran first (--sequence.shuffle), the pager's own setTimeout was armed
+// after replay() had already advanced the clock, and the test hung until its
+// 5 s timeout. Loaded here, every test's import resolves within the clock
+// advances it makes.
+import './crisisAlert.service.js';
+import './suppression.js';
 
 const PARTICIPANT = 41;
 const VOICE = 'live_cut_voice';
