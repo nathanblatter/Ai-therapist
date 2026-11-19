@@ -102,6 +102,9 @@ import {
   LiveDelegationUnsupportedError,
   LIVE_STEER_KEEP_SPEAKING,
   LIVE_STEER_RESUME_COMMENTARY,
+  DELEGATION_STALL_MS,
+  LIVE_DELEGATION_STALLED_COMMENTARY,
+  LIVE_RECOVERY_NO_LOOKUP_COMMENTARY,
   withKeepSpeaking,
 } from './sidebandManager.service.js';
 
@@ -1445,6 +1448,287 @@ describe('admin control surface', () => {
 // Crisis recovery sessions: client delegation, no backend, no tools
 // (ai-therapist-282)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Unanswered delegations (ai-therapist-348)
+// ---------------------------------------------------------------------------
+
+describe('unanswered delegations (ai-therapist-348)', () => {
+  const created = (id = 'dg_w') => ({ type: 'session.delegation.created', delegation: { id } });
+  const nested = (type: string, extra: Record<string, unknown> = {}, id = 'dg_w') => ({
+    type: 'response.event',
+    delegation_id: id,
+    event: { type, ...extra },
+  });
+  const toolCall = (callId: string) =>
+    nested('response.output_item.done', {
+      item: { type: 'function_call', call_id: callId, name: 'find_worksheet', arguments: '{}' },
+    });
+  const commentary = (ws: FakeSocket) => sentEvents(ws).filter((e) => e.type === 'session.commentary.append');
+  const fallbackRecords = () =>
+    queryMock.mock.calls.filter(
+      (c) => String(c[0]).includes('intervention_actions') && String(c[1]?.[2]).includes('delegation_fallback'),
+    );
+  const fallbackBroadcasts = () => broadcastMock.mock.calls.filter((c) => c[1] === 'live:delegation-fallback');
+  /** The record is written through a dynamically imported module: let it land. */
+  const settle = async () => {
+    await flush();
+    await vi.dynamicImportSettled();
+    await flush();
+  };
+
+  describe('ordinary session (Responses delegation): the stall watchdog', () => {
+    it('tells the voice model to say so when no backend event arrives within the threshold', async () => {
+      const sessionId = 's-deleg-stall';
+      const ws = await attach(sessionId);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await fire(sessionId, created());
+
+      await vi.advanceTimersByTimeAsync(DELEGATION_STALL_MS - 1);
+      expect(commentary(ws)).toHaveLength(0);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await settle();
+      const sent = commentary(ws);
+      expect(sent).toHaveLength(1);
+      expect(sent[0].content).toBe(LIVE_DELEGATION_STALLED_COMMENTARY);
+      expect(sent[0].content).toMatch(/research team/);
+      expect(sent[0].content).toMatch(/consent form/);
+      // "Non-null IDs are not accepted with Responses delegation."
+      expect(sent[0].delegation_id).toBeNull();
+
+      const line = warnSpy.mock.calls.find((c) => c[0] === '[Live] delegation fallback');
+      expect(JSON.parse(String(line![1]))).toMatchObject({
+        delegationId: 'dg_w',
+        reason: 'no_response',
+        afterMs: DELEGATION_STALL_MS,
+        delegationMode: 'responses',
+        delivered: true,
+      });
+      expect(fallbackBroadcasts()).toHaveLength(1);
+      expect(fallbackBroadcasts()[0][2]).toMatchObject({ sessionId, delegationId: 'dg_w', reason: 'no_response' });
+      expect(fallbackRecords()).toHaveLength(1);
+      expect(fallbackRecords()[0][1][1]).toBe('external_api_called');
+      warnSpy.mockRestore();
+    });
+
+    it('never fires after the delegation completed', async () => {
+      const sessionId = 's-deleg-done';
+      const ws = await attach(sessionId);
+      await fire(sessionId, created());
+      await vi.advanceTimersByTimeAsync(1_000);
+      await fire(sessionId, nested('response.created'));
+      await fire(sessionId, nested('response.output_text.delta', { delta: 'You can leave at any time.' }));
+      await fire(sessionId, nested('response.completed', { response: { id: 'resp_w', usage: {} } }));
+
+      await vi.advanceTimersByTimeAsync(10 * DELEGATION_STALL_MS);
+      await settle();
+      expect(commentary(ws)).toHaveLength(0);
+      expect(fallbackRecords()).toHaveLength(0);
+    });
+
+    it('measures quiet time, not total time: every backend event restarts it', async () => {
+      const sessionId = 's-deleg-slow';
+      const ws = await attach(sessionId);
+      await fire(sessionId, created());
+      // A slow answer that keeps streaming for 30 s is not a stall.
+      for (let i = 0; i < 6; i++) {
+        await vi.advanceTimersByTimeAsync(5_000);
+        await fire(sessionId, nested('response.output_text.delta', { delta: 'more ' }));
+      }
+      expect(commentary(ws)).toHaveLength(0);
+
+      // ...but a backend that started and then went quiet is one.
+      await vi.advanceTimersByTimeAsync(DELEGATION_STALL_MS);
+      await settle();
+      expect(commentary(ws)).toHaveLength(1);
+      expect(fallbackBroadcasts()[0][2]).toMatchObject({ reason: 'backend_stalled' });
+    });
+
+    it('keeps watching through a tool call: the continuation response is still owed', async () => {
+      const sessionId = 's-deleg-tool';
+      const ws = await attach(sessionId);
+      await fire(sessionId, created());
+      await fire(sessionId, nested('response.created'));
+      await fire(sessionId, toolCall('call_w'));
+      await fire(sessionId, nested('response.completed', { response: { id: 'resp_tool', usage: {} } }));
+      await flush();
+      expect(sentEvents(ws).map((e) => e.type)).toContain('response.create');
+
+      // The continuation never starts.
+      await vi.advanceTimersByTimeAsync(DELEGATION_STALL_MS);
+      await settle();
+      expect(commentary(ws)).toHaveLength(1);
+    });
+
+    it('is satisfied when the continuation after a tool call completes', async () => {
+      const sessionId = 's-deleg-tool-ok';
+      const ws = await attach(sessionId);
+      await fire(sessionId, created());
+      await fire(sessionId, nested('response.created'));
+      await fire(sessionId, toolCall('call_x'));
+      await fire(sessionId, nested('response.completed', { response: { id: 'resp_tool_1', usage: {} } }));
+      await fire(sessionId, nested('response.created'));
+      await fire(sessionId, nested('response.completed', { response: { id: 'resp_tool_2', usage: {} } }));
+
+      await vi.advanceTimersByTimeAsync(10 * DELEGATION_STALL_MS);
+      await settle();
+      expect(commentary(ws)).toHaveLength(0);
+    });
+
+    it('gives one extra period, once, while a tool of ours is still running', async () => {
+      const sessionId = 's-deleg-tool-slow';
+      const ws = await attach(sessionId);
+      executeToolMock.mockReturnValue(new Promise(() => {})); // never resolves
+      await fire(sessionId, created());
+      void fire(sessionId, toolCall('call_slow'));
+      await settle();
+
+      await vi.advanceTimersByTimeAsync(DELEGATION_STALL_MS);
+      await settle();
+      expect(commentary(ws)).toHaveLength(0);
+
+      await vi.advanceTimersByTimeAsync(DELEGATION_STALL_MS);
+      await settle();
+      expect(commentary(ws)).toHaveLength(1);
+    });
+
+    it('never fires after the session closed', async () => {
+      const sessionId = 's-deleg-closed';
+      const ws = await attach(sessionId);
+      await fire(sessionId, created());
+      await fire(sessionId, { type: 'session.closed', reason: 'close_requested', usage: { seconds: 5 } });
+      ws.send.mockClear();
+
+      await vi.advanceTimersByTimeAsync(10 * DELEGATION_STALL_MS);
+      await settle();
+      expect(sentEvents(ws)).toHaveLength(0);
+      expect(fallbackRecords()).toHaveLength(0);
+    });
+
+    it('never fires after the sideband is disconnected', async () => {
+      const sessionId = 's-deleg-disconnected';
+      const ws = await attach(sessionId);
+      await fire(sessionId, created());
+      const disconnected = sidebandManager.disconnect(sessionId, { graceMs: 0 });
+
+      await vi.advanceTimersByTimeAsync(10 * DELEGATION_STALL_MS);
+      await disconnected;
+      await settle();
+      expect(commentary(ws)).toHaveLength(0);
+      expect(fallbackRecords()).toHaveLength(0);
+    });
+
+    it('sends nothing when the socket is no longer open', async () => {
+      const sessionId = 's-deleg-socket-gone';
+      const ws = await attach(sessionId);
+      await fire(sessionId, created());
+      ws.readyState = 3; // CLOSED
+
+      await vi.advanceTimersByTimeAsync(DELEGATION_STALL_MS);
+      await settle();
+      expect(commentary(ws)).toHaveLength(0);
+      expect(fallbackRecords()).toHaveLength(0);
+    });
+
+    it('fires once per delegation, and a replayed created event does not re-arm it', async () => {
+      const sessionId = 's-deleg-once';
+      const ws = await attach(sessionId);
+      await fire(sessionId, created());
+      await vi.advanceTimersByTimeAsync(DELEGATION_STALL_MS);
+      await settle();
+      await fire(sessionId, created());
+      await vi.advanceTimersByTimeAsync(10 * DELEGATION_STALL_MS);
+      await settle();
+      expect(commentary(ws)).toHaveLength(1);
+
+      // A different delegation is watched on its own.
+      await fire(sessionId, created('dg_second'));
+      await vi.advanceTimersByTimeAsync(DELEGATION_STALL_MS);
+      await settle();
+      expect(commentary(ws)).toHaveLength(2);
+    });
+
+    it('still records the stall when the commentary cannot be sent', async () => {
+      const sessionId = 's-deleg-send-fails';
+      const ws = await attach(sessionId);
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      await fire(sessionId, created());
+      ws.send.mockImplementation(() => {
+        throw new Error('socket write failed');
+      });
+
+      await vi.advanceTimersByTimeAsync(DELEGATION_STALL_MS);
+      await settle();
+      expect(fallbackBroadcasts()[0][2]).toMatchObject({ delivered: false });
+      expect(fallbackRecords()).toHaveLength(1);
+      errSpy.mockRestore();
+    });
+  });
+
+  describe('recovery session (client delegation): the sideband is the backend', () => {
+    async function attachClientDelegated(sessionId: string): Promise<FakeSocket> {
+      const ws = await sidebandManager.connect(sessionId, `live_${sessionId}`, 'sk-test', {
+        model: MODEL,
+        backendModel: BACKEND_MODEL,
+        delegationMode: 'client',
+      });
+      return ws as unknown as FakeSocket;
+    }
+
+    it('answers a delegation at once, against its id, with who can answer the question', async () => {
+      const sessionId = 's-rec-deleg';
+      const ws = await attachClientDelegated(sessionId);
+      await fire(sessionId, created('item_rec_1'));
+      await settle();
+
+      const sent = commentary(ws);
+      expect(sent).toHaveLength(1);
+      expect(sent[0].content).toBe(LIVE_RECOVERY_NO_LOOKUP_COMMENTARY);
+      expect(sent[0].content).toMatch(/research team/);
+      expect(sent[0].content).toMatch(/consent form/);
+      // A client delegation's result is returned against the delegation's id.
+      expect(sent[0].delegation_id).toBe('item_rec_1');
+      expect(fallbackBroadcasts()[0][2]).toMatchObject({
+        delegationId: 'item_rec_1',
+        reason: 'no_backend',
+        delegationMode: 'client',
+        delivered: true,
+      });
+      expect(fallbackRecords()).toHaveLength(1);
+    });
+
+    it('answers each delegation once and arms no timer', async () => {
+      const sessionId = 's-rec-deleg-many';
+      const ws = await attachClientDelegated(sessionId);
+      const timersBefore = vi.getTimerCount();
+      await fire(sessionId, created('item_rec_1'));
+      await fire(sessionId, created('item_rec_2'));
+      await fire(sessionId, created('item_rec_1'));
+      await settle();
+      expect(vi.getTimerCount()).toBe(timersBefore);
+
+      await vi.advanceTimersByTimeAsync(10 * DELEGATION_STALL_MS);
+      await settle();
+      expect(commentary(ws).map((e) => e.delegation_id)).toEqual(['item_rec_1', 'item_rec_2']);
+    });
+
+    it('sends nothing once the session has closed', async () => {
+      const sessionId = 's-rec-deleg-closed';
+      const ws = await attachClientDelegated(sessionId);
+      await fire(sessionId, { type: 'session.closed', reason: 'close_requested', usage: { seconds: 5 } });
+      ws.send.mockClear();
+      await fire(sessionId, created('item_rec_late'));
+      await settle();
+      expect(commentary(ws)).toHaveLength(0);
+    });
+
+    it('both fallback texts fit one append', () => {
+      expect(LIVE_DELEGATION_STALLED_COMMENTARY.length).toBeLessThanOrEqual(1600);
+      expect(LIVE_RECOVERY_NO_LOOKUP_COMMENTARY.length).toBeLessThanOrEqual(1600);
+    });
+  });
+});
 
 describe('recovery session (client delegation)', () => {
   async function attachRecovery(sessionId: string): Promise<FakeSocket> {

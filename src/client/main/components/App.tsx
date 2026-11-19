@@ -1785,6 +1785,29 @@ export default function App() {
     pc.ontrack = (e) => {
       audioEl.srcObject = e.streams[0];
       setRemoteStream(e.streams[0]);
+      // Start playback explicitly instead of relying on `autoplay` alone
+      // (ai-therapist-348). A recovery session starts with no click, on a new
+      // audio element, and on 2026-11-18 a participant on an iPhone said "I
+      // cannot hear you" for the first 25 seconds of one while the transcript
+      // shows the assistant speaking. A browser that refuses to start sound
+      // without a gesture refuses silently with `autoplay`; play() rejects, so
+      // a refusal is reported and retried on the participant's next touch.
+      void audioEl.play().catch((err: unknown) => {
+        const name = err instanceof Error ? err.name : String(err);
+        // AbortError is a play() overtaken by a newer source, not a refusal.
+        if (name === 'AbortError') return;
+        reportClientEvent(
+          'data_channel_error',
+          { stage: 'assistant_audio_play_refused', name, recovery },
+          newSessionId,
+        );
+        const retry = () => {
+          if (audioElement.current !== audioEl) return;
+          void audioEl.play().catch(() => {});
+        };
+        window.addEventListener('pointerdown', retry, { once: true });
+        window.addEventListener('keydown', retry, { once: true });
+      });
       // Capture the whole conversation: mix mic + assistant audio into one PCM
       // stream and upload it over HTTP for the entire session, so the server can
       // record it and relay it live to any admin who is listening. Independent

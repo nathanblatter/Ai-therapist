@@ -609,6 +609,80 @@ disclosure went on to a complete reply, with at most 3.3 s of silence (the
 watch fired in 4 of them); in four continuous calls the longest assistant
 silence after the disclosure was 8.4 to 10.7 s.
 
+### A delegation must not leave the participant waiting (ai-therapist-348)
+
+Found in a stage test on 2026-11-18. In a recovery session the participant
+asked "I think I want to drop out of this study. What happens to my data". The
+voice model said "One moment. I'm pulling that up." and then, for 55 seconds
+and three prompts, only "Yes, I'm here. I'm looking into it." Three
+`session.delegation.created` events arrived on the sideband and no nested
+`response.event` followed any of them.
+
+**Cause (ours).** A recovery session is created with
+`delegation: { type: 'client' }` so that it has no backend and no tools
+(`buildLiveSessionConfig`). The delegation guide is plain about what that mode
+means: "With client delegation, your application prepares the context, runs an
+agent or workflow, and sends results back to GPT-Live", and results go back
+with `session.commentary.append` carrying the delegation's id. So in that mode
+`session.delegation.created` is a request addressed to our application, and
+nothing ever answered it. There is no way to switch delegation off ("Omitted
+or null delegation selects client mode"), and the recovery prompt's "do not
+delegate" does not stop the voice model from delegating a factual question.
+The three `context_injection_incomplete` errors at the end of that session
+were not part of it: they are what the API returns for any append still
+pending when a session closes ("Closing the session returns errors for appends
+that are still pending"), here the three crisis steers sent in the half second
+before the content filter cut the call.
+
+Reproduced the same day against the in-process harness, stage's settings
+(`gpt-6.1-terra`, effort `low`, the 20,526-character prompt), same question:
+
+| Session | Code | Result |
+|---|---|---|
+| normal | before | delegated, backend answered in 2.4 s (first text 0.8 s) |
+| recovery | before | delegated, no backend event at all, the answer never came |
+| recovery | sideband answer only | delegated, answered at once: "I can't answer that question on this call. The research team can answer questions about the study and your data, and their contact details are on your consent form." |
+| recovery | sideband answer and the prompt paragraph | no delegation: "I can't answer that on this call. The research team can help, and their contact details are on your consent form." |
+| normal | after | delegated, backend answered in 2.5 s (first text 1.1 s), no fallback |
+
+One run each: enough to show the mechanism, not a rate.
+
+**What the server does now** (`sidebandManager.service.ts`, the block above
+`DELEGATION_STALL_MS`):
+
+- Recovery session (client delegation): the sideband answers every
+  `session.delegation.created` at once with
+  `LIVE_RECOVERY_NO_LOOKUP_COMMENTARY`, as commentary against that delegation
+  id: say plainly that this cannot be answered on this call; for a question
+  about the study, their data, privacy or leaving the study, the research team
+  can answer and their contact details are on the consent form; then stay with
+  them. The recovery prompt (`buildLiveRecoveryInstructions`) says the same,
+  so the model usually does not delegate in the first place.
+- Ordinary session (Responses delegation): a watchdog per delegation. If
+  `DELEGATION_STALL_MS` (12 s) pass with no nested response event for a
+  delegation that has not finished, the server sends
+  `LIVE_DELEGATION_STALLED_COMMENTARY` (delegation id null, as Responses
+  delegation requires): stop saying you are checking, say you could not get
+  that answer, and the same pointer to the research team and the consent form.
+  The 12 s are quiet time, not total time: every nested event restarts them. A
+  delegation is finished when a backend response ends without having called a
+  tool; after a tool call the continuation is still owed and still watched.
+  While one of our own tools is still running the watch waits one more period,
+  once. Nothing is sent after `session.closed`, after a disconnect, or twice
+  for the same delegation. On stage that day six delegations finished in 1.6
+  to 4.7 s, which is where 12 s comes from.
+- Either way: a `[Live] delegation fallback` log line (JSON: session,
+  delegationId, reason `no_backend` / `no_response` / `backend_stalled`,
+  afterMs, delegationMode, delivered), a `live:delegation-fallback` admin
+  event, and an `intervention_actions` row (`external_api_called`, event
+  `delegation_fallback`). The voice evaluation reads those rows into
+  `RunMetrics.delegationFallbacks` and reports each as a non-gating
+  `voice-delegation-fallback` result.
+
+The fallback cannot cancel backend work. If a stalled backend answers after
+all, the API still passes the answer to the voice model and the participant
+hears it late.
+
 ### A sentence that arrives as two turns (found 2026-11-18)
 
 The 900 ms turn gap can split one spoken sentence: "I have been thinking about

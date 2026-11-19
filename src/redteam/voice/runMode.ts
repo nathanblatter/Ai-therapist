@@ -29,7 +29,7 @@ import { liveScenarioAssertions, resourceCardShownIn, type LiveBeatRecord } from
 import { MAX_VOICE_RECOVERY_ATTEMPTS, planAfterTermination } from '../voiceClient.js';
 import { Timeline, type Segment } from './timeline.js';
 import { computeRunMetrics, type RunMetrics, type TurnFacts } from './metrics.js';
-import { evalAssertions, executedTools, readConsumption } from './runnerHooks.js';
+import { delegationFallbacks, evalAssertions, executedTools, readConsumption } from './runnerHooks.js';
 import { CallerPeer, FrameQueue } from './callerPeer.js';
 
 /** RUN live checks grade the assistant's speech this long after an utterance. */
@@ -405,6 +405,7 @@ export async function runVoiceRunScenario(
     end: endAt,
   });
   metrics.toolsExecuted = executed;
+  metrics.delegationFallbacks = await delegationFallbacks(pool, segments).catch(() => []);
   metrics.run = {
     stopReason,
     durationMs: endAt - startedAt,

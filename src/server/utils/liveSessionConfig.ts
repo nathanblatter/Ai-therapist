@@ -580,6 +580,14 @@ failed and what the participant can do next.`;
  * to stay true for both ways a session reaches recovery: the content filter,
  * and the vendor's session ceiling during a crisis (where the participant was
  * told beforehand), which is why it says "cut off" and not "without warning".
+ *
+ * Added the same day (ai-therapist-348): the last paragraph. "Do not delegate"
+ * alone did not hold. Asked what happens to their data if they leave the
+ * study, the model said "One moment. I'm pulling that up." and delegated to a
+ * backend this session does not have, and the participant waited 55 seconds
+ * for nothing. The prompt now says there is nothing to look up with and who
+ * can answer; the sideband answers any delegation that still happens
+ * (sidebandManager, LIVE_RECOVERY_NO_LOOKUP_COMMENTARY).
  */
 export function buildLiveRecoveryInstructions(opts: { languageName?: string | null; crisisLine: string }): string {
   const languageLine = opts.languageName ? `Speak ${opts.languageName}.\n` : '';
@@ -612,7 +620,11 @@ What NOT to do:
 - Do not go silent. If you are unsure what to say, say that you are still here.
 
 Delegation policy: do not delegate. Answer directly and immediately. Nothing matters more right now
-than staying present in this conversation.`;
+than staying present in this conversation.
+You have no way to look anything up on this call. Never say you are checking, pulling something up or
+looking into it. If they ask something you cannot answer, such as a question about the study, their data,
+privacy or leaving the study, say plainly that you cannot answer it on this call, and that the research
+team can: the team's contact details are on their consent form. Then stay with them.`;
 }
 
 export interface LiveSessionConfigInput {

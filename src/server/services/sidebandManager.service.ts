@@ -92,6 +92,72 @@ const STEER_INTERRUPT_TAIL_MS = 1_200;
 /** The participant counts as still talking if a fragment of theirs arrived this recently. */
 const STEER_PARTICIPANT_TALKING_MS = 1_500;
 
+/**
+ * A delegated question must never leave the participant waiting on an answer
+ * that is not coming (ai-therapist-348).
+ *
+ * On 2026-11-18 a participant in a recovery session asked what happens to
+ * their data if they leave the study. The voice model said "One moment. I'm
+ * pulling that up." and then, for 55 seconds and three prompts, only "Yes, I'm
+ * here. I'm looking into it." Three `session.delegation.created` events had
+ * arrived and nothing answered them.
+ *
+ * Cause: a recovery session runs in CLIENT delegation mode (see
+ * buildLiveSessionConfig), and in that mode the API does not run a backend.
+ * "With client delegation, your application prepares the context, runs an
+ * agent or workflow, and sends results back to GPT-Live" (live-delegation,
+ * "Choose a delegation mode"): `session.delegation.created` is a request to
+ * US, and no nested `response.event` ever follows it. Our recovery session
+ * has no backend by design, and its prompt says "do not delegate", but the
+ * voice model still delegates a factual question, so every one of them hung.
+ *
+ * Two layers, both in this file:
+ *  - Client delegation (recovery): the sideband IS the backend, so it answers
+ *    each delegation at once with the only result it has: this cannot be
+ *    looked up on this call, and who can answer it. No timer.
+ *  - Responses delegation (every ordinary session): OpenAI runs the backend
+ *    and we only observe it, so a watchdog covers the case where it does not
+ *    come back. If DELEGATION_STALL_MS pass with no nested response event for
+ *    a delegation that has not finished, the voice model is told to say so.
+ *
+ * DELEGATION_STALL_MS is time with NO backend activity, not time to an
+ * answer: every nested event restarts it. Measured 2026-11-18 on stage
+ * (gpt-6.1-terra, effort low, the 20,526-character prompt): six delegations
+ * finished in 1.6 to 4.7 s, with first backend text at about 1.0 s. 12 s is
+ * more than twice the slowest whole delegation, while still short of the
+ * point where a participant has asked "hello?" twice.
+ */
+export const DELEGATION_STALL_MS = 12_000;
+/** Why a delegation got the fallback instead of an answer. */
+export type DelegationFallbackReason = 'no_backend' | 'no_response' | 'backend_stalled';
+const DELEGATION_FALLBACK_WHO_CAN_ANSWER =
+  'If their question was about the study, their data, privacy or leaving the study, say that the research team ' +
+  "can answer it and that the team's contact details are on their consent form.";
+/** Spoken when an ordinary session's backend did not come back. */
+export const LIVE_DELEGATION_STALLED_COMMENTARY =
+  "You could not get an answer to the participant's last question: the lookup did not come back. Stop saying you " +
+  'are checking or looking into it. Tell them plainly, now, that you could not get that answer. ' +
+  `${DELEGATION_FALLBACK_WHO_CAN_ANSWER} Otherwise offer to try again, or to keep talking about what is on their mind.`;
+/** The result a recovery session's delegation gets: there is nothing to look up with. */
+export const LIVE_RECOVERY_NO_LOOKUP_COMMENTARY =
+  'You cannot look anything up on this call, so do not say you are checking, pulling anything up or looking into ' +
+  'it. Tell them plainly, now, that you cannot answer that question on this call. ' +
+  `${DELEGATION_FALLBACK_WHO_CAN_ANSWER} Then stay with them as before: you are still here.`;
+
+/** One delegation the sideband is watching for an answer. */
+interface DelegationWatch {
+  startedAt: number;
+  timer: NodeJS.Timeout | null;
+  /** Answered, or given the fallback: nothing more to do, and never re-armed. */
+  settled: boolean;
+  /** At least one nested response event arrived for it. */
+  sawBackend: boolean;
+  /** The backend called a tool and its continuation response has not started. */
+  awaitingContinuation: boolean;
+  /** One extra period was already granted because a tool of ours was still running. */
+  toolGraceUsed: boolean;
+}
+
 /** A clinical steer as delivered to a live voice model: the text, then the keep-speaking line, inside the append cap. */
 export function withKeepSpeaking(text: string): string {
   if (!text.startsWith(CLINICAL_STEER_MARKER) || text.includes(LIVE_STEER_KEEP_SPEAKING)) return text;
@@ -236,6 +302,8 @@ interface LiveSessionState {
    * logDelegationTiming.
    */
   delegationTimings: Map<string, { startedAt: number; firstTextAt: number | null }>;
+  /** Delegations watched for an answer, keyed by delegation id. See DELEGATION_STALL_MS. */
+  delegationWatches: Map<string, DelegationWatch>;
   /** Latest cumulative voice seconds from session.usage.updated. */
   lastUsageSeconds: number;
   peakContextRatio: number;
@@ -471,6 +539,7 @@ export class SidebandManager {
       pendingCalls: new Map(),
       meteredResponses: new Set(),
       delegationTimings: new Map(),
+      delegationWatches: new Map(),
       lastUsageSeconds: 0,
       peakContextRatio: 0,
       finalized: false,
@@ -952,6 +1021,162 @@ export class SidebandManager {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Unanswered delegations (ai-therapist-348; see DELEGATION_STALL_MS)
+  // -------------------------------------------------------------------------
+
+  /** `session.delegation.created`: answer it ourselves (recovery) or watch it. */
+  private watchDelegation(sessionId: string, delegationId: string): void {
+    const state = this.sessions.get(sessionId);
+    // A replayed event must neither answer twice nor re-arm a finished watch.
+    if (!state || state.finalized || state.delegationWatches.has(delegationId)) return;
+    const watch: DelegationWatch = {
+      startedAt: Date.now(),
+      timer: null,
+      settled: false,
+      sawBackend: false,
+      awaitingContinuation: false,
+      toolGraceUsed: false,
+    };
+    state.delegationWatches.set(delegationId, watch);
+    if (state.delegationMode === 'client') {
+      // No backend exists to wait for: the request is addressed to us.
+      void this.delegationFallback(sessionId, delegationId, 'no_backend');
+      return;
+    }
+    this.armDelegationWatch(sessionId, delegationId);
+  }
+
+  private armDelegationWatch(sessionId: string, delegationId: string): void {
+    const watch = this.sessions.get(sessionId)?.delegationWatches.get(delegationId);
+    if (!watch || watch.settled) return;
+    if (watch.timer) clearTimeout(watch.timer);
+    watch.timer = setTimeout(() => {
+      void this.onDelegationQuiet(sessionId, delegationId);
+    }, DELEGATION_STALL_MS);
+    watch.timer.unref?.();
+  }
+
+  private settleDelegationWatch(watch: DelegationWatch): void {
+    if (watch.timer) clearTimeout(watch.timer);
+    watch.timer = null;
+    watch.settled = true;
+  }
+
+  /**
+   * A nested backend event for a watched delegation. Any event is activity and
+   * restarts the quiet timer. The delegation is finished, and the watch over,
+   * when a response ends without having called a tool: a response that called
+   * one is followed by a continuation (executePendingCall sends the result and
+   * `response.create`), and that continuation is still owed.
+   */
+  private noteDelegationProgress(
+    sessionId: string,
+    delegationId: string,
+    inner: { type?: string; [key: string]: unknown },
+  ): void {
+    const watch = this.sessions.get(sessionId)?.delegationWatches.get(delegationId);
+    if (!watch || watch.settled) return;
+    watch.sawBackend = true;
+    if (inner.type === 'response.created') {
+      watch.awaitingContinuation = false;
+    } else if (inner.type === 'response.output_item.done') {
+      if ((inner.item as { type?: string } | undefined)?.type === 'function_call') watch.awaitingContinuation = true;
+    } else if (inner.type === 'response.completed' || inner.type === 'response.incomplete') {
+      if (!watch.awaitingContinuation) {
+        this.settleDelegationWatch(watch);
+        return;
+      }
+    }
+    this.armDelegationWatch(sessionId, delegationId);
+  }
+
+  /** DELEGATION_STALL_MS passed with no backend activity on an unfinished delegation. */
+  private async onDelegationQuiet(sessionId: string, delegationId: string): Promise<void> {
+    const state = this.sessions.get(sessionId);
+    const watch = state?.delegationWatches.get(delegationId);
+    if (!state || !watch || watch.settled) return;
+    watch.timer = null;
+    // The backend is waiting on a tool that is still running in THIS process:
+    // that is our latency, not a lost answer. One more period, once.
+    const toolRunning = [...state.pendingCalls.values()].some((call) => call.delegationId === delegationId);
+    if (toolRunning && !watch.toolGraceUsed) {
+      watch.toolGraceUsed = true;
+      this.armDelegationWatch(sessionId, delegationId);
+      return;
+    }
+    await this.delegationFallback(sessionId, delegationId, watch.sawBackend ? 'backend_stalled' : 'no_response');
+  }
+
+  /**
+   * Tell the voice model the answer is not coming, and say so everywhere a
+   * human or a metric looks: the log, the admin dashboard, and
+   * intervention_actions (event `delegation_fallback`), which is where the
+   * voice evaluation counts it.
+   *
+   * Commentary, because it is the channel for "a result the model should say
+   * aloud" and the one that has reliably made a quiet model speak here (see
+   * resendRecoverySpeakFirst). On a recovery session it carries the client
+   * delegation's id, which is how a client-delegated result is returned; with
+   * Responses delegation the id must be null ("Non-null IDs are not accepted
+   * with Responses delegation", sideband reference, session.commentary.append).
+   *
+   * It cannot cancel backend work. If a stalled backend does answer later, the
+   * API still hands that answer to the voice model, and the participant hears
+   * it after the apology, which is better than never.
+   */
+  private async delegationFallback(
+    sessionId: string,
+    delegationId: string,
+    reason: DelegationFallbackReason,
+  ): Promise<void> {
+    const state = this.sessions.get(sessionId);
+    const watch = state?.delegationWatches.get(delegationId);
+    if (!state || !watch || watch.settled) return;
+    this.settleDelegationWatch(watch);
+    // Never steer a session that has closed or lost its socket.
+    if (state.finalized || !this.isConnected(sessionId)) return;
+
+    const short = sessionId.substring(0, 12);
+    const client = state.delegationMode === 'client';
+    const details = {
+      delegationId,
+      reason,
+      afterMs: Date.now() - watch.startedAt,
+      delegationMode: state.delegationMode,
+      delivered: false,
+    };
+    try {
+      await this.appendCommentary(
+        sessionId,
+        client ? LIVE_RECOVERY_NO_LOOKUP_COMMENTARY : LIVE_DELEGATION_STALLED_COMMENTARY,
+        client ? delegationId : null,
+      );
+      details.delivered = true;
+    } catch (err) {
+      console.error(`[Live] Could not deliver the delegation fallback for ${short}...:`, err);
+    }
+    console.warn('[Live] delegation fallback', JSON.stringify({ session: short, ...details }));
+    if (global.io) {
+      void broadcastAdminEventForSession(
+        global.io,
+        'live:delegation-fallback',
+        { sessionId, ...details, timestamp: new Date() },
+        sessionId,
+      );
+    }
+    try {
+      const { logInterventionAction } = await import('./crisisDetection.service.js');
+      await logInterventionAction(sessionId, 'external_api_called', {
+        event: 'delegation_fallback',
+        vendor: 'openai',
+        ...details,
+      });
+    } catch (err) {
+      console.error(`[Live] Failed to record a delegation fallback for ${short}...:`, err);
+    }
+  }
+
   /**
    * Record that the vendor's moderation stopped a generation, so how often a
    * reply is cut WITHOUT the session closing is a number rather than an
@@ -1117,6 +1342,7 @@ export class SidebandManager {
         if (timingState && created?.id) {
           timingState.delegationTimings.set(created.id, { startedAt: Date.now(), firstTextAt: null });
         }
+        if (created?.id) this.watchDelegation(sessionId, created.id);
         if (global.io) {
           const delegation = event.delegation as { id?: string; target?: string } | undefined;
           void broadcastAdminEventForSession(
@@ -1272,6 +1498,7 @@ export class SidebandManager {
       const timing = state.delegationTimings.get(delegationId);
       if (timing && timing.firstTextAt === null) timing.firstTextAt = Date.now();
     }
+    if (delegationId) this.noteDelegationProgress(sessionId, delegationId, inner);
 
     switch (inner.type) {
       case 'response.output_item.done': {
@@ -2075,6 +2302,8 @@ export class SidebandManager {
     state.speakFirstTimers = [];
     state.steerResumeTimers.forEach((t) => clearTimeout(t));
     state.steerResumeTimers = [];
+    // Settled, not deleted: a late event for one of them must not re-arm it.
+    state.delegationWatches.forEach((watch) => this.settleDelegationWatch(watch));
     state.keepalive = null;
     state.regrounding = null;
     state.toolChoiceReset = null;
