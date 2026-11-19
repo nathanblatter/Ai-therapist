@@ -623,12 +623,25 @@ const SAFETY_QUESTION_TOPICS: RegExp[] = [
   /\bsuicid/,
   /\b(?:kill|killing|hurt|hurting|harm|harming|cut|cutting) yourself\b/,
   /\bself[- ]harm/,
-  /\b(?:end|ending|take|taking) (?:your (?:own )?life|it all|things)\b/,
+  // "end things", but not the session: "would you like to end things here for
+  // today?" answered "yes" was read as the answer to a safety question and
+  // flagged medium (live, review of PR 65).
+  /\b(?:end|ending|take|taking) (?:your (?:own )?life|it all|things(?! (?:here|there|for (?:today|now|tonight)|early|on that|with (?:that|this))\b))\b/,
   /\b(?:want(?:ing|ed)?|wish(?:ing|ed)?) (?:to die|to be dead|you were dead|you (?:were|was)n't (?:here|alive|around)|to disappear|to not (?:be (?:here|alive)|exist|wake up)|not to (?:be (?:here|alive)|exist|wake up))\b/,
-  /\b(?:not|n't) (?:want(?:ing)?|wish(?:ing)?) to (?:be (?:alive|here|around)|live|exist|wake up|go on)\b/,
+  // No word boundary before "n't": it follows a letter ("don't", "doesn't"),
+  // so `\bn't` can never match and "do you ever feel like you don't want to
+  // be here anymore?" was not recognised.
+  /(?:\bnot|n't) (?:want(?:ing)?|wish(?:ing)?) to (?:be (?:alive|here|around)|live|exist|wake up|go on)\b/,
   /\bnot (?:being|be) (?:alive|here|around)\b/,
   /\b(?:better off|be (?:fine|better)) without you\b/,
-  /\bthoughts? (?:of|about) (?:death|dying|not (?:being|waking|existing))\b/,
+  /\bbetter off dead\b/,
+  // "thoughts of death", and the verb forms a model uses as often: "do you
+  // ever think about dying?", "have you been thinking about death?".
+  /\b(?:thoughts?|think(?:ing)?|thought) (?:(?:a lot|much|often|ever) )?(?:of|about) (?:death|dying|not (?:being|waking|existing))\b/,
+  // The second half of the C-SSRS wish-to-be-dead item, asked on its own:
+  // "do you ever wish you could go to sleep and not wake up?".
+  /\b(?:not|never) wak(?:e|ing) up\b/,
+  /(?:\bnot|n't) worth living\b|\bgiv(?:e|ing|en) up on life\b/,
   /\b(?:are|do|have|did|were) you\b[\w\s,'-]{0,20}\bsafe\b|\b(?:keep|keeping|stay|staying) (?:yourself )?safe\b|\bfeel(?:ing)? safe\b|\bin (?:any )?danger\b/,
 ];
 
@@ -684,8 +697,8 @@ const LOW_CONTENT_WORDS = new Set(
   (
     'stop wait would ok okay k yeah yes yep yup no nope nah um uh hmm mm oh ah well so and then but just like ' +
     'i it that this the a you we can please sorry thanks thank right sure fine good great cool alright ' +
-    'hold on one sec second moment minute pause continue keep going go back again now here there what huh hey hi ' +
-    'hello bye goodbye never mind nothing really maybe actually let me us'
+    'hold on one sec second moment minute pause continue keep back again here there what huh hey hi ' +
+    'hello never mind nothing really maybe actually us'
   ).split(' '),
 );
 /** Longest message the fragment guard considers (in words). */
@@ -694,9 +707,16 @@ const LOW_CONTENT_MAX_WORDS = 6;
 /**
  * Is this message a low-content fragment: at most LOW_CONTENT_MAX_WORDS words,
  * every one of them a filler, an acknowledgement or a stop/go word? Exported
- * for tests. "goodbye" is on the list on purpose: the farewell context signals
- * ("this is goodbye", "goodbye everyone") are checked BEFORE this guard, and a
- * bare "bye" at the end of an ordinary session is the common case.
+ * for tests.
+ *
+ * Words of leaving are NOT on the list (go, going, now, let, me, bye,
+ * goodbye). With them a participant who had already voiced distress could say
+ * "just let me go", "no going back now", "I can go now. Goodbye." or "it can
+ * stop now" and never reach the assessor: each is made only of stop/go words,
+ * and none matches a farewell signal (those need "this is goodbye", "goodbye
+ * everyone"). The cost of leaving them off is one assessor call for "bye",
+ * "go back" or "keep going" in a session that already holds a low-band turn;
+ * the rubric's "Fragments" rule tells the assessor not to over-read those.
  */
 export function isLowContentFragment(content: string): boolean {
   const words = normalizeForScreen(content)
@@ -1130,6 +1150,7 @@ Harm to others. When the participant talks about hurting or killing ANOTHER pers
 - Credible intent or planning → 75-100, high, context "harm_to_others": thoughts or images of hurting a specific person that the participant presents as real, together with anything that makes it more than venting (knowing where the person is or will be, having thought through what they would do, a plan, the means, a time, a threat meant seriously, or saying they might actually do it). "I keep picturing hurting him. I know where he parks." and "He's going to get what's coming to him. I've thought about exactly what I'd do." are this. The study team is alerted so a person can respond.
 - Unwanted thoughts of harming someone that the participant is frightened by and rejects ("I've been having thoughts about hurting my baby sister and it scares me. I would never do it"), or rage with an urge to hurt a specific person but no plan and no stated intent → 25-50, low to medium, context "harm_to_others". Never high.
 "states_intent" is false for all of these: it is only about the participant's own suicide or self-harm.
+- If the participant ALSO says they mean to die or to hurt themselves ("I want to kill him and then myself", "I know where he parks, and after that I don't plan on being around"), their own risk is scored as well and comes first: context "genuine", the suicide bands above (intent, a plan or a time → 80-100), "states_intent" answered for it, and the risk to the other person named in "factors".
 Slang and shorthand: "kms" (kill myself), "ctb" or "catch the bus" (die by suicide), "unalive", "sewerslide", "off myself", "I want out" (of life, of everything). Said in earnest about themselves, score them as the plain words they stand for ("been thinking about ctb a lot lately" is active ideation; "I want out. Of everything." is at least passive ideation, 50 or more). With an ordinary meaning in the conversation (a distance in kms, an unrelated abbreviation, an actual bus, wanting out of a lease or a class) → 0-10, none.
 An answer to a safety question. When the assistant's turn just before the latest message asks about suicide, self-harm, wanting to die or not be alive, or whether the participant is safe, the latest message is the answer to THAT question, however short: score it as if the participant had said the full sentence. "yeah", "kind of", "sometimes", "most nights", "I guess" in reply to a question about not wanting to be alive is passive ideation → at least 50, medium; in reply to a question about suicide or ending their life it is active ideation; in reply to a question about a plan, the means or a time → 80-100, high. Hedged and minimal answers do not downgrade it. A clear "no" (or "yes, I'm safe") is "negated" → 0-15. A dodge ("I don't know", "does it matter") is "unclear" → 25-40, low.
 Before you answer, read the latest message once more for help-seeking. When it announces or agrees to a step toward help or safety (texting or calling a family member, a friend, a counselor or a crisis line, booking an appointment, telling a roommate), the "it" in "I'm going to do it" or "I'll do it" is that step: "states_intent" is false and the score is not above the level the conversation had already established.
@@ -2040,7 +2061,35 @@ export async function analyzeMessageRisk(
     const severity = severityForScore(riskScore);
     // Someone else's crisis, as judged by the assessor. Only at the flagging
     // levels: a low bystander score (ordinary worry, a past loss) labels nothing.
-    const subject = subjectFor(llm?.context, severity);
+    //
+    // The label changes what happens: a labelled turn gets no suicide ladder,
+    // a steer that says not to ask about the participant's own suicidal
+    // thoughts, a page that reads "not their own" / "not self-harm" and, for
+    // risk to others, no crisis-line card. So it must never stand on a turn
+    // that also carries the participant's own risk. Live, before this check:
+    // "I want to kill him and then myself" came back 100, context
+    // harm_to_others, states_intent true, and was handled as risk to others
+    // only. Two facts keep the participant's own risk in charge, neither a
+    // new judgment: the assessor's literal observation that the participant
+    // states intent for THEMSELVES (`states_intent`, defined as never true for
+    // a third party or for harm to others), and, for harm to others, a
+    // first-person keyword in the same message ("... and then kill myself").
+    // The keyword is not used for a third party: "she texted 'I want to kill
+    // myself'" is a quotation and stays a third-party report.
+    const labelled = subjectFor(llm?.context, severity);
+    const ownRiskToo =
+      labelled !== null &&
+      (llm?.states_intent === true ||
+        (labelled === 'harm_to_others' && keywordAnalysis.keywordScore >= PASSIVE_IDEATION_SCORE));
+    const subject = ownRiskToo ? null : labelled;
+    if (ownRiskToo) {
+      factors = [
+        ...factors,
+        labelled === 'harm_to_others'
+          ? 'also: thoughts of harming another person (handled as own risk)'
+          : "also: a third party's crisis reported (handled as own risk)",
+      ];
+    }
     const thirdParty = subject === 'third_party';
     if (thirdParty) factors = [THIRD_PARTY_FACTOR, ...factors];
     if (subject === 'harm_to_others') factors = [HARM_TO_OTHERS_FACTOR, ...factors];
@@ -2111,6 +2160,8 @@ export async function analyzeMessageRisk(
             // row so later turns are told so (describeSessionRiskContext).
             ...(thirdParty ? { third_party: true } : {}),
             ...(subject === 'harm_to_others' ? { harm_to_others: true } : {}),
+            // The assessor's label was set aside: own risk in the same turn.
+            ...(ownRiskToo ? { subject_overridden: labelled } : {}),
             ...(contextFallbackApplied ? { context_fallback: true } : {}),
             ...(contextSignalFloored ? { context_signal_floor: CRISIS_KEYWORDS.high.score } : {}),
             ...(meansInquiryFloor !== null ? { means_inquiry_floor: meansInquiryFloor } : {}),

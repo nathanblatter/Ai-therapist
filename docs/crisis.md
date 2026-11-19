@@ -197,7 +197,11 @@ and staff were paged. Two changes:
   acknowledgement and stop/go words (a closed list: stop, wait, would, ok, yeah, no, um,
   hold on, ...) is not sent to the assessor merely because the session had an earlier
   low-band turn. It scores 0 and its risk row carries `low_content_fragment: true`. It is a
-  word list and not a length rule: "tonight", "pills" and "bought a gun" are not on it. The
+  word list and not a length rule: "tonight", "pills" and "bought a gun" are not on it.
+  Words of leaving are not on it either (go, going, now, let, me, bye, goodbye): "just let
+  me go", "no going back now" and "I can go now. Goodbye." are made only of stop/go words,
+  match no farewell signal, and must reach the assessor in a session that already holds a
+  low-band turn (review of PR 65). The
   guard does not apply when the fragment answers an assistant safety question ("yeah" is
   the disclosure there), when it matches a context signal, in a session already at medium
   or high, on a periodic sweep, or when the session state could not be read.
@@ -268,6 +272,26 @@ What the context wake changes downstream:
   or re-page unless its score exceeds the stored score by more than 10, the existing re-flag
   rule. Without this, every short answer in a crisis conversation would restart the
   assessment protocol. Keyword turns are unchanged and still force.
+- **A subject label never stands on a turn that also carries the participant's own risk**
+  (review of PR 65). The label switches off the suicide ladder, swaps the steer for one that
+  says not to ask about the participant's own suicidal thoughts, puts "not their own" / "not
+  self-harm" on the page and, for risk to others, withholds the crisis-line card. Live, "I
+  want to kill him and then myself" came back 100, context `harm_to_others`, `states_intent`
+  true, and was handled as risk to others only. Now the label is dropped (the turn is the
+  participant's own risk, with the other fact kept as a factor and `subject_overridden` on the
+  risk row) when the assessor observes the participant's own intent (`states_intent`), or,
+  for harm to others, when a first-person keyword is in the same message. A quoted keyword
+  does not undo a third-party label ("she texted 'I want to kill myself'"). The rubric's
+  harm-to-others rule has the matching sentence (own risk comes first when both are voiced).
+- **A change of who is at risk always flags** (review of PR 65). The re-flag rule compares
+  scores, and a third party's active crisis scores 80-100. After "my roommate is going to
+  kill herself tonight" (90, paged as a third party at risk, "not their own"), the
+  participant's own "I've been thinking about killing myself too" (75) is not 10 points
+  above 90, so it raised no flag, no crisis event and no page. A high turn about someone
+  the session's automatic high flags have not been about (the participant, a third party,
+  or a person they may harm; read from the `subject` on the `auto_flag` rows) now flags and
+  pages whatever the stored score. The crisis event's notes and the dashboard alert say
+  what changed; the `auto_flag` row carries `trigger: 'new_subject'`.
 - The periodic sweep is independent: a context wake does not reset its counter, and when a
   sweep is due on the same turn there is one call, labelled `llm_sweep`.
 

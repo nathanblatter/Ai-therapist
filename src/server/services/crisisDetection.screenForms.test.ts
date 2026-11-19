@@ -238,6 +238,20 @@ describe('the assistant asking about safety', () => {
     'When you say that, do you mean you wish you were dead?',
     'Have you had thoughts about dying?',
     'Have you thought about harming yourself?',
+    // Review of PR 65: common phrasings of the same screening questions that
+    // were not recognised, so a keyword-free "yeah" to them in a calm session
+    // was never assessed.
+    "Do you ever feel like you don't want to be here anymore?",
+    "Is part of you saying you doesn't want to be alive?",
+    'Do you ever think about dying?',
+    'Have you been thinking about death?',
+    'Do you ever wish you could go to sleep and not wake up?',
+    'Have you had thoughts that life is not worth living?',
+    "Does it ever feel like life isn't worth living?",
+    'Is any part of you thinking you would be better off dead?',
+    'Are things so bad that you have thought about giving up on life?',
+    'Have you thought about ending things?',
+    'Do you ever think about ending things for good?',
   ])('is a safety question: %s', (text) => {
     expect(asksSafetyQuestion(text), text).toBe(true);
   });
@@ -248,6 +262,9 @@ describe('the assistant asking about safety', () => {
     'You can call or text 988 at any time. It is the Suicide and Crisis Lifeline.',
     'How long have you been feeling this way?',
     'Is it safe to say the group project is the main stress?',
+    // Closing the session is not a safety question (review of PR 65).
+    'Would you like to end things here for today?',
+    'Shall we end things there?',
     '',
   ])('is not: %s', (text) => {
     expect(asksSafetyQuestion(text), text).toBe(false);

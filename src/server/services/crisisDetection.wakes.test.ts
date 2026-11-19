@@ -578,6 +578,57 @@ describe('ai-therapist-349: a low-content fragment is not over-read', () => {
     expect(isLowContentFragment(text)).toBe(false);
   });
 
+  // Review of PR 65: each of these is made only of stop/go and filler words,
+  // and each can be a statement of leaving or giving up. None matches a
+  // keyword or a farewell signal, so in a session that already holds a
+  // low-band turn the guard was the only thing deciding whether the assessor
+  // saw them, and it said no.
+  it.each([
+    'just let me go',
+    'let me go',
+    'no going back now',
+    'I can go now. Goodbye.',
+    'it can stop now',
+    'I can stop this now',
+    'goodbye',
+    'bye',
+    'so sorry. goodbye.',
+    'I am going now. goodbye.',
+  ])('words of leaving are not a fragment: "%s"', (text) => {
+    expect(isLowContentFragment(text)).toBe(false);
+  });
+
+  // What must stay a fragment for ai-therapist-349 to stay fixed.
+  it.each(['can we stop', 'please stop', 'wait can you stop', 'hold on', 'one sec', 'never mind', 'nothing', 'sorry'])(
+    'an interruption or an acknowledgement is still a fragment: "%s"',
+    (text) => {
+      expect(isLowContentFragment(text)).toBe(true);
+    },
+  );
+
+  it('"just let me go" after a low-band turn reaches the assessor', async () => {
+    lowSession();
+    createMock.mockResolvedValue(assess(55, 'genuine', ['passive ideation']));
+    const result = await analyzeMessageRisk(turn('just let me go'), []);
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(result.severity).toBe('medium');
+    expect(riskRow().low_content_fragment).toBeUndefined();
+  });
+
+  // The guard never applies to a turn that has a keyword or a signal of its
+  // own, however short, or to a session with no earlier risk at all (nothing
+  // is skipped there that was assessed before).
+  it.each(['kms', 'i want it all to stop', 'tonight', 'pills', 'i want it to stop', 'make it stop', 'no more', 'done'])(
+    'a short disclosure in a low session is assessed: "%s"',
+    async (text) => {
+      lowSession();
+      createMock.mockResolvedValue(assess(55, 'genuine', ['passive ideation']));
+      await analyzeMessageRisk(turn(text), []);
+      expect(createMock).toHaveBeenCalledTimes(1);
+      expect(riskRow().low_content_fragment).toBeUndefined();
+    },
+  );
+
   it('REPRODUCTION: "would stop" in a low-band session is not sent to the assessor and scores 0', async () => {
     lowSession();
     createMock.mockResolvedValue(assess(50, 'genuine', ['passive ideation', 'hopelessness']));
@@ -645,5 +696,74 @@ describe('ai-therapist-349: a low-content fragment is not over-read', () => {
   it('the rubric tells the assessor to score only what was said', () => {
     expect(RISK_ASSESSMENT_PROMPT).toMatch(/Fragments\. Voice transcripts arrive in pieces/);
     expect(RISK_ASSESSMENT_PROMPT).toMatch(/do not complete it into a sentence about dying, escape or giving up/);
+  });
+});
+
+// Review of PR 65. A subject label switches off the suicide ladder, swaps the
+// steer for one that says not to ask about the participant's own suicidal
+// thoughts, and puts "not their own" / "not self-harm" on the page. Live, the
+// assessor returned harm_to_others (100, states_intent true) for "I want to
+// kill him and then myself", so a murder-suicide statement was handled as risk
+// to others only.
+describe("a subject label never stands on a turn that also carries the participant's own risk", () => {
+  const assessWithIntent = (risk_score: number, context: string, factors: string[] = []) => {
+    const base = assess(risk_score, context, factors);
+    const body = JSON.parse(base.choices[0].message.content) as Record<string, unknown>;
+    return { choices: [{ message: { content: JSON.stringify({ ...body, states_intent: true }) } }] };
+  };
+
+  it('REPRODUCTION: harm to others + the assessor observes own intent -> handled as the participant own risk', async () => {
+    createMock.mockResolvedValue(
+      assessWithIntent(100, 'harm_to_others', ['intent to harm another person', 'own intent']),
+    );
+
+    const result = await analyzeMessageRisk(turn('I want to kill him and then myself'), []);
+
+    expect(result.severity).toBe('high');
+    expect(result.subject).toBeUndefined();
+    expect(result.thirdParty).toBe(false);
+    expect(result.factors).not.toContain(HARM_TO_OTHERS_FACTOR);
+    expect(result.factors).toContain('also: thoughts of harming another person (handled as own risk)');
+    expect(riskRow()).toMatchObject({ subject_overridden: 'harm_to_others', llm_context: 'harm_to_others' });
+    expect(riskRow().harm_to_others).toBeUndefined();
+  });
+
+  it('harm to others + a first-person keyword in the same message -> own risk, even if the assessor missed the intent', async () => {
+    createMock.mockResolvedValue(assess(85, 'harm_to_others', ['intent to harm another person']));
+
+    const result = await analyzeMessageRisk(turn("I'm going to hurt him and then kill myself"), []);
+
+    expect(result.subject).toBeUndefined();
+    expect(riskRow()).toMatchObject({ subject_overridden: 'harm_to_others' });
+  });
+
+  it('a third-party report in which the assessor observes the participant own intent -> own risk', async () => {
+    createMock.mockResolvedValue(assessWithIntent(90, 'bystander', ['third party stated intent', 'own intent']));
+
+    const result = await analyzeMessageRisk(turn(`${ROOMMATE} If she does it I am doing it too, tonight.`), []);
+
+    expect(result.thirdParty).toBe(false);
+    expect(result.subject).toBeUndefined();
+    expect(result.factors).not.toContain(THIRD_PARTY_FACTOR);
+  });
+
+  it('a QUOTED first-person keyword does not undo a third-party label ("she texted: I want to kill myself")', async () => {
+    createMock.mockResolvedValue(assess(90, 'bystander', ['third party stated intent']));
+
+    const result = await analyzeMessageRisk(turn('My roommate just texted me "I want to kill myself tonight"'), []);
+
+    expect(result.thirdParty).toBe(true);
+    expect(result.subject).toBe('third_party');
+  });
+
+  it('plain risk to others keeps its label', async () => {
+    createMock.mockResolvedValue(assess(80, 'harm_to_others', ['intent to harm another person']));
+    const result = await analyzeMessageRisk(turn('I keep picturing hurting him. I know where he parks.'), []);
+    expect(result.subject).toBe('harm_to_others');
+    expect(riskRow().subject_overridden).toBeUndefined();
+  });
+
+  it('the rubric tells the assessor that own risk comes first when both are voiced', () => {
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/If the participant ALSO says they mean to die or to hurt themselves/);
   });
 });
