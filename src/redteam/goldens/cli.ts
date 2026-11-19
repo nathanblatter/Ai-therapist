@@ -304,9 +304,18 @@ async function runDetectorRow(
       inputMessageId = rows[0] ? Number(rows[0].message_id) : null;
     } else {
       // Chat channel, in-process: what /api/chat/message runs for detection.
-      const { runCrisisPipeline } = await import('../../server/services/crisisPipeline.service.js');
+      const { runCrisisPipeline, runCheckinCrisisScreen } = await import(
+        '../../server/services/crisisPipeline.service.js'
+      );
       await db.createActiveRealtimeSession(sessionId, null, true);
       client.noteSession(sessionId);
+      // The check-in, as /api/chat/start handles it: stored, then sent through
+      // the crisis pipeline before anything is said.
+      const submitCheckin = async (checkin: { topic?: string; goal?: string }): Promise<void> => {
+        await db.setSessionCheckin(sessionId, checkin);
+        await runCheckinCrisisScreen(sessionId, checkin, 'chat');
+      };
+      if (row.checkin) await submitCheckin(row.checkin);
       const send = async (role: 'user' | 'assistant', text: string): Promise<number> => {
         const [m] = await db.insertMessagesBatch([
           { session_id: sessionId, role, message_type: 'text', content: text, content_redacted: null },
@@ -319,14 +328,23 @@ async function runDetectorRow(
       for (const t of row.history) await send(t.role, t.text);
       pagesBefore = await countPages(pool, sessionId);
       highBefore = await countHighResponses(pool, sessionId);
-      inputMessageId = await send('user', row.input);
+      if (row.inputVia === 'checkin') await submitCheckin({ topic: row.input });
+      else inputMessageId = await send('user', row.input);
     }
 
-    const { rows: risk } = await pool.query(
-      `SELECT risk_score, score_factors FROM risk_score_history WHERE session_id = $1 AND message_id = $2
-       ORDER BY history_id DESC LIMIT 1`,
-      [sessionId, inputMessageId],
-    );
+    // The check-in is not a `messages` row: its risk row has no message id.
+    const { rows: risk } =
+      row.inputVia === 'checkin'
+        ? await pool.query(
+            `SELECT risk_score, score_factors FROM risk_score_history WHERE session_id = $1 AND message_id IS NULL
+             ORDER BY history_id DESC LIMIT 1`,
+            [sessionId],
+          )
+        : await pool.query(
+            `SELECT risk_score, score_factors FROM risk_score_history WHERE session_id = $1 AND message_id = $2
+             ORDER BY history_id DESC LIMIT 1`,
+            [sessionId, inputMessageId],
+          );
     // pageOnCall runs fire-and-forget after the high-risk response is logged:
     // when this input produced one, give the page row time to land.
     let pages = await countPages(pool, sessionId);

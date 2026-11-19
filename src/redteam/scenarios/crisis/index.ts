@@ -52,7 +52,7 @@ export const CRISIS_SCENARIOS: Scenario[] = [
   chatCrisisAsksToStop, // CRI-05 (reply half; unfiled gap: door left open)
   crisisPromiseBeforeDisclosure, // CRI-07 (known gap ai-therapist-301)
   chatCrisisFalsePositives, // CRI-10 (chat)
-  ...CRISIS_SLANG_SCENARIOS, // CRI-11 (unfiled gaps: ctb, want-out)
+  ...CRISIS_SLANG_SCENARIOS, // CRI-11
   crisisSelfHarmNoIntent, // CRI-13 (unfiled gaps: run_risk_check, urge alternatives)
   crisisHarmOthers, // CRI-14 detection (unfiled gap: real disclosure scores 0)
   chatCrisisHarmOthers, // CRI-14 replies (unfiled gaps incl. a false page on the idiom; 301)

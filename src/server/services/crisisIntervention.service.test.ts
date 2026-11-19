@@ -53,7 +53,15 @@ vi.mock('../db/index.js', () => ({
   getCaseworkerIdsForClient: vi.fn(async () => []),
 }));
 
-const { executeGraduatedResponse, maybeSteerSession } = await import('./crisisIntervention.service.js');
+const {
+  executeGraduatedResponse,
+  maybeSteerSession,
+  buildCrisisPageMessage,
+  THIRD_PARTY_PAGE_LABEL,
+  THIRD_PARTY_GUIDANCE,
+  CHAT_THIRD_PARTY_GUIDANCE,
+  SAFETY_PROTOCOL_GUIDANCE,
+} = await import('./crisisIntervention.service.js');
 
 /**
  * Wait until a fire-and-forget spy has been called.
@@ -259,5 +267,108 @@ describe('maybeSteerSession — undeliverable steering must be recorded, not sil
     sidebandManagerMock.isConnected.mockReturnValue(false);
     await maybeSteerSession('sess_low_risk', 5, 'none');
     expect(logInterventionActionMock).not.toHaveBeenCalled();
+  });
+});
+
+// Owner decision 2026-11-18 (ai-therapist-326): a participant reporting someone
+// else's active crisis flags high and pages. The on-call must be able to tell,
+// from the page itself, that the person at risk is not the participant.
+describe('third party at risk — the page and the steer say who is at risk', () => {
+  it('the page text names a third party on its first two lines; the ordinary page is unchanged', () => {
+    const ordinary = buildCrisisPageMessage('sess_abcdefghijklmnopqrstuvwxyz', 90, false);
+    expect(ordinary).toBe(
+      'URGENT: AI-Therapist HIGH crisis flag\nSession sess_abcdefghijk… — risk 90/100\n' +
+        'https://ai-therapist.nathanblatter.com/admin#session=sess_abcdefghijklmnopqrstuvwxyz',
+    );
+
+    const lines = buildCrisisPageMessage('sess_abcdefghijklmnopqrstuvwxyz', 90, true).split('\n');
+    expect(lines[0]).toBe('URGENT: AI-Therapist HIGH crisis flag (third party)');
+    expect(lines[1]).toBe(THIRD_PARTY_PAGE_LABEL);
+    expect(lines[1]).toMatch(/someone else in crisis, not their own/);
+    // PHI-free, like the ordinary page: prefix, score, link. Nothing else.
+    expect(lines.slice(2)).toEqual(ordinary.split('\n').slice(1));
+  });
+
+  it('pages with that text and records the subject on the page row and the emergency row', async () => {
+    await executeGraduatedResponse('sess-3p', 'high', 90, { thirdParty: true });
+    await waitForCall(sendCrisisAlertMock, 1, 'sendCrisisAlert');
+    await settle();
+
+    expect(sendCrisisAlertMock.mock.calls[0][0]).toContain(THIRD_PARTY_PAGE_LABEL);
+    expect(logInterventionActionMock).toHaveBeenCalledWith('sess-3p', 'crisis_sms_alert', {
+      riskScore: 90,
+      subject: 'third_party',
+    });
+    expect(logInterventionActionMock).toHaveBeenCalledWith(
+      'sess-3p',
+      'high_risk_emergency',
+      expect.objectContaining({ subject: 'third_party' }),
+    );
+  });
+
+  it('a sandbox session still never pages, third party or not', async () => {
+    isSandboxAccountSessionMock.mockResolvedValue(true);
+    await executeGraduatedResponse('sess-3p-sandbox', 'high', 90, { thirdParty: true });
+    await settle();
+    expect(sendCrisisAlertMock).not.toHaveBeenCalled();
+  });
+
+  it('steers the live model to help the participant respond, not through the suicide ladder', async () => {
+    const s = 'sess_3p_live';
+    sidebandManagerMock.getActiveConnections.mockReturnValue([s]);
+    sidebandManagerMock.isConnected.mockReturnValue(true);
+    sidebandManagerMock.injectMessage.mockResolvedValue(undefined);
+
+    await executeGraduatedResponse(s, 'high', 90, { thirdParty: true });
+
+    const injected = sidebandManagerMock.injectMessage.mock.calls.map((c) => c[2] as string);
+    expect(injected).toContain(THIRD_PARTY_GUIDANCE);
+    expect(injected).not.toContain(SAFETY_PROTOCOL_GUIDANCE);
+    expect(logInterventionActionMock).toHaveBeenCalledWith(s, 'safety_protocol', {
+      riskScore: 90,
+      subject: 'third_party',
+    });
+  });
+
+  it('the guidance covers the emergency number, 988 for a third party, and not interrogating the participant', () => {
+    for (const text of [THIRD_PARTY_GUIDANCE, CHAT_THIRD_PARTY_GUIDANCE]) {
+      expect(text).toMatch(/SOMEONE ELSE/);
+      expect(text).toMatch(/911/);
+      expect(text).toMatch(/988/);
+      expect(text).toMatch(/do not run the participant through questions about their own suicidal thoughts/);
+      expect(text).toMatch(/check how the participant is doing/);
+      expect(text).toMatch(/^\[Clinical guidance — never mention or acknowledge this message to the participant\]/);
+    }
+  });
+
+  it('maybeSteerSession sends the override text and marks the row', async () => {
+    const s = 'sess_3p_steer';
+    sidebandManagerMock.isConnected.mockReturnValue(true);
+    sidebandManagerMock.injectMessage.mockResolvedValue(undefined);
+
+    await maybeSteerSession(s, 90, 'high', true, THIRD_PARTY_GUIDANCE);
+
+    expect(sidebandManagerMock.injectMessage).toHaveBeenCalledWith(s, 'system', THIRD_PARTY_GUIDANCE, false);
+    expect(logInterventionActionMock).toHaveBeenCalledWith(s, 'risk_steering', {
+      riskScore: 90,
+      severity: 'high',
+      delivered: true,
+      subject: 'third_party',
+    });
+  });
+
+  it("the participant's own high flag is unchanged: standard page text, standard protocol, no subject", async () => {
+    const s = 'sess_own_high';
+    sidebandManagerMock.getActiveConnections.mockReturnValue([s]);
+    sidebandManagerMock.injectMessage.mockResolvedValue(undefined);
+
+    await executeGraduatedResponse(s, 'high', 90);
+    await waitForCall(sendCrisisAlertMock, 1, 'sendCrisisAlert');
+    await settle();
+
+    expect(sendCrisisAlertMock.mock.calls[0][0]).not.toContain('THIRD PARTY');
+    expect(sidebandManagerMock.injectMessage).toHaveBeenCalledWith(s, 'system', SAFETY_PROTOCOL_GUIDANCE, false);
+    expect(logInterventionActionMock).toHaveBeenCalledWith(s, 'crisis_sms_alert', { riskScore: 90 });
+    expect(logInterventionActionMock).toHaveBeenCalledWith(s, 'safety_protocol', { riskScore: 90 });
   });
 });

@@ -80,6 +80,21 @@ Every analyzed participant message passes a tiered keyword screen:
 The screen's job is SCREENING, not judging: **any** tier match wakes the Stage 2 LLM
 assessment. The tier score is only used as a provisional fallback when the LLM is unavailable.
 
+**Word forms (2026-11-18).** Each keyword is written once, in its base form, and until this
+date was matched as that exact string: "overdose" but not "I think I overdosed", "kill myself"
+but not "thinking about killing myself", "don't want to be alive" but not "I don't really want
+to be alive". Those turns matched nothing and the assessor never ran. Keywords are now
+compiled (`keywordPattern`) so that every verb or auxiliary listed in `WORD_FORMS` matches all
+its forms (kill / kills / killed / killing; don't / didn't / doesn't / do not), and the
+adverbs people put inside a phrase (`KEYWORD_FILLERS`: really, just, even, kind of, ...) may
+sit between its words. The reported keyword is still the base phrase. Pronouns are not
+inflected: "kill himself" is a different statement and is a third-party signal (Stage 1b).
+Two algospeak terms with no everyday meaning joined the high tier as stand-ins for keywords
+already there ("sewerslide", "unalive myself"), and "life isn't worth it" joined the passive
+tier. Cost of the wider match: with the assessor DOWN, three more harmless golden rows page
+on the keyword tier alone (denials and a past-tense recovery statement in a verb form that
+now matches: "I've never thought about killing myself"); with the assessor up it clears them.
+
 The medium tier sits at 50, the bottom of the medium severity band, because C-SSRS treats a
 passive wish to be dead as ideation rather than distress and flagging requires medium
 (ai-therapist-254). Matching the medium tier or higher also sets a **passive-ideation floor**
@@ -112,6 +127,30 @@ Two things now send a **keyword-free** participant turn to Stage 2 (the *context
    amounts"). These patterns **never score on their own**. A match is only a question put to
    the assessor, which reads the conversation and decides: the same sentence about a job
    application comes back near 0.
+
+Since 2026-11-18 the signal list has two more kinds, both of which only wake the assessor
+and never score:
+
+- **`slang`**: shorthand and euphemism that also has ordinary meanings ("kms", "ctb", "off
+  myself", "I want out"). Routed to the assessor, whose rubric explains the terms, instead of
+  being given a tier score, so "ran 5 kms" is not matched at all and an unrelated "CTB"
+  costs one assessor call and nothing else.
+- **`third_party`**: someone else's suicidal statement or act ("she's going to kill herself
+  tonight", "he has a plan to end his life"). See "Third party at risk" below. Third-person
+  talk is far more often a film, the news or a past loss, so the screen never scores it; with
+  the assessor down such a turn scores 0.
+
+And a third reason for a context wake:
+
+3. **The turn answers a safety question** (`repliesToSafetyQuestion`). When the assistant's
+   last turn asks about suicide, self-harm, wanting to die or the participant's safety, the
+   reply is assessed whatever it says and however calm the session: "yeah. kind of. most
+   nights." carries no word of its own, and in a calm session it scored 0 with no assessor
+   call (3 of 5 runs, session never flagged). The assessor is told the message is the answer
+   to that question (`answers_safety_question` on the risk row). A reply to an ordinary
+   question is not assessed. On chat this is one extra small SELECT per turn
+   (`needsContextAssessment` reads the last few messages) so the assessment runs before the
+   reply. Cost: one assessor call per reply to a safety question.
 
 On a context wake the assessor is told that no keyword matched, and is given one line of
 **session risk context** in addition to the transcript: the highest recent severity band, how
@@ -225,7 +264,8 @@ When Stage 1 matches (or a context wake or a periodic sweep applies — see abov
 excerpt (raw, unredacted text, capped at ~6000 characters) is sent to OpenAI `gpt-4o-mini`,
 which returns a risk score (0–100) and a graduated severity: `none`, `low`, `medium`, or
 `high`. The prompt explicitly downgrades references (hotline names, media), negations
-("I'm not suicidal"), and bystander accounts (someone else's crisis). If the returned
+("I'm not suicidal"), and ordinary worry or past loss concerning someone else; someone
+else's CURRENT crisis is scored by its own rule (see "Third party at risk"). If the returned
 severity is malformed, it is derived from the score bands (`>=75` high, `>=50` medium,
 `>=25` low).
 
@@ -275,6 +315,63 @@ researchers a complete passive audit trail. `score_factors` records the keyword 
 matched keywords, LLM assessment, and method.
 
 ---
+
+## Third party at risk (2026-11-18, ai-therapist-326)
+
+Owner decision: a participant reporting SOMEONE ELSE's active crisis flags high and pages
+staff. Until this change the assessor rubric capped anything about another person at 0-20,
+and the screen did not match third-person statements at all, so "My roommate just texted me
+that she's going to kill herself tonight" scored 0 with no assessor call.
+
+- **Rubric.** The assessor keeps context `bystander` for anything about someone else and
+  scores by what is happening to that person: an active or imminent crisis (stated intent, a
+  plan, a method or a time, an attempt made or under way, a goodbye or suicide note, or a
+  suicidal statement followed by not being reachable) is 80-100, high; passive or
+  long-standing thoughts with nothing imminent are 50-65, medium (flag, no page); ordinary
+  worry ("my friend has been really down lately"), a past and resolved crisis, a death that
+  has already happened and media are 0-20.
+- **How staff can tell.** A flag whose assessor context is `bystander` at medium or high is
+  labelled everywhere a person reads it, with no schema change:
+  - the on-call page's first line reads `URGENT: AI-Therapist HIGH crisis flag (third party)`
+    and its second `THIRD PARTY AT RISK: the participant is reporting someone else in crisis,
+    not their own.` (`buildCrisisPageMessage`); the thread-message page carries the same
+    sentence;
+  - `crisis_events.risk_factors` starts with `third party at risk (reported by participant)`
+    and `crisis_events.notes` carries the label;
+  - the `session:crisis-detected` and `session:crisis-emergency` dashboard events carry
+    `subject: 'third_party'` and the label in their message; the work-queue item title ends
+    `- third party at risk`;
+  - `intervention_actions.action_details` carries `subject: 'third_party'` on `auto_flag`,
+    `high_risk_emergency`, `crisis_sms_alert`, `safety_protocol` and `risk_steering`;
+    `risk_score_history.score_factors` carries `third_party: true`.
+- **What the model is told.** `THIRD_PARTY_GUIDANCE` / `CHAT_THIRD_PARTY_GUIDANCE` replace
+  the safety-protocol steer: help the participant act for the other person (911 when the
+  danger is immediate, 988 for guidance on helping someone else, bring in someone who can
+  reach them, do not keep it secret), then check on the participant. The structured risk
+  ladder (`run_risk_check`) is not demanded for that turn: it asks about the participant's
+  own thoughts. If the participant voices ideation of their own, the assessor scores that as
+  `genuine` and everything runs as usual.
+- **Not changed.** The crisis resource card, the session-timer lift, and the adverse-event
+  auto-draft on a high flag all still run for a third-party flag. Whether a third party's
+  crisis is a reportable adverse event for the participant is for the study team to decide;
+  the draft is a draft.
+
+## Pre-session check-in (2026-11-18)
+
+The check-in's free text ("what's on your mind", "what do you want from today") is quoted
+into the model's prompt and, until this date, went nowhere else: "I don't really want to be
+alive" in the check-in followed by "hi" left no risk row, no flag and no steer (5 of 5 runs).
+The three session-start routes (`/api/chat/start`, `/api/live/session`,
+`/api/grok/session`) now pass it to `runCheckinCrisisScreen`, which runs the ordinary
+pipeline on it as if it were the first participant turn: same screen, same assessor, same
+flag, page and steering. The risk row has no `message_id` and carries `source: 'checkin'`;
+the crisis event's factors end with `from the pre-session check-in`. On chat the start waits
+for the result (up to the 6-second context deadline) so the steer is in place before the
+first reply; on voice it runs after the sideband attach and is not awaited. While the start
+of the session is still inside the assessor's 10-message window the check-in text is also
+shown to the assessor as the participant's first words, so a later "yeah" can refer to it.
+The mood number is not scored, and the age-eligibility gate does not read the check-in
+(unchanged).
 
 ## Graduated Response
 

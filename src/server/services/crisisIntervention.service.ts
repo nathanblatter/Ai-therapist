@@ -246,6 +246,51 @@ export const CHAT_SAFETY_PROTOCOL_GUIDANCE =
   `Do not end the session yourself. Stay with them. ` +
   RISK_CHECK_DIRECTIVE;
 
+// ============================================
+// THIRD PARTY AT RISK (ai-therapist-326)
+// ============================================
+// Owner decision 2026-11-18: a participant reporting SOMEONE ELSE's active
+// crisis ("my roommate just texted me that she's going to kill herself
+// tonight") flags high and pages staff. The detection side is the assessor's
+// `bystander` context at medium or high (crisisDetection analyzeMessageRisk
+// `thirdParty`). Everything that reaches a person says so in words, because a
+// page that reads like the participant's own crisis sends the on-call to the
+// wrong problem:
+//   - the page and the dashboard alert carry THIRD_PARTY_PAGE_LABEL;
+//   - crisis_events.notes / risk_factors and the intervention rows carry
+//     subject 'third_party' (existing JSON and text columns, no migration);
+//   - the model is steered to help the participant act for the other person
+//     instead of being told to run the participant through the suicide
+//     ladder, and the structured ladder is not demanded for that turn.
+
+/** Line added to the on-call page and the dashboard alert. */
+export const THIRD_PARTY_PAGE_LABEL =
+  'THIRD PARTY AT RISK: the participant is reporting someone else in crisis, not their own.';
+
+const THIRD_PARTY_GUIDANCE_CORE =
+  `The participant has just told you that SOMEONE ELSE may be at risk of suicide or is in a crisis right now. ` +
+  `The research team's monitoring systems have been alerted. Take it seriously and stay calm. In your reply: ` +
+  `acknowledge how frightening this is for them; ` +
+  `if the other person may be in immediate danger (a stated plan for now or tonight, an attempt under way, or they cannot be reached after saying something suicidal), ` +
+  `say plainly to call 911 now, or campus police or a resident assistant if they are on campus, and to stay with the person or get someone to them if that is safe; ` +
+  `say that they can call or text 988 themselves, right now, to get guidance on helping someone else; ` +
+  `encourage them not to carry this alone or keep it secret, and to bring in someone who can reach the person (family, a roommate, an RA). ` +
+  `Do not question whether the other person means it, and do not run the participant through questions about their own suicidal thoughts as if the risk were theirs. ` +
+  `Once the immediate steps are covered, check how the participant is doing: hearing this is heavy, and if they voice thoughts of their own, follow your crisis protocol. ` +
+  `Do not end the session yourself. Stay with them.`;
+
+/** Realtime steer for a third party at risk (the resource card tool exists there). */
+export const THIRD_PARTY_GUIDANCE =
+  `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
+  THIRD_PARTY_GUIDANCE_CORE +
+  ` Call the show_resource_card tool so crisis lines are on their screen.`;
+
+/** Chat steer for a third party at risk (resources go in the reply). */
+export const CHAT_THIRD_PARTY_GUIDANCE =
+  `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
+  THIRD_PARTY_GUIDANCE_CORE +
+  ` Include 911 and the 988 Suicide & Crisis Lifeline (call or text 988) directly in your reply.`;
+
 // Sessions already recorded as having undeliverable steering. Keeps the signal
 // to one row per session rather than one per risky turn, while still making the
 // session countable.
@@ -275,6 +320,9 @@ export async function maybeSteerSession(
    *  severity always forces); the pipeline passes false for a context-wake
    *  turn in a session already flagged high (see runCrisisPipeline). */
   force: boolean = severity === 'high',
+  /** Steer with this text instead of the standard copy (a third party at
+   *  risk). The cooldown, the sideband gate and the logging are unchanged. */
+  guidanceOverride: string | null = null,
 ): Promise<void> {
   try {
     if (riskScore < STEER_MIN_SCORE) return;
@@ -315,8 +363,18 @@ export async function maybeSteerSession(
 
     if (!shouldSteer(sessionId, riskScore, force)) return;
 
-    await sidebandManager.injectMessage(sessionId, 'system', steeringGuidance(riskScore, severity), false);
-    await logInterventionAction(sessionId, 'risk_steering', { riskScore, severity, delivered: true });
+    await sidebandManager.injectMessage(
+      sessionId,
+      'system',
+      guidanceOverride ?? steeringGuidance(riskScore, severity),
+      false,
+    );
+    await logInterventionAction(sessionId, 'risk_steering', {
+      riskScore,
+      severity,
+      delivered: true,
+      ...(guidanceOverride ? { subject: 'third_party' } : {}),
+    });
 
     if (global.io) {
       void broadcastAdminEventForSession(
@@ -446,10 +504,17 @@ async function hardEndCrisisSession(sessionId: string, endedBy: string): Promise
  * @param {string} severity - Risk severity ('high' or 'none')
  * @param {number} riskScore - Risk score (0-100)
  */
-export async function executeGraduatedResponse(sessionId: string, severity: string, riskScore: number): Promise<void> {
+export async function executeGraduatedResponse(
+  sessionId: string,
+  severity: string,
+  riskScore: number,
+  /** `thirdParty`: the flag is for someone else's crisis reported by the
+   *  participant; the page, the alert and the steer say so. */
+  options: { thirdParty?: boolean } = {},
+): Promise<void> {
   try {
     if (severity === 'high') {
-      await executeHighRiskResponse(sessionId, riskScore);
+      await executeHighRiskResponse(sessionId, riskScore, options.thirdParty === true);
     }
   } catch (error) {
     console.error('Error executing graduated response:', error);
@@ -499,13 +564,19 @@ export const SAFETY_PROTOCOL_GUIDANCE =
  * session to link), the message is sent as-is with no suppression check or
  * intervention log — the caller owns its own sandbox short-circuit.
  */
-export async function pageOnCall(message: string, session?: { sessionId: string; riskScore: number }): Promise<void> {
+export async function pageOnCall(
+  message: string,
+  session?: { sessionId: string; riskScore: number; thirdParty?: boolean },
+): Promise<void> {
   const { sendCrisisAlert } = await import('./crisisAlert.service.js');
   if (!session) {
     await sendCrisisAlert(message);
     return;
   }
   const { sessionId, riskScore } = session;
+  // Recorded on the page's own row so "who was at risk" survives in the audit
+  // trail, not only in the text that was sent.
+  const subject = session.thirdParty ? { subject: 'third_party' } : {};
   let suppressed = false;
   try {
     const { sessionSuppressesCrisisPaging } = await import('./suppression.js');
@@ -519,11 +590,28 @@ export async function pageOnCall(message: string, session?: { sessionId: string;
       suppressed: 'crisis_sms_alert',
       reason: 'sandbox',
       riskScore,
+      ...subject,
     }).catch((err) => console.error('[Crisis] failed to log sandbox SMS suppression:', err));
     return;
   }
   await sendCrisisAlert(message);
-  await logInterventionAction(sessionId, 'crisis_sms_alert', { riskScore });
+  await logInterventionAction(sessionId, 'crisis_sms_alert', { riskScore, ...subject });
+}
+
+/**
+ * The on-call page for a high flag. PHI-free: session id prefix, score, link.
+ * A third-party flag says so on the first and second lines, so the on-call
+ * knows before opening the session that the person at risk is not the
+ * participant. Pure; exported for tests.
+ */
+export function buildCrisisPageMessage(sessionId: string, riskScore: number, thirdParty: boolean): string {
+  // Deep-link straight to the session (AdminApp reads #session=<id> on
+  // load); APP_BASE_URL keeps the link pointed at the right environment.
+  const adminBase = (process.env.APP_BASE_URL ?? 'https://ai-therapist.nathanblatter.com').trim().replace(/\/+$/, '');
+  const headline = thirdParty
+    ? `URGENT: AI-Therapist HIGH crisis flag (third party)\n${THIRD_PARTY_PAGE_LABEL}`
+    : 'URGENT: AI-Therapist HIGH crisis flag';
+  return `${headline}\nSession ${sessionId.substring(0, 16)}… — risk ${riskScore}/100\n${adminBase}/admin#session=${encodeURIComponent(sessionId)}`;
 }
 
 /**
@@ -531,7 +619,7 @@ export async function pageOnCall(message: string, session?: { sessionId: string;
  * dashboards, and inject the structured safety-assessment protocol into the
  * live model over the sideband.
  */
-async function executeHighRiskResponse(sessionId: string, riskScore: number): Promise<void> {
+async function executeHighRiskResponse(sessionId: string, riskScore: number, thirdParty = false): Promise<void> {
   try {
     // Crisis resources to the participant FIRST, before anything that can
     // stall (ai-therapist-293): on GPT-Live the vendor's filter can close the
@@ -543,25 +631,33 @@ async function executeHighRiskResponse(sessionId: string, riskScore: number): Pr
     await logInterventionAction(sessionId, 'high_risk_emergency', {
       riskScore,
       emergencyProtocol: 'activated',
+      ...(thirdParty ? { subject: 'third_party' } : {}),
     });
 
     // Page a human — the dashboard socket alert only works if someone is
     // looking at the dashboard. Fire-and-forget; suppression/logging policy
     // lives in pageOnCall.
-    // Deep-link straight to the session (AdminApp reads #session=<id> on
-    // load); APP_BASE_URL keeps the link pointed at the right environment.
-    const adminBase = (process.env.APP_BASE_URL ?? 'https://ai-therapist.nathanblatter.com').trim().replace(/\/+$/, '');
-    pageOnCall(
-      `URGENT: AI-Therapist HIGH crisis flag\nSession ${sessionId.substring(0, 16)}… — risk ${riskScore}/100\n${adminBase}/admin#session=${encodeURIComponent(sessionId)}`,
-      { sessionId, riskScore },
-    ).catch((err) => console.error('Error sending crisis SMS:', err));
+    pageOnCall(buildCrisisPageMessage(sessionId, riskScore, thirdParty), {
+      sessionId,
+      riskScore,
+      thirdParty,
+    }).catch((err) => console.error('Error sending crisis SMS:', err));
 
-    // Steer the live model into a structured safety assessment.
+    // Steer the live model into a structured safety assessment, or, when the
+    // person at risk is someone else, into helping the participant respond.
     try {
       const { sidebandManager } = await import('./sidebandManager.service.js');
       if (sidebandManager.getActiveConnections().includes(sessionId)) {
-        await sidebandManager.injectMessage(sessionId, 'system', SAFETY_PROTOCOL_GUIDANCE, false);
-        await logInterventionAction(sessionId, 'safety_protocol', { riskScore });
+        await sidebandManager.injectMessage(
+          sessionId,
+          'system',
+          thirdParty ? THIRD_PARTY_GUIDANCE : SAFETY_PROTOCOL_GUIDANCE,
+          false,
+        );
+        await logInterventionAction(sessionId, 'safety_protocol', {
+          riskScore,
+          ...(thirdParty ? { subject: 'third_party' } : {}),
+        });
         console.log(`Safety protocol injected for session ${sessionId}`);
       }
     } catch (err) {
@@ -579,7 +675,10 @@ async function executeHighRiskResponse(sessionId: string, riskScore: number): Pr
           severity: 'high',
           riskScore,
           priority: 'critical',
-          message: `CRITICAL: High-risk crisis detected - Immediate attention required`,
+          message: thirdParty
+            ? `CRITICAL: High-risk crisis detected - ${THIRD_PARTY_PAGE_LABEL} Immediate attention required`
+            : `CRITICAL: High-risk crisis detected - Immediate attention required`,
+          ...(thirdParty ? { subject: 'third_party' } : {}),
           emergencyAt: new Date(),
           requiresImmediateIntervention: true,
         },

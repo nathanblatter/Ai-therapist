@@ -20,7 +20,7 @@
 // risk_score_history — that table's trajectory logic is session-local.
 import { createLogger } from '../utils/logger.js';
 import { analyzeStandaloneRisk } from './crisisDetection.service.js';
-import { pageOnCall } from './crisisIntervention.service.js';
+import { pageOnCall, THIRD_PARTY_PAGE_LABEL } from './crisisIntervention.service.js';
 import { broadcastAdminEvent } from '../utils/adminBroadcast.js';
 import {
   listThreadMessages,
@@ -149,7 +149,10 @@ export async function scanThreadMessage(message: ThreadMessageRow, thread: Messa
     if (severity === 'high' && !alreadyRecorded) {
       await pageOnCall(
         `CRISIS MESSAGE ALERT: high-severity risk flagged in a client message ` +
-          `(score ${risk.riskScore}/100). Review the crisis dashboard.`,
+          `(score ${risk.riskScore}/100).` +
+          // Someone else's crisis reported by the client (ai-therapist-326).
+          (risk.thirdParty ? ` ${THIRD_PARTY_PAGE_LABEL}` : '') +
+          ` Review the crisis dashboard.`,
       ).catch((err) => log.error({ err }, '[scan] on-call page failed for high-severity message'));
     }
 

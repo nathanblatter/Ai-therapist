@@ -294,6 +294,17 @@ export default function grokSessionRoutes(): Router {
           reconnectWindowMs: tuning.reconnect_window_s * 1000,
         });
 
+        // The check-in's free text goes through the crisis pipeline as a first
+        // participant turn would (score, flag, page); until now it only
+        // reached the prompt. Not awaited: it never delays or fails the start.
+        // The voice socket is not open yet, so a steer from this turn is
+        // recorded as undelivered; the flag and the page do not depend on it.
+        if (checkin) {
+          void import('../../services/crisisPipeline.service.js')
+            .then((m) => m.runCheckinCrisisScreen(sessionId, checkin, 'realtime'))
+            .catch((err) => log.error({ err }, 'check-in crisis screen failed'));
+        }
+
         if (limitCheck.limits?.max_duration_minutes && !limitCheck.bypass) {
           scheduleAutoTermination({
             sessionId,

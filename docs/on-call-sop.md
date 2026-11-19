@@ -25,6 +25,19 @@ When a participant's message trips the imminent-risk detector
 No automated message beyond the agent's own protocol is sent to the
 participant — a trained human decides the response.
 
+**A page that says "third party" (since 2026-11-18).** When the participant
+is reporting that SOMEONE ELSE is in crisis (a roommate, a friend, a family
+member), the page's first line ends `(third party)` and its second line reads
+`THIRD PARTY AT RISK: the participant is reporting someone else in crisis, not
+their own.` The dashboard alert and the crisis event carry the same label. The
+person at risk is not the participant and is not known to the study; the
+participant is the only route to them. The agent has been steered to help the
+participant act (911 if the danger is immediate, 988 for guidance on helping
+someone else) and then to check on the participant. [What the on-call does
+for a third-party page, beyond reviewing the session and supporting the
+participant, is not yet written: to be set by the PI and the clinical
+consultant.]
+
 ## 2. On-call rotation
 
 - One **on-call researcher** is designated at all times during the study

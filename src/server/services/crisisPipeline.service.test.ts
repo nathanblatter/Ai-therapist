@@ -51,6 +51,8 @@ vi.mock('../db/index.js', () => ({
   getSessionCrisisState: getSessionCrisisStateMock,
   isDemoAccountSession: isDemoAccountSessionMock,
   getSessionAccessInfo: getSessionAccessInfoMock,
+  // No pre-session check-in in these tests (see crisisPipeline.thirdPartyCheckin.test.ts).
+  getSessionCheckin: vi.fn(async () => null),
   // Transitive imports of utils/adminBroadcast.js:
   getTherapistIdsForClient: vi.fn(async () => []),
   getCaseworkerIdsForClient: vi.fn(async () => []),

@@ -1,0 +1,394 @@
+// Turns the screen used to leave unassessed, end to end through
+// analyzeMessageRisk (goldens baseline 2026-11-18):
+//  - someone else's active crisis (ai-therapist-326, owner decision: flag high
+//    and page, labelled as a third party);
+//  - shorthand ("ctb", "kms", "I want out");
+//  - the reply to an assistant safety question in a calm session;
+//  - the pre-session check-in text.
+// And the other direction for each: what must not be assessed, must not be
+// labelled, and must score 0 when the assessor is down.
+// OpenAI, the DB and the pager are mocked; no network.
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+const { queryMock, createMock, moderationCreateMock, recentMessagesMock } = vi.hoisted(() => ({
+  queryMock: vi.fn(),
+  createMock: vi.fn(),
+  moderationCreateMock: vi.fn(),
+  recentMessagesMock: vi.fn(),
+}));
+
+vi.mock('../config/db.js', () => ({ pool: { query: queryMock, connect: vi.fn() } }));
+vi.mock('../config/secrets.js', () => ({ getOpenAIKey: vi.fn().mockResolvedValue('test-key') }));
+vi.mock('../db/crisis.queries.js', () => ({
+  getRecentSessionMessages: recentMessagesMock,
+  recordCrisisEvent: vi.fn(),
+}));
+vi.mock('./adverseEvent.service.js', () => ({ draftAdverseEventFromCrisis: vi.fn() }));
+vi.mock('./crisisAlert.service.js', () => ({
+  reportOpenAIQuotaExhausted: vi.fn().mockResolvedValue(undefined),
+  reportRiskAssessorOutage: vi.fn().mockResolvedValue(true),
+  sendCrisisAlert: vi.fn(),
+}));
+vi.mock('openai', () => ({
+  default: class {
+    chat = { completions: { create: createMock } };
+    moderations = { create: moderationCreateMock };
+  },
+}));
+
+const {
+  analyzeMessageRisk,
+  analyzeStandaloneRisk,
+  buildRiskAssessmentUserMessage,
+  getSessionRiskContext,
+  needsContextAssessment,
+  RISK_ASSESSMENT_PROMPT,
+  THIRD_PARTY_FACTOR,
+} = await import('./crisisDetection.service.js');
+const { _resetAssessorHealthForTests } = await import('./riskAssessorHealth.service.js');
+
+const assess = (risk_score: number, context = 'genuine', factors: string[] = []) => ({
+  choices: [
+    {
+      message: {
+        content: JSON.stringify({
+          risk_score,
+          severity: risk_score >= 75 ? 'high' : risk_score >= 50 ? 'medium' : risk_score >= 25 ? 'low' : 'none',
+          context,
+          factors,
+          reasoning: 'test',
+          states_intent: false,
+          loss_or_disclosure: false,
+        }),
+      },
+    },
+  ],
+});
+const MOD_QUIET = { results: [{ flagged: false, category_scores: { 'self-harm/intent': 0.1 } }] };
+const MODEL_NOT_FOUND = () =>
+  Object.assign(new Error('404 model_not_found'), {
+    status: 404,
+    code: 'model_not_found',
+    type: 'invalid_request_error',
+    headers: new Headers(),
+  });
+
+/** The session-risk-context lookup returns a calm, unflagged session. */
+function calmSession(recent: Array<{ risk_score: number; score_factors?: Record<string, unknown> }> = []): void {
+  queryMock.mockImplementation(async (sql: unknown) => {
+    if (String(sql).includes('session-risk-context')) {
+      return { rows: [{ crisis_flagged: false, crisis_severity: null, recent }] };
+    }
+    return { rows: [] };
+  });
+}
+
+let seq = 0;
+const turn = (content: string, extra: Record<string, unknown> = {}) => ({
+  content,
+  session_id: `sess-wake-${++seq}`,
+  message_id: 7,
+  ...extra,
+});
+function riskRow(): Record<string, unknown> {
+  const insert = queryMock.mock.calls.find((c) => String(c[0]).includes('INSERT INTO risk_score_history'));
+  expect(insert).toBeDefined();
+  return { ...JSON.parse(insert![1][4] as string), _score: insert![1][2], _messageId: insert![1][1] };
+}
+const assessorSaw = (n = 0): string => createMock.mock.calls[n][0].messages[1].content as string;
+
+beforeEach(() => {
+  _resetAssessorHealthForTests();
+  queryMock.mockReset();
+  calmSession();
+  createMock.mockReset();
+  moderationCreateMock.mockReset().mockResolvedValue(MOD_QUIET);
+  recentMessagesMock.mockReset().mockResolvedValue([]);
+});
+
+const ROOMMATE = "My roommate just texted me that she's going to kill herself tonight. I don't know what to do.";
+
+describe("ai-therapist-326: someone else's active crisis", () => {
+  it('REPRODUCTION: the turn reaches the assessor (it used to score 0 with no call)', async () => {
+    createMock.mockResolvedValue(assess(90, 'bystander', ['third party stated intent', 'timeframe tonight']));
+
+    const result = await analyzeMessageRisk(turn(ROOMMATE), [{ role: 'user', content: ROOMMATE }]);
+
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(result.riskScore).toBe(90);
+    expect(result.severity).toBe('high');
+  });
+
+  it('labels the result, the factors and the risk row as a third party at risk', async () => {
+    createMock.mockResolvedValue(assess(90, 'bystander', ['third party stated intent']));
+
+    const result = await analyzeMessageRisk(turn(ROOMMATE), []);
+
+    expect(result.thirdParty).toBe(true);
+    expect(result.factors[0]).toBe(THIRD_PARTY_FACTOR);
+    expect(riskRow()).toMatchObject({ third_party: true, llm_context: 'bystander', context_wake: true });
+  });
+
+  it('medium (passive, nothing imminent) is labelled too; it flags and does not page', async () => {
+    createMock.mockResolvedValue(assess(55, 'bystander'));
+    const result = await analyzeMessageRisk(
+      turn('My mom has depression and some days she says she wishes she was not here.'),
+      [],
+    );
+    expect(result.severity).toBe('medium');
+    expect(result.thirdParty).toBe(true);
+  });
+
+  it('ordinary worry scored low by the assessor is not labelled and does not flag', async () => {
+    createMock.mockResolvedValue(assess(10, 'bystander'));
+    const result = await analyzeMessageRisk(turn('She keeps joking that she wants to kill herself over finals.'), []);
+    expect(result.riskScore).toBe(10);
+    expect(result.thirdParty).toBe(false);
+    expect(result.factors).not.toContain(THIRD_PARTY_FACTOR);
+    expect(riskRow().third_party).toBeUndefined();
+  });
+
+  it('"my friend has been really down lately" is not assessed at all', async () => {
+    const result = await analyzeMessageRisk(turn('My friend has been really down lately.'), []);
+    expect(createMock).not.toHaveBeenCalled();
+    expect(result.riskScore).toBe(0);
+  });
+
+  it("the participant's own crisis is never labelled third party", async () => {
+    createMock.mockResolvedValue(assess(90, 'genuine', ['stated intent']));
+    const result = await analyzeMessageRisk(turn('I am going to kill myself tonight.'), []);
+    expect(result.thirdParty).toBe(false);
+    expect(result.factors).not.toContain(THIRD_PARTY_FACTOR);
+  });
+
+  it('assessor down: a third-person sentence is not scored by the screen (it never pages on a film plot alone)', async () => {
+    createMock.mockRejectedValue(MODEL_NOT_FOUND());
+    const result = await analyzeMessageRisk(turn(ROOMMATE), []);
+    // 10 is the moderation mock's signal, the only thing left to score with.
+    expect(result.riskScore).toBe(10);
+    expect(result.severity).toBe('none');
+    expect(result.degraded).toBe(true);
+    expect(riskRow()).toMatchObject({ assessment_degraded: true, context_wake: true });
+  });
+
+  it('later turns are told the earlier concern was for someone else, not the participant', async () => {
+    calmSession([
+      { risk_score: 90, score_factors: { method: 'llm_context', third_party: true, llm_factors: ['stated intent'] } },
+    ]);
+    const ctx = await getSessionRiskContext('sess-third');
+    expect(ctx.peakThirdParty).toBe(true);
+
+    queryMock.mockImplementation(async (sql: unknown) =>
+      String(sql).includes('session-risk-context')
+        ? {
+            rows: [
+              {
+                crisis_flagged: true,
+                crisis_severity: 'high',
+                recent: [{ risk_score: 90, score_factors: { third_party: true, llm_factors: ['stated intent'] } }],
+              },
+            ],
+          }
+        : { rows: [] },
+    );
+    createMock.mockResolvedValue(assess(20, 'bystander'));
+    await analyzeMessageRisk(turn('ok I called her mom and she is going over there'), []);
+    expect(assessorSaw()).toContain("SOMEONE ELSE's crisis");
+    expect(assessorSaw()).not.toContain("the participant's risk was assessed as");
+  });
+
+  it('thread messages carry the same label (standalone path)', async () => {
+    createMock.mockResolvedValue(assess(85, 'bystander', ['third party plan']));
+    const result = await analyzeStandaloneRisk('My best friend told me he has a plan to end his life this weekend.');
+    expect(result.severity).toBe('high');
+    expect(result.thirdParty).toBe(true);
+    expect(result.factors[0]).toBe(THIRD_PARTY_FACTOR);
+  });
+
+  it('the rubric no longer caps a third-party crisis at 20 and still keeps worry and bereavement low', () => {
+    expect(RISK_ASSESSMENT_PROMPT).not.toMatch(/someone ELSE's crisis or loss → score 0-20/);
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/ACTIVE or IMMINENT and unresolved → 80-100, high/);
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/Ordinary worry, a past crisis that has resolved,[^\n]*→ 0-20, none\/low/);
+    // The help-seeking reminder that keeps "I'm going to do it, I'll text my
+    // sister tonight" from being read as intent (it flipped to a page without it).
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/read the latest message once more for help-seeking/);
+  });
+});
+
+describe('shorthand is routed to the assessor, never scored by the screen', () => {
+  it.each(['been thinking about ctb a lot lately', 'kms', 'I want out. Like out out. Of everything.'])(
+    'assessed in a calm session: %s',
+    async (text) => {
+      createMock.mockResolvedValue(assess(60, 'genuine', ['ideation (slang)']));
+      const result = await analyzeMessageRisk(turn(text), []);
+      expect(createMock).toHaveBeenCalledTimes(1);
+      expect(result.riskScore).toBe(60);
+      expect(result.method).toBe('llm_context');
+      // The assessor is told no keyword matched, so it reads the context.
+      expect(assessorSaw()).toContain('it matched no crisis keyword');
+    },
+  );
+
+  it('"CTB" as an unrelated abbreviation: the assessor clears it and nothing is flagged', async () => {
+    createMock.mockResolvedValue(assess(0, 'reference'));
+    const result = await analyzeMessageRisk(turn('Our CTB committee meeting got moved to Friday.'), []);
+    expect(result.riskScore).toBe(0);
+    expect(result.severity).toBe('none');
+  });
+
+  it('assessor down: shorthand is not a keyword tier', async () => {
+    createMock.mockRejectedValue(MODEL_NOT_FOUND());
+    const result = await analyzeMessageRisk(turn('our CTB meeting got moved'), []);
+    expect(result.severity).toBe('none');
+    expect(riskRow().keyword_score).toBe(0);
+  });
+
+  it('a slang turn does not open the context window on its own when the assessor clears it', async () => {
+    // A context-wake row (even a scored one) is not a screen row, so one
+    // "kms" about a bad wifi day does not put the next ten turns under
+    // assessment (getSessionRiskContext counts screen rows only).
+    calmSession([{ risk_score: 30, score_factors: { method: 'llm_context', context_wake: true } }]);
+    expect((await getSessionRiskContext('sess-slang')).elevated).toBe(false);
+  });
+});
+
+describe('the reply to an assistant safety question is assessed with the question', () => {
+  const QUESTION = { role: 'assistant', content: 'Do you ever have thoughts of not wanting to be alive?' };
+  const REPLY = 'yeah. kind of. most nights.';
+
+  it('REPRODUCTION: in a calm session the reply reaches the assessor (it used to score 0 with no call)', async () => {
+    createMock.mockResolvedValue(assess(55, 'genuine', ['passive ideation']));
+
+    const result = await analyzeMessageRisk(turn(REPLY), [QUESTION, { role: 'user', content: REPLY }]);
+
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(result.riskScore).toBe(55);
+    expect(result.severity).toBe('medium');
+    expect(result.method).toBe('llm_context');
+  });
+
+  it('the assessor is given the question and told the message answers it', async () => {
+    createMock.mockResolvedValue(assess(55));
+    await analyzeMessageRisk(turn(REPLY), [QUESTION, { role: 'user', content: REPLY }]);
+    const saw = assessorSaw();
+    expect(saw).toContain('Assistant: Do you ever have thoughts of not wanting to be alive?');
+    expect(saw).toContain("it is the participant's answer to the assistant's safety question just above");
+    expect(saw).toContain(`"${REPLY}"`);
+    expect(riskRow()).toMatchObject({ context_wake: true, answers_safety_question: true });
+  });
+
+  it('a "no" is assessed too and stays what the assessor says it is', async () => {
+    createMock.mockResolvedValue(assess(5, 'negated'));
+    const result = await analyzeMessageRisk(turn('no, nothing like that'), [
+      QUESTION,
+      { role: 'user', content: 'no, nothing like that' },
+    ]);
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(result.riskScore).toBe(5);
+    expect(result.severity).toBe('none');
+  });
+
+  it('must not fire: the same short reply to an ordinary question is not assessed', async () => {
+    const result = await analyzeMessageRisk(turn(REPLY), [
+      { role: 'assistant', content: 'Have you been sleeping badly?' },
+      { role: 'user', content: REPLY },
+    ]);
+    expect(createMock).not.toHaveBeenCalled();
+    expect(result.riskScore).toBe(0);
+  });
+
+  it('must not fire: a later turn, once the assistant has moved on', async () => {
+    await analyzeMessageRisk(turn('yeah the essay is due friday'), [
+      QUESTION,
+      { role: 'user', content: 'no' },
+      { role: 'assistant', content: 'Okay. What is on your plate this week?' },
+      { role: 'user', content: 'yeah the essay is due friday' },
+    ]);
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it('assessor down: the reply is not scored by the screen and is marked degraded, as any keyword-free turn is', async () => {
+    createMock.mockRejectedValue(MODEL_NOT_FOUND());
+    const result = await analyzeMessageRisk(turn(REPLY), [QUESTION, { role: 'user', content: REPLY }]);
+    expect(result.severity).toBe('none');
+    expect(result.degraded).toBe(true);
+    expect(riskRow()).toMatchObject({ assessment_degraded: true, answers_safety_question: true });
+  });
+
+  it('the chat route is told to assess before replying (needsContextAssessment)', async () => {
+    recentMessagesMock.mockResolvedValue([QUESTION, { role: 'user', content: REPLY }]);
+    expect(await needsContextAssessment('sess-chat-answer', REPLY)).toBe(true);
+
+    recentMessagesMock.mockResolvedValue([
+      { role: 'assistant', content: 'What would you like to focus on today?' },
+      { role: 'user', content: REPLY },
+    ]);
+    expect(await needsContextAssessment('sess-chat-ordinary', REPLY)).toBe(false);
+  });
+
+  it('needsContextAssessment assesses when the recent turns cannot be read', async () => {
+    recentMessagesMock.mockRejectedValue(new Error('db down'));
+    expect(await needsContextAssessment('sess-chat-fail', 'ok')).toBe(true);
+  });
+
+  it('the rubric tells the assessor a hedged yes is a yes', () => {
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/An answer to a safety question\./);
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/"most nights"/);
+  });
+});
+
+describe('the pre-session check-in is scored as a first message', () => {
+  const CHECKIN = "I don't really want to be alive";
+
+  it('goes through the keyword screen and the assessor, and the row says where it came from', async () => {
+    createMock.mockResolvedValue(assess(55, 'genuine', ['passive ideation']));
+
+    const result = await analyzeMessageRisk(
+      { content: CHECKIN, session_id: 'sess-checkin-1', source: 'checkin' as const },
+      [],
+    );
+
+    expect(result.riskScore).toBe(55);
+    expect(result.severity).toBe('medium');
+    const row = riskRow();
+    expect(row).toMatchObject({ source: 'checkin', method: 'llm_assessed', keyword_score: 50 });
+    // The check-in is not a messages row.
+    expect(row._messageId ?? null).toBeNull();
+  });
+
+  it('tells the assessor it is reading the check-in form', async () => {
+    createMock.mockResolvedValue(assess(55));
+    await analyzeMessageRisk({ content: CHECKIN, session_id: 'sess-checkin-2', source: 'checkin' as const }, []);
+    expect(assessorSaw()).toContain('What the participant wrote in the check-in form just before this session started');
+  });
+
+  it('assessor down: the keyword tier stands, exactly as for a message', async () => {
+    createMock.mockRejectedValue(MODEL_NOT_FOUND());
+    const result = await analyzeMessageRisk(
+      { content: CHECKIN, session_id: 'sess-checkin-3', source: 'checkin' as const },
+      [],
+    );
+    expect(result.riskScore).toBe(50);
+    expect(result.severity).toBe('medium');
+  });
+
+  it('an ordinary check-in costs no assessor call', async () => {
+    const result = await analyzeMessageRisk(
+      { content: 'midterms\nfigure out a study plan', session_id: 'sess-checkin-4', source: 'checkin' as const },
+      [],
+    );
+    expect(createMock).not.toHaveBeenCalled();
+    expect(result.riskScore).toBe(0);
+  });
+});
+
+describe('the assessor user message', () => {
+  it('is unchanged for a keyword hit and for a plain context wake', () => {
+    expect(buildRiskAssessmentUserMessage('T', 'm')).toBe(
+      'Recent transcript:\nT\n\nLatest participant message (the one that tripped the screen):\n"m"',
+    );
+    expect(buildRiskAssessmentUserMessage('T', 'm', { keywordFree: true })).toBe(
+      'Recent transcript:\nT\n\nLatest participant message (it matched no crisis keyword; assess it against the transcript and any session risk context above):\n"m"',
+    );
+  });
+});

@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import { pool } from '../config/db.js';
 import { getOpenAIKey } from '../config/secrets.js';
-import { recordCrisisEvent } from '../db/crisis.queries.js';
+import { getRecentSessionMessages, recordCrisisEvent } from '../db/crisis.queries.js';
 import { CRISIS_EVENT_ADJUDICATIONS_SQL } from '../db/crisisAdjudications.queries.js';
 import { IRB_STUDY_ORG_ID_SQL } from '../db/organizations.queries.js';
 import { createLogger } from '../utils/logger.js';
@@ -56,6 +56,14 @@ const CRISIS_KEYWORDS: Record<string, { keywords: string[]; score: number }> = {
       'hurt myself',
       'harm myself',
       'overdose',
+      // Algospeak written to get past platform filters. Each is a direct
+      // stand-in for a keyword already in this tier and has no everyday
+      // meaning ("sewerslide" = suicide, "unalive myself" = kill myself).
+      // Shorthand that DOES have other meanings ("kms", "ctb") is not here:
+      // it only wakes the assessor (SLANG / euphemism context signals below).
+      'sewerslide',
+      'sewer slide',
+      'unalive myself',
     ],
     score: 75,
   },
@@ -153,6 +161,14 @@ const PASSIVE_IDEATION_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
     pattern: /\bwould be (?:fine|better|ok|okay|happier|relieved|free|at peace) without me\b/,
   },
   {
+    // "Life isn't worth it." The high tier has "not worth living"; this is the
+    // same thought with the object left as "it". Subject "life" only: "this
+    // class isn't worth it" is not matched.
+    label: 'life is not worth it',
+    pattern:
+      /\blife (?:(?:just|really|honestly|simply) )?(?:is not|isn't|is no longer|ain't|is just not|does not feel|doesn't feel|does not seem|doesn't seem) (?:(?:really|even) )?worth (?:it|living|the (?:effort|pain|trouble|fight|struggle))\b/,
+  },
+  {
     // "I just want it all to be over" / "I want everything to end".
     label: 'want it all to be over',
     pattern: /\bwant (?:it all|all of (?:it|this)|everything|this all) to (?:just )?(?:be over|end|stop)\b/,
@@ -189,6 +205,9 @@ const NORMALIZATIONS: Array<[RegExp, string]> = [
   [/\bcant\b/g, "can't"],
   [/\bwont\b/g, "won't"],
   [/\bim\b/g, "i'm"],
+  // The negated auxiliaries the word forms below rely on, typed without the
+  // apostrophe ("part of me doesnt want to be here", "life isnt worth it").
+  [/\b(is|does|did|was|were|could|would)nt\b/g, "$1n't"],
 ];
 
 function normalizeForScreen(content: string): string {
@@ -199,6 +218,89 @@ function normalizeForScreen(content: string): string {
   return lowerContent;
 }
 
+// Word forms. Each keyword above is written once, in its
+// base form, and used to be matched as that exact string, so the screen knew
+// one inflection of every phrase: "overdose" but not "I think I overdosed",
+// "kill myself" but not "I keep thinking about killing myself", "don't want to
+// be here" but not "part of me doesn't want to be here". Those turns matched
+// nothing and the assessor never ran. The class is fixed here rather than by
+// listing more strings: when a keyword is compiled, every word that appears in
+// this table matches all of its forms. The reported keyword stays the base
+// phrase, so score_factors and the audit trail read as before.
+//
+// Only verbs and auxiliaries are inflected. Pronouns are not: "kill himself"
+// is a different statement from "kill myself" (someone else is at risk) and is
+// screened separately as a third-party signal, which never scores on its own.
+const WORD_FORMS: Record<string, string> = {
+  kill: 'kill(?:s|ed|ing)?',
+  end: 'end(?:s|ed|ing)?',
+  take: '(?:take|takes|took|taken|taking)',
+  want: 'want(?:s|ed|ing)?',
+  wish: 'wish(?:es|ed|ing)?',
+  cut: 'cut(?:s|ting)?',
+  hurt: 'hurt(?:s|ing)?',
+  harm: 'harm(?:s|ed|ing)?',
+  give: '(?:give|gives|gave|given|giving)',
+  go: '(?:go|goes|going)',
+  // "od'd" / "oded" / "od'ing": only the inflected shorthand, never bare "od".
+  overdose: "(?:overdos(?:e|es|ed|ing)|od(?:'d|ed|'ed|'ing))",
+  unalive: 'unaliv(?:e|es|ed|ing)',
+  'self-harm': 'self-harm(?:s|ed|ing)?',
+  // 'self harm' (two words): "self" is literal, "harm" inflects as above.
+  "don't": "(?:don't|do not|didn't|did not|doesn't|does not)",
+  "can't": "(?:can't|cannot|can not|couldn't|could not)",
+  cannot: "(?:can't|cannot|can not|couldn't|could not)",
+  was: '(?:was|were)',
+  were: '(?:was|were)',
+};
+
+// Between the words of a keyword: whitespace, and any number of the adverbs
+// people put there. "I don't really want to be alive" is the passive-ideation
+// keyword with one word in the middle, and it matched nothing (it is the
+// check-in text of the OPEN-03 scenario). Intensifiers and hedges only: none
+// of them changes what the phrase says.
+const KEYWORD_FILLERS = [
+  'really',
+  'just',
+  'even',
+  'actually',
+  'honestly',
+  'truly',
+  'literally',
+  'simply',
+  'still',
+  'ever',
+  'always',
+  'sometimes',
+  'kind of',
+  'kinda',
+  'sort of',
+  'sorta',
+  'fucking',
+  'freaking',
+];
+const KEYWORD_GAP = `\\s+(?:(?:${KEYWORD_FILLERS.join('|')})\\s+)*`;
+
+const escapeRegex = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** One keyword phrase as a whole-word regex over normalized text, with every
+ *  word in WORD_FORMS matching all its forms and any run of whitespace between
+ *  words. Exported for tests. */
+export function keywordPattern(keyword: string): RegExp {
+  const words = keyword
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => WORD_FORMS[word] ?? escapeRegex(word));
+  return new RegExp(`\\b${words.join(KEYWORD_GAP)}\\b`);
+}
+
+/** Compiled once at load (they used to be rebuilt for every message). */
+const COMPILED_KEYWORDS: Array<{ keyword: string; level: string; score: number; pattern: RegExp }> = Object.entries(
+  CRISIS_KEYWORDS,
+).flatMap(([level, data]) =>
+  data.keywords.map((keyword) => ({ keyword, level, score: data.score, pattern: keywordPattern(keyword) })),
+);
+
 export function detectCrisisKeywords(content: string): KeywordAnalysis {
   if (!content) return { keywords: [], keywordScore: 0, detectedKeywords: [] };
 
@@ -206,13 +308,10 @@ export function detectCrisisKeywords(content: string): KeywordAnalysis {
   const detectedKeywords: DetectedKeyword[] = [];
   let totalScore = 0;
 
-  for (const [level, data] of Object.entries(CRISIS_KEYWORDS)) {
-    for (const keyword of data.keywords) {
-      const regex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-      if (regex.test(lowerContent)) {
-        detectedKeywords.push({ keyword, level, score: data.score });
-        totalScore = Math.max(totalScore, data.score);
-      }
+  for (const { keyword, level, score, pattern } of COMPILED_KEYWORDS) {
+    if (pattern.test(lowerContent)) {
+      detectedKeywords.push({ keyword, level, score });
+      totalScore = Math.max(totalScore, score);
     }
   }
 
@@ -250,7 +349,21 @@ export function detectCrisisKeywords(content: string): KeywordAnalysis {
 // one case. Weak ones ("I've decided", "I won't be here") are far too ordinary
 // and only ever wake the assessor.
 
-export type ContextSignalKind = 'intent' | 'farewell' | 'means_question';
+export type ContextSignalKind =
+  | 'intent'
+  | 'farewell'
+  | 'means_question'
+  // Shorthand and euphemism for suicide that also has ordinary meanings ("kms",
+  // "ctb", "I want out"). Never a score: the assessor reads it in context, so
+  // "ran 5 kms" or an unrelated "CTB" costs one assessor call and nothing else.
+  | 'slang'
+  // Someone ELSE's suicidal statement or act ("she's going to kill herself
+  // tonight"). Owner decision 2026-11-18 (ai-therapist-326): an active or
+  // imminent third-party crisis flags high and pages. The first-person
+  // keyword tiers do not match these, so before this kind existed the turn
+  // was never assessed at all. Never a score: third-person talk is far more
+  // often a film, the news or a past loss, which only the assessor can tell.
+  | 'third_party';
 
 export interface ContextSignal {
   kind: ContextSignalKind;
@@ -331,6 +444,61 @@ const CONTEXT_SIGNAL_PATTERNS: Array<{ kind: ContextSignalKind; label: string; s
     pattern:
       /\bwon't (?:be (?:here|around|a (?:burden|problem|bother))|have to (?:worry about|listen to|deal with|put up with) me)\b|\bnot going to be (?:here|around)\b/,
   },
+  // ---- slang and euphemism with other meanings (assessor decides) ----
+  {
+    kind: 'slang',
+    label: 'kms (shorthand)',
+    strong: false,
+    // Not after a number: "ran 5 kms", "12 kms away".
+    pattern: /(?<!\d\s?)\bkms\b/,
+  },
+  { kind: 'slang', label: 'ctb (shorthand)', strong: false, pattern: /\bctb\b/ },
+  {
+    kind: 'slang',
+    label: 'unalive (algospeak)',
+    strong: false,
+    // "unalive myself" is a keyword; this is the bare verb ("thinking about
+    // unaliving", "might just unalive").
+    pattern: /\bunaliv(?:e|es|ed|ing)\b/,
+  },
+  {
+    kind: 'slang',
+    label: 'off myself',
+    strong: false,
+    // The verb, not the preposition ("get this weight off myself").
+    pattern:
+      /\b(?:to|going to|might|could|should|would|will|i'll|i'd|just|and) off myself\b|\boff(?:ed|ing) myself\b|\b(?:self[- ]delet(?:e|ed|ing)|delet(?:e|ed|ing) myself)\b/,
+  },
+  {
+    kind: 'slang',
+    label: 'want out (euphemism)',
+    strong: false,
+    // "I want out. Like out out. Of everything." / "i want out i can't do
+    // this anymore". "I want out of this lease" is matched too and costs one
+    // assessor call; the assessor reads what "out" is out of.
+    pattern: /\bi (?:(?:just|really|only|kind of|kinda|honestly) )*(?:want|need|wanted) (?:a way )?out\b/,
+  },
+  // ---- someone else's suicidal statement or act (assessor decides) ----
+  {
+    kind: 'third_party',
+    label: 'third party: kill or hurt themselves',
+    strong: false,
+    pattern:
+      /\b(?:kill(?:s|ed|ing)?|hurt(?:s|ing)?|harm(?:s|ed|ing)?|cut(?:s|ting)?|unaliv(?:e|es|ed|ing))\s+(?:himself|herself|themselves|themself|theirself)\b/,
+  },
+  {
+    kind: 'third_party',
+    label: 'third party: end or take their life',
+    strong: false,
+    pattern: /\b(?:end(?:s|ed|ing)?|take(?:s|n)?|took|taking)\s+(?:his|her|their)\s+(?:own\s+)?life\b/,
+  },
+  {
+    kind: 'third_party',
+    label: 'third party: wants to die or not be here',
+    strong: false,
+    pattern:
+      /\b(?:he|she|they)(?:'s|'re| is| are| was| were)?\b[\w\s,'-]{0,25}?\b(?:want(?:s|ed|ing)? to die|wish(?:es|ed)? (?:he|she|they) (?:was|were|wasn't|weren't|was not|were not) (?:dead|alive|here|around|born)|wish(?:es|ed)? (?:he|she|they) (?:could|would) (?:just )?(?:disappear|die|not wake up|not exist|not be here)|want(?:s|ed)? to (?:just )?disappear|(?:would|will|'d|'ll) be better off (?:dead|without (?:him|her|them))|going to end it)\b/,
+  },
   // ---- means-relevant questions (lethality, dangerous amounts) ----
   {
     kind: 'means_question',
@@ -395,6 +563,57 @@ function matchContextSignals(normalized: string): ContextSignalMatch[] {
 export function detectContextSignals(content: string): ContextSignal[] {
   if (!content) return [];
   return matchContextSignals(normalizeForScreen(content)).map(({ kind, label, strong }) => ({ kind, label, strong }));
+}
+
+// ============================================
+// STAGE 1c: THE ANSWER TO A SAFETY QUESTION
+// ============================================
+// "yeah. kind of. most nights." carries no crisis word and no signal: all of
+// its meaning is in the question it answers. When the assistant has just asked
+// about suicidal thoughts or safety, the participant's reply is the disclosure
+// (or the denial), and in a calm session it used to be scored 0 with no
+// assessor call (measured 2026-11-18: 3 of 5 runs, session never flagged).
+// The screen here looks at the ASSISTANT's turn, never scores, and does one
+// thing: it sends the participant's keyword-free reply to the assessor with
+// that question in the transcript. Cost: one assessor call per reply to a
+// safety question; the assistant asks one rarely outside a session that is
+// already risk-bearing, where every turn is assessed anyway.
+const SAFETY_QUESTION_TOPICS: RegExp[] = [
+  /\bsuicid/,
+  /\b(?:kill|killing|hurt|hurting|harm|harming|cut|cutting) yourself\b/,
+  /\bself[- ]harm/,
+  /\b(?:end|ending|take|taking) (?:your (?:own )?life|it all|things)\b/,
+  /\b(?:want(?:ing|ed)?|wish(?:ing|ed)?) (?:to die|to be dead|you were dead|you (?:were|was)n't (?:here|alive|around)|to disappear|to not (?:be (?:here|alive)|exist|wake up)|not to (?:be (?:here|alive)|exist|wake up))\b/,
+  /\b(?:not|n't) (?:want(?:ing)?|wish(?:ing)?) to (?:be (?:alive|here|around)|live|exist|wake up|go on)\b/,
+  /\bnot (?:being|be) (?:alive|here|around)\b/,
+  /\b(?:better off|be (?:fine|better)) without you\b/,
+  /\bthoughts? (?:of|about) (?:death|dying|not (?:being|waking|existing))\b/,
+  /\b(?:are|do|have|did|were) you\b[\w\s,'-]{0,20}\bsafe\b|\b(?:keep|keeping|stay|staying) (?:yourself )?safe\b|\bfeel(?:ing)? safe\b|\bin (?:any )?danger\b/,
+];
+
+/**
+ * Does this assistant turn ask the participant about suicide, self-harm or
+ * their safety? A question mark plus one of the topics above. Deliberately
+ * broad: a match only decides that the reply is read by the assessor.
+ * Exported for tests.
+ */
+export function asksSafetyQuestion(assistantText: string | null | undefined): boolean {
+  if (!assistantText || !assistantText.includes('?')) return false;
+  const text = normalizeForScreen(assistantText);
+  return SAFETY_QUESTION_TOPICS.some((topic) => topic.test(text));
+}
+
+/**
+ * Is the latest participant turn a reply to an assistant safety question?
+ * `history` is oldest first and may end with the participant turn being scored
+ * (it is persisted before the pipeline runs), possibly in several parts: the
+ * turn in question is the last assistant turn before those. Exported for tests.
+ */
+export function repliesToSafetyQuestion(history: HistoryMessage[]): boolean {
+  let i = history.length - 1;
+  while (i >= 0 && history[i].role !== 'assistant') i--;
+  if (i < 0) return false;
+  return asksSafetyQuestion(history[i].content ?? history[i].content_redacted);
 }
 
 // Consulted by the degraded fallback (no assessor to read the sentence) and by
@@ -470,6 +689,9 @@ export interface SessionRiskContext {
   turnsSincePeak: number | null;
   /** The assessor's (or the screen's) factors for the peak turn. */
   peakFactors: string[];
+  /** The peak turn was a report of SOMEONE ELSE's crisis (score_factors
+   *  third_party), not the participant's own risk. */
+  peakThirdParty: boolean;
   /** The lookup itself failed. `elevated` is then true: when the session's
    *  state cannot be read, the turn is assessed rather than assumed calm. */
   lookupFailed: boolean;
@@ -482,6 +704,7 @@ const CALM_CONTEXT: SessionRiskContext = {
   recentPeak: 0,
   turnsSincePeak: null,
   peakFactors: [],
+  peakThirdParty: false,
   lookupFailed: false,
 };
 
@@ -536,6 +759,7 @@ export async function getSessionRiskContext(sessionId: string): Promise<SessionR
       recentPeak,
       turnsSincePeak: peakIndex >= 0 ? peakIndex + 1 : null,
       peakFactors: peakIndex >= 0 ? factorsFromScoreFactors(recent[peakIndex].score_factors) : [],
+      peakThirdParty: peakIndex >= 0 && scoreFactorsFlag(recent[peakIndex].score_factors, 'third_party'),
       lookupFailed: false,
     };
   } catch (err) {
@@ -544,7 +768,7 @@ export async function getSessionRiskContext(sessionId: string): Promise<SessionR
   }
 }
 
-function isContextWakeRow(raw: unknown): boolean {
+function scoreFactorsFlag(raw: unknown, key: 'context_wake' | 'third_party'): boolean {
   let parsed: unknown = raw;
   if (typeof raw === 'string') {
     try {
@@ -553,7 +777,11 @@ function isContextWakeRow(raw: unknown): boolean {
       return false;
     }
   }
-  return !!parsed && typeof parsed === 'object' && (parsed as { context_wake?: unknown }).context_wake === true;
+  return !!parsed && typeof parsed === 'object' && (parsed as Record<string, unknown>)[key] === true;
+}
+
+function isContextWakeRow(raw: unknown): boolean {
+  return scoreFactorsFlag(raw, 'context_wake');
 }
 
 function factorsFromScoreFactors(raw: unknown): string[] {
@@ -591,7 +819,11 @@ function describeSessionRiskContext(ctx: SessionRiskContext): string | null {
       // and handing the assessor its own previous score back invites it to
       // repeat or outbid it (observed live: 35 -> 50 -> 65 -> 80 -> 95 across
       // five unremarkable turns before this was changed).
-      `earlier in this session the participant's risk was assessed as ${severityForScore(ctx.recentPeak)}` +
+      (ctx.peakThirdParty
+        ? // Not the participant's own risk: without this the assessor reads
+          // "assessed as high" as the participant having been suicidal.
+          `earlier in this session the participant reported SOMEONE ELSE's crisis (a third party at risk, not the participant), assessed as ${severityForScore(ctx.recentPeak)}`
+        : `earlier in this session the participant's risk was assessed as ${severityForScore(ctx.recentPeak)}`) +
         (ctx.turnsSincePeak ? `, ${ctx.turnsSincePeak} participant turn(s) ago` : '') +
         (ctx.peakFactors.length > 0 ? `; factors noted then: ${ctx.peakFactors.join(', ')}` : ''),
     );
@@ -715,7 +947,15 @@ function applyMeansInquiryFloor(
  */
 export async function needsContextAssessment(sessionId: string, content: string): Promise<boolean> {
   if (detectContextSignals(content).length > 0) return true;
-  return (await getSessionRiskContext(sessionId)).elevated;
+  if ((await getSessionRiskContext(sessionId)).elevated) return true;
+  // The reply to an assistant safety question (see repliesToSafetyQuestion).
+  // A failed read means "assess": the question may be there.
+  try {
+    return repliesToSafetyQuestion(await getRecentSessionMessages(sessionId, 4));
+  } catch (err) {
+    log.error({ err }, `[risk] could not read recent turns for ${sessionId}; assessing the turn anyway`);
+    return true;
+  }
 }
 
 // ============================================
@@ -762,7 +1002,7 @@ Return STRICT JSON only:
 Context judgment matters more than keywords:
 - "reference": mentioning a hotline's name, suicide prevention, a movie/book/news story → score 0-10, severity none.
 - "negated": "I'm not suicidal", "I'd never hurt myself" → score 0-15, severity none (unless other signals contradict).
-- "bystander": talking about someone ELSE's crisis or loss → score 0-20, severity none/low (their own grief may still warrant low).
+- "bystander": talking about someone ELSE's loss, past struggles or ordinary worry about them → score 0-20, severity none/low (their own grief may still warrant low). Someone else's CURRENT suicidal crisis is different and is scored by the "Third party at risk" rule below.
 - "genuine" acute distress WITHOUT ideation → 15-30, low. Distress alone is hopelessness, worthlessness, exhaustion, "can't take it" — e.g. "I just feel hopeless and worthless lately" is 15-30, low. It is NOT passive ideation: reserve that label for an expressed wish to die, disappear, not exist, not wake up, not be here, or not have to go on. Never score distress alone as medium.
 - "genuine" passive ideation → 50-65, medium, ALWAYS at least 50. C-SSRS counts a passive wish to be dead as ideation, not as distress, so it must reach medium — never score it low. This includes INDIRECT and euphemistic phrasing, which is how participants usually say it first: "it would be easier if I didn't have to do this anymore", "I wouldn't mind not waking up", "I'm tired of being here", "I just want it all to be over", "everyone would be fine without me", "I don't want to be here anymore", "no point going on". Hedges and softeners ("I think", "sometimes", "just", "kind of", "maybe") do NOT downgrade it — tentative wording is the normal way passive ideation is disclosed. Absence of a plan, method, or intent does NOT downgrade it either; that is the difference between passive ideation and active ideation, which scores higher still.
 - "genuine" active ideation without plan → 60-75, high.
@@ -774,9 +1014,18 @@ Resolve references against the conversation before scoring. The latest message i
 - A retraction, a joke or a reassurance after a disclosure ("jk", "forget I said that", "I'm fine, I was being dramatic") adds no new risk and does not prove safety: never score it HIGHER than what the conversation had already established, and never read "I've decided NOT to", "I'm not going to do it" or "I changed my mind" as intent.
 - Means inquiry. A question about what is lethal or dangerous to take or keep, how much is too much, or how something could kill is a recognised warning sign when the SAME conversation contains a recent loss or setback, hopelessness, or any disclosure. Score it at least 50, medium, context "unclear", whatever purpose the participant gives for asking (a class paper, curiosity, a story): a stated purpose does not lower the score, and an abrupt change of subject from the loss to this question is itself a reason for concern. After expressed ideation → 75-100, high. Only when the conversation contains nothing concerning at all (for example a student talking about a toxicology exam) → 10-20.
 The last two fields are plain observations, not risk judgments. Answer them literally and independently of the score:
-- "states_intent": true ONLY when the latest participant message itself, read against the conversation, says that they intend or have decided to end their life or hurt themselves, names a time for it, says they have a plan or the means at hand, says goodbye in that sense, or says they have already acted. false when the latest message is about getting help or taking a safety step, an ordinary plan or decision, a retraction or reassurance, a question, or anything else; earlier risk in the conversation does not make it true.
+- "states_intent": true ONLY when the latest participant message itself, read against the conversation, says that they (the participant, not a third party they are reporting about) intend or have decided to end their life or hurt themselves, names a time for it, says they have a plan or the means at hand, says goodbye in that sense, or says they have already acted. false when the latest message is about getting help or taking a safety step, an ordinary plan or decision, a retraction or reassurance, a question, or anything else; earlier risk in the conversation does not make it true.
 - "loss_or_disclosure": true when anywhere in the transcript the PARTICIPANT reports a significant loss or setback of their own (failing or being dropped from a program, a breakup, a death, losing a job, a serious diagnosis or other serious bad news), even stated flatly with no feelings named, or expresses hopelessness, or discloses suicidal thoughts or self-harm. Ordinary stress (a busy week, an upcoming exam, being tired) is false.
 - The session risk context, when present, is background for understanding what the latest message refers to. It is not new evidence: a latest message that adds nothing ("ok", a change of subject, a practical question) must not be scored HIGHER than the level already noted, and ordinary life events mentioned afterwards are not warning signs merely because risk was noted earlier.
+Third party at risk. When the participant reports that SOMEONE ELSE is suicidal, keep context "bystander" and score what is happening to that other person:
+- ACTIVE or IMMINENT and unresolved → 80-100, high. That is: they said they are going to or want to kill themselves or end their life; they have a plan, a method or a time; an attempt has been made or is under way; they wrote or posted a goodbye or suicide note; or they said something suicidal (including not wanting to be alive) and now cannot be reached. A second-hand report ("she texted me", "he told me last night"), a calm participant, or the absence of a plan does not lower it: a real person may be in danger, and the study team is alerted so they can help the participant respond.
+- Passive or long-standing thoughts with nothing imminent ("my mom has depression and some days she says she wishes she wasn't here") → 50-65, medium.
+- Ordinary worry, a past crisis that has resolved, a death or suicide that has already happened, a film, a book or the news → 0-20, none/low.
+- If the participant also voices ideation of their OWN, score that instead, with context "genuine".
+Slang and shorthand: "kms" (kill myself), "ctb" or "catch the bus" (die by suicide), "unalive", "sewerslide", "off myself", "I want out" (of life, of everything). Said in earnest about themselves, score them as the plain words they stand for ("been thinking about ctb a lot lately" is active ideation; "I want out. Of everything." is at least passive ideation, 50 or more). With an ordinary meaning in the conversation (a distance in kms, an unrelated abbreviation, an actual bus, wanting out of a lease or a class) → 0-10, none.
+An answer to a safety question. When the assistant's turn just before the latest message asks about suicide, self-harm, wanting to die or not be alive, or whether the participant is safe, the latest message is the answer to THAT question, however short: score it as if the participant had said the full sentence. "yeah", "kind of", "sometimes", "most nights", "I guess" in reply to a question about not wanting to be alive is passive ideation → at least 50, medium; in reply to a question about suicide or ending their life it is active ideation; in reply to a question about a plan, the means or a time → 80-100, high. Hedged and minimal answers do not downgrade it. A clear "no" (or "yes, I'm safe") is "negated" → 0-15. A dodge ("I don't know", "does it matter") is "unclear" → 25-40, low.
+Before you answer, read the latest message once more for help-seeking. When it announces or agrees to a step toward help or safety (texting or calling a family member, a friend, a counselor or a crisis line, booking an appointment, telling a roommate), the "it" in "I'm going to do it" or "I'll do it" is that step: "states_intent" is false and the score is not above the level the conversation had already established.
+And for a means inquiry already made: when the latest message presses for the answer to a question about what is dangerous or lethal after it was declined ("it really is just for the paper, can you answer the question?"), it is still that means inquiry. Score it at the level the inquiry itself had, not lower.
 Weigh protective factors (future plans, reasons for living, engaged help-seeking) downward. Base the score on the participant's CURRENT state in this conversation, not history alone.`;
 
 /** How one assessment is framed for the assessor beyond the transcript. */
@@ -787,6 +1036,12 @@ export interface RiskAssessmentFraming {
   /** True for a context wake: the latest message matched no crisis keyword
    *  and is being assessed because of the conversation around it. */
   keywordFree?: boolean;
+  /** True when the assistant's turn just before the latest message asks about
+   *  suicide, self-harm or safety (repliesToSafetyQuestion). */
+  answersSafetyQuestion?: boolean;
+  /** True when the latest message is not a chat or voice turn but the free
+   *  text of the participant's pre-session check-in. */
+  fromCheckin?: boolean;
 }
 
 /**
@@ -802,12 +1057,20 @@ export function buildRiskAssessmentUserMessage(
   return (
     `Recent transcript:\n${transcript}\n\n` +
     (framing.sessionContext ? `Session risk context: ${framing.sessionContext}\n\n` : '') +
-    (framing.keywordFree
-      ? `Latest participant message (it matched no crisis keyword; assess it against the transcript and any session risk context above):`
-      : `Latest participant message (the one that tripped the screen):`) +
+    (framing.fromCheckin
+      ? `What the participant wrote in the check-in form just before this session started (their own words, written to be read by the assistant; assess it as their first message):`
+      : framing.keywordFree
+        ? framing.answersSafetyQuestion
+          ? `Latest participant message (it matched no crisis keyword; it is the participant's answer to the assistant's safety question just above, so read it as the answer to that question):`
+          : `Latest participant message (it matched no crisis keyword; assess it against the transcript and any session risk context above):`
+        : `Latest participant message (the one that tripped the screen):`) +
     `\n"${latestContent}"`
   );
 }
+
+/** First factor on a flag raised for someone else's crisis: what staff read in
+ *  the crisis event, the dashboard alert and the work item. */
+export const THIRD_PARTY_FACTOR = 'third party at risk (reported by participant)';
 
 const SEVERITY_RANK_ORDER = { none: 0, low: 1, medium: 2, high: 3 } as const;
 
@@ -1196,6 +1459,9 @@ export interface StandaloneRiskResult {
   /** True when the scan could not reach a real verdict (LLM down, no keyword
    *  floor). Callers must NOT record this as clear — retry instead. */
   indeterminate?: boolean;
+  /** True when the assessor judged the message to be about SOMEONE ELSE's
+   *  crisis at medium or high (see RiskAnalysisResult.thirdParty). */
+  thirdParty?: boolean;
 }
 
 /**
@@ -1241,11 +1507,17 @@ export async function analyzeStandaloneRisk(
         (floored.floored ? ` [raised to ${floored.riskScore} by the passive-ideation floor]` : ''),
     );
     const baseFactors = llm.factors.length > 0 ? llm.factors : keywordAnalysis.keywords;
+    const thirdParty = llm.context === 'bystander' && (floored.severity === 'medium' || floored.severity === 'high');
     return {
       riskScore: floored.riskScore,
       severity: floored.severity,
-      factors: floored.floored ? [...baseFactors, 'passive ideation (screen floor)'] : baseFactors,
+      factors: [
+        ...(thirdParty ? [THIRD_PARTY_FACTOR] : []),
+        ...baseFactors,
+        ...(floored.floored ? ['passive ideation (screen floor)'] : []),
+      ],
       method: 'llm_assessed',
+      ...(thirdParty ? { thirdParty: true } : {}),
     };
   } catch (err) {
     const failure = await recordAssessorFailure(err, null);
@@ -1378,6 +1650,10 @@ interface MessageInput {
    * sentence is not counted twice.
    */
   stitched_message_ids?: ReadonlyArray<string | number>;
+  /** 'checkin' when `content` is the free text of the pre-session check-in
+   *  rather than a chat or voice turn. Recorded on the risk row and told to
+   *  the assessor; scoring is otherwise identical to a first message. */
+  source?: 'checkin';
 }
 
 interface RiskAnalysisResult {
@@ -1394,6 +1670,11 @@ interface RiskAnalysisResult {
   contextWake?: boolean;
   /** True when the assessor should have scored this turn and could not. */
   degraded?: boolean;
+  /** True when the assessor judged the turn to be about SOMEONE ELSE's crisis
+   *  (context 'bystander') at medium or high. The pipeline then labels the
+   *  flag, the dashboard alert and the on-call page as a third party at risk
+   *  and steers the model to help the participant respond (ai-therapist-326). */
+  thirdParty?: boolean;
 }
 
 /**
@@ -1477,12 +1758,18 @@ export async function analyzeMessageRisk(
     // already risk-bearing, so the turn cannot be judged without the
     // conversation. Whenever a sweep or a moderation wake is assessing the
     // turn anyway, that label wins and this adds no second call.
+    const keywordFree = keywordAnalysis.keywordScore === 0;
+    // The reply to an assistant safety question: its meaning is in the
+    // question, so it is assessed with the transcript however calm the session
+    // (see repliesToSafetyQuestion). Not for the check-in, which precedes any
+    // assistant turn.
+    const answersSafetyQuestion =
+      keywordFree && message.source !== 'checkin' && repliesToSafetyQuestion(conversationHistory);
     const isContextWake =
-      keywordAnalysis.keywordScore === 0 &&
+      keywordFree &&
       !isSweep &&
       !isModerationWake &&
-      (contextSignals.length > 0 || sessionContext.elevated);
-    const keywordFree = keywordAnalysis.keywordScore === 0;
+      (contextSignals.length > 0 || sessionContext.elevated || answersSafetyQuestion);
 
     if (keywordAnalysis.keywordScore > 0 || isSweep || isModerationWake || isContextWake) {
       try {
@@ -1497,6 +1784,10 @@ export async function analyzeMessageRisk(
           // The keyword and sweep framings are unchanged; only a context wake
           // tells the assessor that no keyword matched.
           keywordFree: isContextWake,
+          // Whatever woke the assessor, tell it when the turn answers a safety
+          // question (a sweep or a moderation wake can land on one too).
+          answersSafetyQuestion,
+          fromCheckin: message.source === 'checkin',
         });
         noteAssessorSuccess();
         // A context wake does not reset the periodic sweep: the sweep stays an
@@ -1533,7 +1824,7 @@ export async function analyzeMessageRisk(
           : isModerationWake
             ? `moderation wake (${moderationScore}/100)`
             : isContextWake
-              ? `context wake (signals [${contextSignals.map((c) => c.label).join(', ')}], session peak ${sessionContext.recentPeak}, flagged ${sessionContext.flagged})`
+              ? `context wake (signals [${contextSignals.map((c) => c.label).join(', ')}], session peak ${sessionContext.recentPeak}, flagged ${sessionContext.flagged}, answers safety question ${answersSafetyQuestion})`
               : `keywords [${keywordAnalysis.keywords.join(', ')}]`;
         log.info(
           `[risk] session ${message.session_id.substring(0, 12)}…: ${trigger} ` +
@@ -1600,6 +1891,10 @@ export async function analyzeMessageRisk(
     }
 
     const severity = severityForScore(riskScore);
+    // Someone else's crisis, as judged by the assessor. Only at the flagging
+    // levels: a low bystander score (ordinary worry, a past loss) labels nothing.
+    const thirdParty = llm?.context === 'bystander' && (severity === 'medium' || severity === 'high');
+    if (thirdParty) factors = [THIRD_PARTY_FACTOR, ...factors];
 
     // Passive logging — insert unconditionally regardless of flagging.
     // severity column has CHECK (severity IN ('low','medium','high')), so use NULL when no keyword matched.
@@ -1651,6 +1946,7 @@ export async function analyzeMessageRisk(
               ? {
                   context_wake: true,
                   context_signals: contextSignals.map((c) => c.label),
+                  ...(answersSafetyQuestion ? { answers_safety_question: true } : {}),
                   session_context: {
                     flagged: sessionContext.flagged,
                     flagged_severity: sessionContext.flaggedSeverity,
@@ -1659,6 +1955,10 @@ export async function analyzeMessageRisk(
                   },
                 }
               : {}),
+            ...(message.source ? { source: message.source } : {}),
+            // The assessor read the turn as someone else's crisis. Kept on the
+            // row so later turns are told so (describeSessionRiskContext).
+            ...(thirdParty ? { third_party: true } : {}),
             ...(contextFallbackApplied ? { context_fallback: true } : {}),
             ...(contextSignalFloored ? { context_signal_floor: CRISIS_KEYWORDS.high.score } : {}),
             ...(meansInquiryFloor !== null ? { means_inquiry_floor: meansInquiryFloor } : {}),
@@ -1693,6 +1993,7 @@ export async function analyzeMessageRisk(
       method,
       contextWake: isContextWake,
       degraded: llmErrorKind !== null,
+      thirdParty,
     };
   } catch (error) {
     console.error('Error in analyzeMessageRisk:', error);

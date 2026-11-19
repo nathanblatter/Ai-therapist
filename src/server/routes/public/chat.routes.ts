@@ -215,9 +215,42 @@ export default function chatRoutes(): Router {
 
         if (checkin) {
           const { setSessionCheckin } = await import('../../db/index.js');
-          setSessionCheckin(sessionId, checkin).catch((err) =>
+          // Awaited (it used to be fire-and-forget): the crisis pipeline reads
+          // the stored check-in back as context for the first turns.
+          await setSessionCheckin(sessionId, checkin).catch((err) =>
             log.error({ err }, '[ChatStart] Failed to store check-in'),
           );
+
+          // The check-in's free text goes through the crisis pipeline exactly
+          // as a first message would: scored, flagged, paged and steered. Until
+          // now it only reached the model's prompt, so "I don't really want to
+          // be alive" in the check-in followed by "hi" left no risk row at all.
+          // Held up to the same deadline as a context assessment so the steer
+          // is in place before the first reply; past it the start returns and
+          // detection finishes in the background. Never fails the start.
+          try {
+            const { runCheckinCrisisScreen } = await import('../../services/crisisPipeline.service.js');
+            const { injectGuidance } = await import('../../services/chatTherapy.service.js');
+            let timer: NodeJS.Timeout | undefined;
+            let injected = false;
+            const pending = runCheckinCrisisScreen(sessionId, checkin, 'chat').then((r) => {
+              if (r.steeringGuidance && !injected) {
+                injected = true;
+                injectGuidance(sessionId, r.steeringGuidance);
+              }
+              return r;
+            });
+            pending.catch((err) => log.error({ err }, '[ChatStart] check-in crisis screen failed'));
+            await Promise.race([
+              pending.catch(() => null),
+              new Promise<null>((resolve) => {
+                timer = setTimeout(() => resolve(null), CHAT_CONTEXT_ASSESS_DEADLINE_MS);
+              }),
+            ]);
+            clearTimeout(timer);
+          } catch (err) {
+            log.error({ err }, '[ChatStart] check-in crisis screen failed (fail-open)');
+          }
         }
 
         // Durable per-session consent record, linked to the consent this

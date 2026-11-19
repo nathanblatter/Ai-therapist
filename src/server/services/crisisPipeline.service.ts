@@ -23,8 +23,17 @@ import {
   buildChatSteeringGuidance,
   executeGraduatedResponse,
   CHAT_SAFETY_PROTOCOL_GUIDANCE,
+  CHAT_THIRD_PARTY_GUIDANCE,
+  THIRD_PARTY_GUIDANCE,
+  THIRD_PARTY_PAGE_LABEL,
 } from './crisisIntervention.service.js';
-import { getRecentSessionMessages, getSessionAccessInfo, getSessionCrisisState } from '../db/index.js';
+import {
+  getRecentSessionMessages,
+  getSessionAccessInfo,
+  getSessionCheckin,
+  getSessionCrisisState,
+  type SessionCheckin,
+} from '../db/index.js';
 import { sessionSuppressesSafetyPipeline } from './suppression.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { enqueueWorkItem } from './workQueue.service.js';
@@ -35,6 +44,72 @@ export interface ParticipantTurn {
   sessionId: string;
   messageId: string | number | null;
   content: string;
+  /** 'checkin': `content` is the free text of the pre-session check-in, not a
+   *  chat or voice turn (see runCheckinCrisisScreen). */
+  source?: 'checkin';
+}
+
+/** How many recent turns the assessor is shown. */
+const HISTORY_WINDOW = 10;
+
+/** The check-in's free text (what is on their mind, what they want from
+ *  today), as one string to score; '' when there is none. The mood number is
+ *  not text and is not scored. Pure; exported for tests. */
+export function checkinFreeText(checkin: Pick<SessionCheckin, 'topic' | 'goal'> | null | undefined): string {
+  return [checkin?.topic, checkin?.goal]
+    .map((part) => (typeof part === 'string' ? part.trim() : ''))
+    .filter(Boolean)
+    .join('\n');
+}
+
+/**
+ * Pre-session check-in through the crisis pipeline.
+ *
+ * The check-in ("what's on your mind", "what do you want from today") is
+ * quoted into the model's prompt, and until this existed that was the only
+ * place it went: a participant who wrote "I don't really want to be alive"
+ * and then typed "hi" had no risk row, no flag and no steer (measured
+ * 2026-11-18, 5 of 5 runs, peak risk 0). It is the participant's own words to
+ * the assistant, so it is scored exactly as a first message is: same screen,
+ * same assessor, same flag, page and steering, on the same channel rules. The
+ * risk row has no message id (the check-in is not a `messages` row) and
+ * carries `source: 'checkin'`.
+ *
+ * Call it once, after the session row and its check-in are stored. Never
+ * throws. Chat callers inject the returned `steeringGuidance`.
+ */
+export async function runCheckinCrisisScreen(
+  sessionId: string,
+  checkin: Pick<SessionCheckin, 'topic' | 'goal'> | null | undefined,
+  channel: 'realtime' | 'chat',
+): Promise<CrisisPipelineResult> {
+  const content = checkinFreeText(checkin);
+  if (!content) return NONE_RESULT;
+  return runCrisisPipeline({ sessionId, messageId: null, content, source: 'checkin' }, channel);
+}
+
+/**
+ * The history the risk assessor reads for a turn. While the start of the
+ * session is still inside the window, the check-in's free text is put first,
+ * as the participant's words: after a check-in that said "I don't really want
+ * to be alive", a later "yeah" or "tonight" refers to it, and the assessor can
+ * only resolve that if it can see it. Never throws (a failed read leaves the
+ * history as it was).
+ */
+async function withCheckinContext<T extends { role: string; content?: string | null }>(
+  sessionId: string,
+  history: T[],
+  turn: ParticipantTurn,
+): Promise<Array<T | { role: string; content: string }>> {
+  if (turn.source === 'checkin' || history.length >= HISTORY_WINDOW) return history;
+  try {
+    const text = checkinFreeText(await getSessionCheckin(sessionId));
+    if (!text) return history;
+    return [{ role: 'user', content: `[Written in the pre-session check-in form] ${text}` }, ...history];
+  } catch (err) {
+    console.error('[CrisisPipeline] check-in read failed (non-fatal):', err);
+    return history;
+  }
 }
 
 export type CrisisSeverity = 'none' | 'low' | 'medium' | 'high';
@@ -78,7 +153,7 @@ export async function runCrisisPipeline(
     // still exercise the real pipeline (its runner neuters paging/broadcast).
     if (await sessionSuppressesSafetyPipeline(turn.sessionId)) return NONE_RESULT;
 
-    const history = await getRecentSessionMessages(turn.sessionId, 10);
+    const history = await getRecentSessionMessages(turn.sessionId, HISTORY_WINDOW);
 
     // Age-eligibility confirmation starts NOW, alongside risk scoring, and is
     // acted on after the crisis block below (ai-therapist-296). On voice the
@@ -96,10 +171,15 @@ export async function runCrisisPipeline(
     // Scoring and the age check therefore read the sentence as it was spoken:
     // this turn joined to the participant turn(s) that ended moments before it.
     const stitched =
-      channel === 'realtime' ? stitchSplitTurnParts(turn, history) : { content: turn.content, priorMessageIds: [] };
+      channel === 'realtime' && turn.source !== 'checkin'
+        ? stitchSplitTurnParts(turn, history)
+        : { content: turn.content, priorMessageIds: [] };
     const scoredTurn = stitched.content === turn.content ? turn : { ...turn, content: stitched.content };
 
-    const minorVerdict = channel === 'realtime' ? startRealtimeMinorConfirmation(scoredTurn, history) : null;
+    // Unchanged for the check-in: the age gate has never read it, and whether
+    // it should is not decided here.
+    const minorVerdict =
+      channel === 'realtime' && turn.source !== 'checkin' ? startRealtimeMinorConfirmation(scoredTurn, history) : null;
 
     const risk = await analyzeMessageRisk(
       {
@@ -112,11 +192,16 @@ export async function runCrisisPipeline(
         // own "sudden spike" (a medium statement plus " you know?" scored
         // high, and paged, before this was passed).
         ...(stitched.priorMessageIds.length > 0 ? { stitched_message_ids: stitched.priorMessageIds } : {}),
+        ...(turn.source ? { source: turn.source } : {}),
       },
-      history,
+      await withCheckinContext(turn.sessionId, history, turn),
     );
 
     const severity = risk.severity as CrisisSeverity;
+    // Someone else's crisis, reported by the participant (ai-therapist-326).
+    // Same flag, same page; the label, the steer and the ladder differ.
+    const thirdParty = risk.thirdParty === true;
+    const fromCheckin = turn.source === 'checkin';
     let steeringGuidance: string | null = null;
     let flagged = false;
 
@@ -175,7 +260,13 @@ export async function runCrisisPipeline(
       // ---- Steering ----
       if (channel === 'realtime') {
         // Sideband injection happens inside; realtime ignores the return value.
-        await maybeSteerSession(turn.sessionId, risk.riskScore, severity, forceSteer);
+        // The fifth argument only exists for a third party at risk; every
+        // other turn makes the call it always made.
+        if (thirdParty) {
+          await maybeSteerSession(turn.sessionId, risk.riskScore, severity, forceSteer, THIRD_PARTY_GUIDANCE);
+        } else {
+          await maybeSteerSession(turn.sessionId, risk.riskScore, severity, forceSteer);
+        }
       } else if (shouldSteer(turn.sessionId, risk.riskScore, forceSteer)) {
         // Chat: same shared cooldown, but the guidance is returned for the
         // caller to inject into this turn's model call. High severity swaps the
@@ -183,17 +274,23 @@ export async function runCrisisPipeline(
         // realtime `safety_protocol` intervention so the AE timeline matches.
         // High severity forces past the cooldown — a crisis escalating within
         // three minutes of a routine steer must still get the safety protocol.
-        steeringGuidance =
-          severity === 'high' ? CHAT_SAFETY_PROTOCOL_GUIDANCE : buildChatSteeringGuidance(risk.riskScore, severity);
+        const subject = thirdParty ? { subject: 'third_party' } : {};
+        steeringGuidance = thirdParty
+          ? CHAT_THIRD_PARTY_GUIDANCE
+          : severity === 'high'
+            ? CHAT_SAFETY_PROTOCOL_GUIDANCE
+            : buildChatSteeringGuidance(risk.riskScore, severity);
         await logInterventionAction(turn.sessionId, 'risk_steering', {
           riskScore: risk.riskScore,
           severity,
           channel: 'chat',
+          ...subject,
         });
         if (severity === 'high') {
           await logInterventionAction(turn.sessionId, 'safety_protocol', {
             riskScore: risk.riskScore,
             channel: 'chat',
+            ...subject,
           });
         }
         if (global.io) {
@@ -217,7 +314,13 @@ export async function runCrisisPipeline(
       // this session has logged no ladder step", not on steering cadence. It
       // runs on both channels; realtime delivers over the sideband inside,
       // chat gets a guidance string appended to this turn's model call.
-      const ladderGuidance = await maybeRequireRiskCheck(turn.sessionId, risk.riskScore, severity, channel);
+      // Not for a third party at risk: the ladder asks the participant about
+      // their OWN suicidal thoughts, and its questions are about someone who is
+      // not in the conversation. If the participant voices thoughts of their
+      // own, that turn is scored as theirs and requires the ladder as usual.
+      const ladderGuidance = thirdParty
+        ? null
+        : await maybeRequireRiskCheck(turn.sessionId, risk.riskScore, severity, channel);
       if (ladderGuidance) {
         steeringGuidance = steeringGuidance ? `${steeringGuidance}\n\n${ladderGuidance}` : ladderGuidance;
       }
@@ -239,8 +342,11 @@ export async function runCrisisPipeline(
           'system',
           'auto',
           turn.messageId ?? null,
-          risk.factors,
-          `Risk score: ${risk.riskScore} - Factors: ${risk.factors.join(', ')}`,
+          fromCheckin ? [...risk.factors, CHECKIN_FACTOR] : risk.factors,
+          `Risk score: ${risk.riskScore} - ` +
+            (thirdParty ? `${THIRD_PARTY_PAGE_LABEL} - ` : '') +
+            (fromCheckin ? 'Source: pre-session check-in text - ' : '') +
+            `Factors: ${risk.factors.join(', ')}`,
         );
 
         await logInterventionAction(turn.sessionId, 'auto_flag', {
@@ -248,6 +354,8 @@ export async function runCrisisPipeline(
           severity,
           messageId: turn.messageId,
           factors: risk.factors,
+          ...(thirdParty ? { subject: 'third_party' } : {}),
+          ...(fromCheckin ? { source: 'checkin' } : {}),
         });
 
         if (global.io) {
@@ -261,7 +369,11 @@ export async function runCrisisPipeline(
               factors: risk.factors,
               messageId: turn.messageId,
               detectedAt: new Date(),
-              message: `${severity.toUpperCase()} risk detected (score: ${risk.riskScore})`,
+              message:
+                `${severity.toUpperCase()} risk detected (score: ${risk.riskScore})` +
+                (thirdParty ? ` - ${THIRD_PARTY_PAGE_LABEL}` : '') +
+                (fromCheckin ? ' - from the pre-session check-in' : ''),
+              ...(thirdParty ? { subject: 'third_party' } : {}),
               ...(channel === 'chat' ? { sessionType: 'chat' } : {}),
             },
             turn.sessionId,
@@ -285,7 +397,11 @@ export async function runCrisisPipeline(
           );
         }
 
-        await executeGraduatedResponse(turn.sessionId, severity, risk.riskScore);
+        if (thirdParty) {
+          await executeGraduatedResponse(turn.sessionId, severity, risk.riskScore, { thirdParty: true });
+        } else {
+          await executeGraduatedResponse(turn.sessionId, severity, risk.riskScore);
+        }
         flagged = true;
 
         // Work-queue hook (caseworker portal): pool item for the client's care
@@ -305,7 +421,9 @@ export async function runCrisisPipeline(
             void enqueueWorkItem({
               itemType: 'crisis_flag',
               severity: 'urgent',
-              title: `Crisis flag: ${severity} risk (score ${risk.riskScore})`,
+              title:
+                `Crisis flag: ${severity} risk (score ${risk.riskScore})` +
+                (thirdParty ? ' - third party at risk' : ''),
               detail: { severity, risk_score: risk.riskScore, factors: risk.factors },
               sourceTable: 'therapy_sessions',
               sourceId: `${turn.sessionId}:${severity}`,
@@ -338,6 +456,9 @@ export async function runCrisisPipeline(
     return NONE_RESULT;
   }
 }
+
+/** Factor added to a flag raised by the check-in text rather than a turn. */
+export const CHECKIN_FACTOR = 'from the pre-session check-in';
 
 /** A participant turn that ended this recently before the next one began is
  *  treated as the first part of the same spoken sentence. */
