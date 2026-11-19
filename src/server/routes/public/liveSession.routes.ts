@@ -65,6 +65,7 @@ import {
   resolveLiveVoice,
   LIVE_DEFAULT_BACKEND_MODEL,
   resolveBackendReasoningEffort,
+  hasStudyContact,
 } from '../../utils/liveSessionConfig.js';
 import {
   DEFAULT_CRISIS_CONTACT,
@@ -330,7 +331,13 @@ export default function liveSessionRoutes(): Router {
           ),
           storable: isDemoSession,
           recovery: isRecovery
-            ? { crisisLine, speakFirst: buildRecoverySpeakFirstNudge(crisisContact as RecoveryCrisisContact) }
+            ? {
+                crisisLine,
+                speakFirst: buildRecoverySpeakFirstNudge(crisisContact as RecoveryCrisisContact),
+                // A demo, sandbox or clinical-deployment session has no research
+                // team or consent form to point a factual question to.
+                studyContact: hasStudyContact(systemConfig.deployment_mode, isDemoSession),
+              }
             : undefined,
           psychoeducationCue: psychoeducationCue === true,
           leadConversation,

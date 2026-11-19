@@ -103,6 +103,15 @@ describe('recovery instructions content', () => {
     expect(text.toLowerCase()).toContain('do not delegate');
   });
 
+  // ai-therapist-348: "do not delegate" alone left a participant waiting 55 s
+  // on "I'm pulling that up" in a session that has nothing to look up with.
+  it('says there is nothing to look up with, and who can answer a study or data question', () => {
+    const flat = text.replace(/\s+/g, ' ');
+    expect(flat).toContain('You have no way to look anything up on this call');
+    expect(flat).toContain('Never say you are checking');
+    expect(flat).toMatch(/research team can: the team's contact details are on their consent form/);
+  });
+
   it('honours the configured language', () => {
     expect(buildLiveRecoveryInstructions({ languageName: 'Spanish', crisisLine: '988' })).toContain('Speak Spanish');
   });

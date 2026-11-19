@@ -132,6 +132,14 @@ export interface VendorCut {
   crisisLineAfterCut: boolean;
 }
 
+export interface DelegationFallback {
+  sessionId: string;
+  /** no_backend (recovery session), no_response or backend_stalled. */
+  reason: string;
+  /** Delegation start to the fallback. */
+  afterMs: number | null;
+}
+
 export interface RunMetrics {
   /** Turns the metrics were computed over. */
   turns: TurnMetrics[];
@@ -156,6 +164,11 @@ export interface RunMetrics {
   vendorCuts: VendorCut[];
   /** Tools the server actually executed (messages rows), when read. */
   toolsExecuted?: string[];
+  /** Delegations the server answered with its fallback instead of a backend
+   *  answer (intervention_actions, event `delegation_fallback`), when read:
+   *  a recovery session's delegation, or an ordinary one whose backend went
+   *  quiet for DELEGATION_STALL_MS (ai-therapist-348). */
+  delegationFallbacks?: DelegationFallback[];
   /** RUN: the caller started speaking while the assistant was talking. */
   bargeIns?: BargeIn[];
   /** RUN: how the simulated call ended and how long it ran. */
