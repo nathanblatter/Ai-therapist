@@ -83,19 +83,73 @@ plan 65-75 ("always at least 65"), and a unit test fails if any band the rubric 
 starts below the cutoff. The bands are code, not `system_config` and not a column: no
 migration, and rows already stored keep the severity they were given.
 
-Two things follow from the number and were not otherwise changed:
+What follows from the number:
 
-- **Trajectory bonus.** A turn the assessor scores 50-60 (passive ideation) reaches the
-  paging band with the +10 "sudden spike" or +15 "deteriorating" bonus (55 + 10 = 65). At
-  the old cutoff that needed the full +20, or a 60 with +15. Whether the bonus should be able
-  to carry a passive-ideation turn into a page is a clinical call that has not been made.
+- **The trajectory bonus cannot cross the page line by itself (2026-11-19,
+  ai-therapist-357).** With high at 65, a second passive-ideation statement (assessor 55,
+  +10 "sudden spike") became a page on the run-up arithmetic alone. The bonus is still
+  applied, and still lifts a turn inside its band or from low to medium, but a turn whose own
+  score is below the cutoff is held at 64 (`trajectory_capped_below_high` on the risk row).
+  A turn already at 65 or more keeps the whole bonus. Whether repeated passive ideation
+  should page at all is still the owner's question.
+- **A step toward help cannot cross the page line by itself (2026-11-19).** "I'm going to do
+  it, I'll text my sister tonight" after a passive-ideation turn is agreeing to reach out.
+  The rubric says so in three places, and the assessor still returned it as intent whenever
+  the rubric was edited somewhere else (three times during this work, last at exactly 65).
+  A message that announces contacting a named support (`announcesHelpStep`), with no crisis
+  keyword and no goodbye in it, is held at 64 in a session that was below high
+  (`help_step_cap`).
 - **Assessor down.** The moderation fallback is capped at 85 and uncapped below: a
   keyword-free turn with a moderation self-harm score of 65-74 now pages while the assessor
   is unreachable (it flagged without paging before).
+- **Stored rows keep their band.** A turn scored 70 before the change was stored as medium
+  and paged nobody. The admin risk timeline colours each row by the severity stored with it,
+  not by today's bands.
 
 The offline calibration report keeps its literal `ge_50` / `ge_75` counters (an archived
 format); its `current_bands` follow the shared definition.
 
+The rubric's bands are contiguous and match the table: distress 15-30, passive ideation
+50-64, active ideation without a plan 65-79, a plan, the means or a time 80-100; a third
+party 0-24 / 50-64 / 80-100; risk to others 0-10 / 25-64 / 65-100. A unit test fails if a
+band called high starts below the cutoff or a band called medium ends at or above it.
+
+## Escalation inside the high band (2026-11-19, ai-therapist-353)
+
+Measured live: "yes" to the ideation question scores 65 or 75 depending on the run,
+"tonight" 85, "I already took the pills" 95. The pipeline re-flagged only when a score was
+MORE than 10 above the stored one, and the paging policy re-paged inside 15 minutes only at
+90 and up, so a participant could go ideation, then tonight, then an overdose in progress,
+and staff got one text.
+
+- **The assessor says what the turn states.** A new literal observation, `acute`:
+  `attempt` (an act already taken or under way), `plan_or_time` (intent stated with a time,
+  a plan or the means at hand, or a goodbye in that sense), or `none`. It is decided after
+  the score and only at 65 and up; ambivalence, being alone and the same words about an
+  ordinary subject are `none`. Stored as `llm_acute`.
+- **A flag event the first time a session reaches each stage**, whatever the stored score
+  (`isFirstFlagAtStage`), and when a score crosses into 90 or more from below. The crisis
+  event's notes, the dashboard alert and the `auto_flag` row say what changed
+  (`escalation: 'plan_or_time' | 'attempt'`). A repeat of the same stage does not flag
+  again.
+- **The page says it in words and is not folded into a page that did not.** A risk page
+  carries a `stage` (0 ideation, 1 a stated time or plan, 2 an attempt); `pageCovers`
+  requires the earlier page to have been at least as far along, about the same person. The
+  text carries `WHAT CHANGED: STATED INTENT WITH A TIME OR PLAN` or `WHAT CHANGED: ATTEMPT IN
+  PROGRESS, or an act already taken`. An attempt is the top page level whatever its score.
+- **Any turn at 90 or more always asks for a page**, flag or no flag
+  (`handleHighTurnWithoutReflag`); only a delivered page at that level and stage, about the
+  same person, in the last 15 minutes absorbs it.
+- **The owner's open call: `REPAGE_ON_STATED_TIME_OR_PLAN`** in `crisisPaging.service.ts`.
+  `true` (the default, failing toward paging): "tonight" at 85 pages again after the
+  ideation page. `false`: it is still flagged and recorded as an escalation, and folded;
+  only an attempt or a score of 90 or more pages again.
+
+`crisisEscalationLadder.test.ts` runs the ladder at first scores 65, 75 and 85 through the
+real pipeline, the real high-risk response and the real paging policy together: three flag
+events and three texts each time.
+
+## Detection: Two-Stage (Keyword Screen + LLM Assessment)
 ## Detection: Two-Stage (Keyword Screen + LLM Assessment)
 
 **File:** `src/server/services/crisisDetection.service.ts`
@@ -442,9 +496,21 @@ that she's going to kill herself tonight" scored 0 with no assessor call.
   own thoughts. If the participant voices ideation of their own, the assessor scores that as
   `genuine` and everything runs as usual.
 - **Not changed.** The crisis resource card, the session-timer lift, and the adverse-event
-  auto-draft on a high flag all still run for a third-party flag. Whether a third party's
-  crisis is a reportable adverse event for the participant is for the study team to decide;
-  the draft is a draft.
+  auto-draft on a high flag all still run for a third-party flag. The draft's summary now
+  begins `SUBJECT: THIRD PARTY AT RISK` (or `SUBJECT: RISK TO OTHERS`), so it is not read as
+  the participant's own crisis; whether it is a reportable event for the participant is for
+  the study team to decide.
+- **Vendor cuts.** When the voice vendor ends a session whose high flag was about someone
+  else, the page says so ("the HIGH flag was about SOMEONE ELSE ... No risk of the
+  participant's own was flagged") instead of "their risk before the cut was HIGH", and such
+  a page does not absorb a later page about the participant. `resolveIncidentPeak` returns
+  the `subject` of the incident's peak and the participant's own level.
+- **Own risk in the same message wins.** A turn the assessor labels as about someone else
+  is handled as the participant's own risk when the assessor reports the participant's own
+  intent, when a first-person crisis keyword is in the message, or (risk to others) when the
+  message also says goodbye ("I know where he parks. And after that I don't plan on being
+  around."). The page then adds `ALSO: the same message describes thoughts of harming
+  another person.`
 
 ## Risk to others (2026-11-18, ai-therapist-330)
 
@@ -496,7 +562,10 @@ pipeline on it as if it were the first participant turn: same screen, same asses
 flag, page and steering. The risk row has no `message_id` and carries `source: 'checkin'`;
 the crisis event's factors end with `from the pre-session check-in`. On chat the start waits
 for the result (up to the 6-second context deadline) so the steer is in place before the
-first reply; on voice it runs after the sideband attach and is not awaited. While the start
+first reply; on GPT-Live voice it runs after the sideband attach and is not awaited. On
+Grok voice the socket does not exist yet at session start: the flag and the page go out at
+once, and the steer the check-in earned is held (five minutes at most) and delivered when
+the voice session is configured (`deliverPendingSteer`). While the start
 of the session is still inside the assessor's 10-message window the check-in text is also
 shown to the assessor as the participant's first words, so a later "yeah" can refer to it.
 The mood number is not scored, and the age-eligibility gate does not read the check-in

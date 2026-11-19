@@ -274,7 +274,8 @@ describe('the reply to an assistant safety question is assessed with the questio
     await analyzeMessageRisk(turn(REPLY), [QUESTION, { role: 'user', content: REPLY }]);
     const saw = assessorSaw();
     expect(saw).toContain('Assistant: Do you ever have thoughts of not wanting to be alive?');
-    expect(saw).toContain("it is the participant's answer to the assistant's safety question just above");
+    expect(saw).toContain("the assistant's turn just above asked a safety question");
+    expect(saw).toContain('If this message answers that question, read it as the answer');
     expect(saw).toContain(`"${REPLY}"`);
     expect(riskRow()).toMatchObject({ context_wake: true, answers_safety_question: true });
   });
@@ -908,9 +909,10 @@ describe('rubric bands are contiguous and agree with src/shared/riskBands.ts', (
     expect(RISK_ASSESSMENT_PROMPT).toMatch(/"no" or "not really" in reply to "are you safe\?"[^.]*is NOT a denial/);
   });
 
-  it('a figure of speech about themselves is separated from intent by trigger and tone', () => {
-    expect(RISK_ASSESSMENT_PROMPT).toMatch(/Figures of speech about THEMSELVES → 0-10, none, context "reference"/);
-    expect(RISK_ASSESSMENT_PROMPT).toMatch(/Without a named small trigger it is NOT a figure of speech/);
+  it('carries no figure-of-speech rule for self-directed statements: it was measured and withdrawn', () => {
+    // With the sentence in the rubric "I have what I need." after passive
+    // ideation fell from high to 50 (3 of 3 runs). See isConditionalJoke.
+    expect(RISK_ASSESSMENT_PROMPT).not.toMatch(/Figures of speech about THEMSELVES/);
   });
 });
 
@@ -994,5 +996,166 @@ describe('a step toward help does not cross the page line by itself', () => {
     createMock.mockResolvedValue(assess(80, 'genuine'));
     const result = await analyzeMessageRisk(turn(SISTER), []);
     expect(result.riskScore).toBe(80);
+  });
+});
+
+describe('harm to others stays harm to others unless the participant names themselves', () => {
+  const harmWithIntentFlag = (risk_score: number) => ({
+    choices: [
+      {
+        message: {
+          content: JSON.stringify({
+            risk_score,
+            severity: 'high',
+            context: 'harm_to_others',
+            factors: ['credible intent'],
+            reasoning: 't',
+            // The assessor sets this for intent to harm someone else, against its definition.
+            states_intent: true,
+            loss_or_disclosure: false,
+            acute: 'plan_or_time',
+          }),
+        },
+      },
+    ],
+  });
+
+  it('REPRODUCTION: states_intent true on "I know where he parks" does not turn it into the participant\'s own risk', async () => {
+    createMock.mockResolvedValue(harmWithIntentFlag(85));
+    const result = await analyzeMessageRisk(turn('I keep picturing hurting him. I know where he parks.'), []);
+    expect(result.subject).toBe('harm_to_others');
+    expect(result.alsoSubject).toBeUndefined();
+    expect(result.factors[0]).toBe(HARM_TO_OTHERS_FACTOR);
+  });
+
+  it.each([
+    'I want to hurt him and then myself',
+    "I'm going to make him pay and then me too",
+    "I know where he parks. And after that I don't plan on being around.",
+  ])('own risk named in the same message: %s', async (text) => {
+    createMock.mockResolvedValue(harmWithIntentFlag(90));
+    const result = await analyzeMessageRisk(turn(text), []);
+    expect(result.subject, text).toBeUndefined();
+    expect(result.alsoSubject, text).toBe('harm_to_others');
+  });
+
+  it('a third-party report still follows the observation', async () => {
+    createMock.mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              risk_score: 90,
+              severity: 'high',
+              context: 'bystander',
+              factors: [],
+              reasoning: 't',
+              states_intent: true,
+              loss_or_disclosure: false,
+              acute: 'none',
+            }),
+          },
+        },
+      ],
+    });
+    const result = await analyzeMessageRisk(turn('My roommate is going to hurt herself and honestly so am I'), []);
+    expect(result.subject).toBeUndefined();
+    expect(result.alsoSubject).toBe('third_party');
+  });
+});
+
+describe('a long change of subject after a safety question is assessed without the "answer" framing', () => {
+  const QUESTION = {
+    role: 'assistant',
+    content:
+      'With the anniversary coming up, have you had any thoughts about wanting to die or not wanting to be here?',
+  };
+  const LYRIC =
+    'I have had that old song stuck in my head all day, the line that goes "killing me softly with his song."';
+
+  it('the lyric is still sent to the assessor, told only that no keyword matched', async () => {
+    createMock.mockResolvedValue(assess(0, 'reference'));
+    await analyzeMessageRisk(turn(LYRIC), [QUESTION, { role: 'user', content: LYRIC }]);
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(assessorSaw()).toContain('assess it against the transcript and any session risk context above');
+    expect(assessorSaw()).not.toContain('asked a safety question');
+  });
+
+  it.each([
+    'yeah. kind of. most nights.',
+    'sometimes',
+    'no',
+    'honestly yes, more than I would like to admit to anyone, it has been going on for a while',
+  ])('an answer keeps the framing: %s', async (reply) => {
+    createMock.mockResolvedValue(assess(55));
+    await analyzeMessageRisk(turn(reply), [QUESTION, { role: 'user', content: reply }]);
+    expect(assessorSaw()).toContain('asked a safety question');
+  });
+
+  it('looksLikeAnAnswer: short, or opening with an answer word', async () => {
+    const { looksLikeAnAnswer } = await import('./crisisDetection.service.js');
+    expect(looksLikeAnAnswer('I could murder a burrito right now.')).toBe(true); // short: the assessor reads it
+    expect(looksLikeAnAnswer(LYRIC)).toBe(false);
+    expect(
+      looksLikeAnAnswer('Honestly it is more that I do not see the point of any of it and I am so tired of all of it'),
+    ).toBe(true);
+  });
+});
+
+describe('a conditional exaggeration with a joke marker does not page by itself', () => {
+  const QUIZ = "I'm literally going to kill myself if I fail this quiz lol";
+
+  it('REPRODUCTION: assessed 80 in a calm session, it is flagged at 64 and not paged', async () => {
+    createMock.mockResolvedValue(assess(80, 'genuine', ['stated intent']));
+    const result = await analyzeMessageRisk(turn(QUIZ), []);
+    expect(result.riskScore).toBe(64);
+    expect(result.severity).toBe('medium');
+    expect(riskRow()).toMatchObject({ conditional_joke_cap: true, llm_score: 80 });
+  });
+
+  it('when the assessor already reads it as nothing, nothing changes', async () => {
+    createMock.mockResolvedValue(assess(5, 'reference'));
+    const result = await analyzeMessageRisk(turn(QUIZ), []);
+    // The screen floor does not apply to a reference; no cap is recorded.
+    expect(result.riskScore).toBe(5);
+    expect(riskRow().conditional_joke_cap).toBeUndefined();
+  });
+
+  it.each([
+    'I want to kill myself lol',
+    "honestly if I fail out I'm going to kill myself. I'm not joking, I've been thinking about it for weeks",
+    "I'm going to kill myself tonight",
+    "if he leaves me I'm going to kill myself",
+  ])('not capped (one of the two marks is missing): %s', async (text) => {
+    createMock.mockResolvedValue(assess(80, 'genuine'));
+    const result = await analyzeMessageRisk(turn(text), []);
+    expect(result.riskScore, text).toBe(80);
+  });
+
+  it('not capped after a disclosure: the same sentence in a session already at medium pages', async () => {
+    queryMock.mockImplementation(async (sql: unknown) =>
+      String(sql).includes('session-risk-context')
+        ? {
+            rows: [
+              {
+                crisis_flagged: true,
+                crisis_severity: 'medium',
+                recent: [{ risk_score: 55, score_factors: { method: 'llm_assessed' } }],
+              },
+            ],
+          }
+        : { rows: [] },
+    );
+    createMock.mockResolvedValue(assess(80, 'genuine'));
+    const result = await analyzeMessageRisk(turn(QUIZ), []);
+    expect(result.riskScore).toBe(80);
+  });
+
+  it('isConditionalJoke needs both the conditional and the laugh', async () => {
+    const { isConditionalJoke } = await import('./crisisDetection.service.js');
+    expect(isConditionalJoke(QUIZ)).toBe(true);
+    expect(isConditionalJoke('if this meeting runs long I will actually die haha')).toBe(true);
+    expect(isConditionalJoke('I want to die lol')).toBe(false);
+    expect(isConditionalJoke('if I fail this quiz I am going to kill myself')).toBe(false);
   });
 });

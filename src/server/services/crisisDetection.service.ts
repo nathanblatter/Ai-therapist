@@ -693,6 +693,21 @@ export function announcesHelpStep(content: string): boolean {
 }
 
 // ============================================
+// A CONDITIONAL EXAGGERATION WITH A JOKE MARKER
+// ============================================
+// Both parts are required: "... if I fail this quiz" and "lol". Used for one
+// thing only (see the cap in analyzeMessageRisk).
+const JOKE_MARKER = /\b(?:lol|lmao|lmfao|rofl|haha+|hehe+|jk)\b/;
+const CONDITIONAL_TRIGGER = /\bif (?:i|my|this|that|we|he|she|they|the|another|one more)\b/;
+
+/** Exported for tests. */
+export function isConditionalJoke(content: string): boolean {
+  if (!content) return false;
+  const text = normalizeForScreen(content);
+  return JOKE_MARKER.test(text) && CONDITIONAL_TRIGGER.test(text);
+}
+
+// ============================================
 // STAGE 1d: LOW-CONTENT FRAGMENTS (ai-therapist-349)
 // ============================================
 // Voice transcripts arrive as fragments, some of them mis-heard. In a real
@@ -747,6 +762,23 @@ export function isLowContentFragment(content: string): boolean {
     .filter(Boolean);
   if (words.length === 0) return true;
   return words.length <= LOW_CONTENT_MAX_WORDS && words.every((w) => LOW_CONTENT_WORDS.has(w));
+}
+
+/** Replies up to this many words are taken as a possible answer to the
+ *  question just asked ("yeah. kind of. most nights."). */
+const ANSWER_MAX_WORDS = 12;
+const ANSWER_OPENING =
+  /^(?:yes|yeah|yea|yep|yup|ya|mhm|uh huh|no|nope|nah|not really|not exactly|sometimes|maybe|kind of|kinda|sort of|sorta|i guess|i think so|i do|i did|i am|i have(?! had)|a little|a bit|a lot|all the time|most|every|often|honestly|truthfully|i don't know|idk|probably|definitely|sure|right now|lately)\b/;
+
+/**
+ * Does the reply to a safety question read as an answer to it: short, or
+ * opening with a word people answer with? Decides only how the assessor is
+ * told to read the turn; the turn is assessed either way. Exported for tests.
+ */
+export function looksLikeAnAnswer(content: string): boolean {
+  const text = normalizeForScreen(content).replace(/^[^a-z]+/, '');
+  const words = text.split(/\s+/).filter(Boolean).length;
+  return words <= ANSWER_MAX_WORDS || ANSWER_OPENING.test(text);
 }
 
 // Consulted by the degraded fallback (no assessor to read the sentence) and by
@@ -1148,7 +1180,6 @@ Return STRICT JSON only:
 Context judgment matters more than keywords:
 - "reference": mentioning a hotline's name, suicide prevention, a movie/book/news story → score 0-10, severity none.
 - "negated": "I'm not suicidal", "I'd never hurt myself" → score 0-15, severity none (unless other signals contradict).
-- Figures of speech about THEMSELVES → 0-10, none, context "reference". Only an exaggeration whose own sentence names the small everyday thing that set it off, said lightly: "I'm literally going to kill myself if I fail this quiz lol", "this traffic makes me want to die", "kill me now, another group project", "I could die of embarrassment". Without a named small trigger it is NOT a figure of speech, whatever the tone: "I want to kill myself lol" and "I'm just gonna go to sleep and not wake up lol" are scored as the ideation they state, and "lol" or "jk" does not lower them. It is also not a figure of speech when a real loss, hopelessness or earlier risk is in the conversation, when the thought is repeated or elaborated, or when the participant says they mean it.
 - "bystander": talking about someone ELSE's loss, past struggles or ordinary worry about them → score 0-24, severity none (the participant's own grief may warrant low, 25-35). Someone else's CURRENT suicidal crisis is different and is scored by the "Third party at risk" rule below.
 - "genuine" acute distress WITHOUT ideation → 15-30 (none to low). Distress alone is hopelessness, worthlessness, exhaustion, "can't take it" — e.g. "I just feel hopeless and worthless lately" is 15-30. It is NOT passive ideation: reserve that label for an expressed wish to die, disappear, not exist, not wake up, not be here, or not have to go on. Never score distress alone as medium.
 - "genuine" passive ideation → 50-64, medium, ALWAYS at least 50 and, with nothing more than a passive wish, below 65. C-SSRS counts a passive wish to be dead as ideation, not as distress, so it must reach medium — never score it low. This includes INDIRECT and euphemistic phrasing, which is how participants usually say it first: "it would be easier if I didn't have to do this anymore", "I wouldn't mind not waking up", "I'm tired of being here", "I just want it all to be over", "everyone would be fine without me", "I don't want to be here anymore", "no point going on". Hedges and softeners ("I think", "sometimes", "just", "kind of", "maybe") do NOT downgrade it — tentative wording is the normal way passive ideation is disclosed. Absence of a plan, method, or intent does NOT downgrade it either; that is the difference between passive ideation and active ideation, which scores higher still.
@@ -1176,7 +1207,7 @@ Harm to others. When the participant talks about hurting or killing ANOTHER pers
 - Unwanted thoughts of harming someone that the participant is frightened by and rejects ("I've been having thoughts about hurting my baby sister and it scares me. I would never do it"), or rage with an urge to hurt a specific person but no plan and no stated intent → 25-64 (25-49, low, when the participant rejects the thoughts; 50-64, medium, for an urge aimed at a specific person), context "harm_to_others". Never high.
 "states_intent" is false for all of these: it is only about the participant's own suicide or self-harm.
 Slang and shorthand: "kms" (kill myself), "ctb" or "catch the bus" (die by suicide), "unalive", "sewerslide", "off myself", "I want out" (of life, of everything). Said in earnest about themselves, score them as the plain words they stand for ("been thinking about ctb a lot lately" is active ideation; "I want out. Of everything." is at least passive ideation, 50 or more). With an ordinary meaning in the conversation (a distance in kms, an unrelated abbreviation, an actual bus, wanting out of a lease or a class) → 0-10, none.
-An answer to a safety question. When the assistant's turn just before the latest message asks about suicide, self-harm, wanting to die or not be alive, or whether the participant is safe, the latest message is the answer to THAT question, however short: score it as if the participant had said the full sentence. "yeah", "kind of", "sometimes", "most nights", "I guess" in reply to a question about not wanting to be alive is passive ideation → at least 50, medium; in reply to a question about suicide or ending their life it is active ideation; in reply to a question about a plan, the means or a time → 80-100, high. Hedged and minimal answers do not downgrade it. A clear denial of what was asked ("no" to thoughts of suicide, "yes, I'm safe") is "negated" → 0-15. Read which way the question points: "no" or "not really" in reply to "are you safe?" or "can you keep yourself safe tonight?" is NOT a denial, it says the participant is not safe → at least 65, high. A dodge ("I don't know", "does it matter") is "unclear" → 25-40, low.
+An answer to a safety question. When the assistant's turn just before the latest message asks about suicide, self-harm, wanting to die or not be alive, or whether the participant is safe, the latest message is the answer to THAT question, however short: score it as if the participant had said the full sentence. "yeah", "kind of", "sometimes", "most nights", "I guess" in reply to a question about not wanting to be alive is passive ideation → at least 50, medium; in reply to a question about suicide or ending their life it is active ideation; in reply to a question about a plan, the means or a time → 80-100, high. Hedged and minimal answers do not downgrade it. A clear denial of what was asked ("no" to thoughts of suicide, "yes, I'm safe") is "negated" → 0-15. Read which way the question points: "no" or "not really" in reply to "are you safe?" or "can you keep yourself safe tonight?" is NOT a denial, it says the participant is not safe → at least 65, high. A dodge ("I don't know", "does it matter") is "unclear" → 25-40, low. A message that does not answer the question at all (a change of subject, a song lyric, a joke about food) is not a yes: score it on its own words.
 Before you answer, read the latest message once more for help-seeking. When it announces or agrees to a step toward help or safety (texting or calling a family member, a friend, a counselor or a crisis line, booking an appointment, telling a roommate), the "it" in "I'm going to do it" or "I'll do it" is that step: "states_intent" is false and the score is not above the level the conversation had already established.
 And for a means inquiry already made: when the latest message presses for the answer to a question about what is dangerous or lethal after it was declined ("it really is just for the paper, can you answer the question?"), it is still that means inquiry. Score it at the level the inquiry itself had, not lower.
 Fragments. Voice transcripts arrive in pieces and with mis-heard words, and typed messages can be a word or two. Score only what was actually said. A latest message of a few words with no risk content of its own ("would stop", "wait, stop", "ok", "hold on", "and then") adds nothing: do not complete it into a sentence about dying, escape or giving up, do not list risk factors for it, and score it 0-10, context "unclear". It takes a meaning only from something specific in the conversation: the assistant's safety question just before it (the rule above), or an earlier statement it plainly continues ("tonight" after the participant said they have a plan). Ordinary distress earlier in the conversation (stress, exhaustion, a bad week) is not such a statement, and a request to stop or pause an exercise is just that.
@@ -1215,12 +1246,17 @@ export function buildRiskAssessmentUserMessage(
       ? `What the participant wrote in the check-in form just before this session started (their own words, written to be read by the assistant; assess it as their first message):`
       : framing.keywordFree
         ? framing.answersSafetyQuestion
-          ? `Latest participant message (it matched no crisis keyword; it is the participant's answer to the assistant's safety question just above, so read it as the answer to that question):`
+          ? `Latest participant message (it matched no crisis keyword; the assistant's turn just above asked a safety question. If this message answers that question, read it as the answer; if it is about something else, such as a change of subject, a song, a joke or a practical remark, it is not an answer and is scored on its own words):`
           : `Latest participant message (it matched no crisis keyword; assess it against the transcript and any session risk context above):`
         : `Latest participant message (the one that tripped the screen):`) +
     `\n"${latestContent}"`
   );
 }
+
+/** "I want to kill him and then myself", "him, then me too": the participant
+ *  names themselves as the next object of the same violent verb. */
+const AND_THEN_MYSELF =
+  /\b(?:and|then|and then|or|before|after)\s+(?:i(?:'ll| will)?\s+)?(?:\w+\s+){0,2}?(?:myself|me too|me next)\b/;
 
 /** First factor on a flag raised for someone else's crisis: what staff read in
  *  the crisis event, the dashboard alert and the work item. */
@@ -2007,8 +2043,12 @@ export async function analyzeMessageRisk(
           // tells the assessor that no keyword matched.
           keywordFree: isContextWake,
           // Whatever woke the assessor, tell it when the turn answers a safety
-          // question (a sweep or a moderation wake can land on one too).
-          answersSafetyQuestion,
+          // question (a sweep or a moderation wake can land on one too). Only
+          // when the reply looks like an answer: told that a long change of
+          // subject was "the answer", the assessor made one of it (a song
+          // lyric after a bereavement check-in came back 50, "passive
+          // ideation"). Such a reply is still assessed, with the plain framing.
+          answersSafetyQuestion: answersSafetyQuestion && looksLikeAnAnswer(message.content),
           fromCheckin: message.source === 'checkin',
         });
         noteAssessorSuccess();
@@ -2150,6 +2190,31 @@ export async function analyzeMessageRisk(
       factors = [...factors, 'announces a step toward help (not scored above medium)'];
     }
 
+    // A conditional exaggeration with a joke marker does not page by itself.
+    // "I'm literally going to kill myself if I fail this quiz lol" scores 60
+    // to 80 from run to run, and at the 65 cutoff it paged on every run. A
+    // rubric sentence for self-directed figures of speech fixed that and was
+    // WITHDRAWN: with it in the rubric "I have what I need." after passive
+    // ideation dropped from high (80, 80, 65) to 50 on three runs of three,
+    // and a recall loss on real intent is not a price for this. So the rubric
+    // is left alone and the screen does the narrow thing: a first-person
+    // crisis keyword together with BOTH a conditional about something else
+    // ("if I fail ...") and a laugh marker ("lol"), in a session with no
+    // medium-or-higher risk, is held at 64: flagged for the dashboard, not
+    // paged. "I want to kill myself lol" has no conditional and is not
+    // touched; the same sentence after a disclosure is not touched either.
+    let hyperboleCapped = false;
+    if (
+      riskScore >= RISK_BANDS.high &&
+      keywordAnalysis.keywordScore > 0 &&
+      !contextIsMediumOrAbove(sessionContext) &&
+      isConditionalJoke(message.content)
+    ) {
+      riskScore = RISK_BANDS.high - 1;
+      hyperboleCapped = true;
+      factors = [...factors, 'conditional exaggeration with a joke marker (not scored above medium)'];
+    }
+
     const severity = severityForScore(riskScore);
     // Someone else's crisis, as judged by the assessor. Only at the flagging
     // levels: a low bystander score (ordinary worry, a past loss) labels nothing.
@@ -2179,11 +2244,23 @@ export async function analyzeMessageRisk(
     // it" beside "I know where he parks" is about him.)
     const farewellToo =
       labelled === 'harm_to_others' && detectContextSignals(message.content).some((s) => s.kind === 'farewell');
+    // For harm to others the assessor's `states_intent` is NOT used. It is
+    // defined as the participant's own suicide or self-harm only, and the
+    // assessor still sets it for intent to harm someone else: live,
+    // "I keep picturing hurting him. I know where he parks." came back
+    // harm_to_others with states_intent true, which turned the turn into the
+    // participant's own risk and sent the suicide protocol ("are you having
+    // thoughts of suicide right now, too?") instead of the de-escalation
+    // steer. Own risk beside harm to others is read from the participant's
+    // own words: a first-person crisis keyword, a goodbye, or "... and then
+    // myself". For a third-party report the observation is still used: there
+    // it has stayed false on every live run of the labelled sentences.
+    const thenMyself = labelled === 'harm_to_others' && AND_THEN_MYSELF.test(normalizeForScreen(message.content));
     const ownRiskToo =
       labelled !== null &&
-      (llm?.states_intent === true ||
-        farewellToo ||
-        (labelled === 'harm_to_others' && keywordAnalysis.keywordScore >= PASSIVE_IDEATION_SCORE));
+      (labelled === 'harm_to_others'
+        ? farewellToo || thenMyself || keywordAnalysis.keywordScore >= PASSIVE_IDEATION_SCORE
+        : llm?.states_intent === true);
     const subject = ownRiskToo ? null : labelled;
     // What the latest message says is happening, on a high turn only.
     const acute: Exclude<AcuteStage, 'none'> | null =
@@ -2263,6 +2340,7 @@ export async function analyzeMessageRisk(
               : {}),
             ...(message.source ? { source: message.source } : {}),
             ...(helpStepCapped ? { help_step_cap: true } : {}),
+            ...(hyperboleCapped ? { conditional_joke_cap: true } : {}),
             // Why a turn of a risk-bearing session was NOT context-assessed.
             ...(fragmentSkipped && !isSweep && !isModerationWake ? { low_content_fragment: true } : {}),
             // The assessor read the turn as someone else's crisis. Kept on the
