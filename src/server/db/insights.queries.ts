@@ -28,6 +28,14 @@ export interface SessionSummary {
   crisis_flagged?: boolean;
   peak_severity?: CrisisSeverity | null;
   peak_risk_score?: number | null;
+  /** Things the participant asked the assistant to forget or not bring up
+   *  again in this session, as short neutral phrases (ai-therapist-341). For
+   *  staff and for the post-session job; never read into memory. */
+  forget_requests?: string[];
+  /** A forget request applies to this summary and it could not be shown to be
+   *  free of the topic: never read into session memory. The text is unchanged
+   *  for staff. */
+  memory_excluded?: boolean;
 }
 
 export type CrisisSeverity = 'low' | 'medium' | 'high';
