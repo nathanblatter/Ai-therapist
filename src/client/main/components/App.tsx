@@ -3153,16 +3153,6 @@ export default function App() {
     voiceTeardownInFlightRef.current = false;
   }
 
-  // The speaker timeline of a voice session the page is leaving mid-call.
-  // reportClientEvent uses sendBeacon, which survives the unload; end() makes
-  // it report once. Its own listener, so the unload handler below is untouched.
-  useEffect(() => {
-    const onPageHide = () => reportSpeakerTimeline(liveSessionIdRef.current);
-    window.addEventListener('pagehide', onPageHide);
-    return () => window.removeEventListener('pagehide', onPageHide);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs and a stable api only
-  }, []);
-
   // Handle page unload - warn user and end session
   useEffect(() => {
     // Show warning dialog when user tries to leave during active session
@@ -3204,6 +3194,15 @@ export default function App() {
           navigator.sendBeacon?.(`/api/sessions/${sessionId}/end`, endBlob);
         }
       }
+
+      // The speaker timeline of a voice session the page is leaving mid-call
+      // (lib/speakerMute.ts; end() makes it report once). Last: it is
+      // telemetry, so it must not take keepalive budget from the recording's
+      // tail or the /end beacon above. A refused beacon loses only this event.
+      const speakerTimeline = speakerApi.end();
+      if (speakerTimeline) {
+        reportClientEvent('speaker_timeline', { ...speakerTimeline }, liveSessionIdRef.current ?? sessionId);
+      }
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
@@ -3213,7 +3212,7 @@ export default function App() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('pagehide', handlePageHide);
     };
-  }, [isSessionActive, sessionId, sessionType]);
+  }, [isSessionActive, sessionId, sessionType, speakerApi]);
 
   // Send one client event on the GPT-Live data channel. Guarded on
   // `session.started` as well as the channel state: the HTTP request starts the

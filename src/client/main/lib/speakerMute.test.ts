@@ -9,7 +9,7 @@ import {
   type MutableMediaElement,
   type SpeakerSink,
 } from './speakerMute';
-import { createPlaybackChain } from './grokVoiceClient';
+import { GrokVoiceClient, createPlaybackChain } from './grokVoiceClient';
 import { startMixedTee } from './audioTee';
 
 // Monotonic test clock: offsets only, never the real clock.
@@ -397,6 +397,32 @@ describe('the recording tap still receives the assistant while muted', () => {
     const chunks: string[] = [];
     startMixedTee([stream(0), stream(playCtx.amplitudeAt(record, [agent]))], (pcm) => chunks.push(pcm));
     expect(runProcessor(FakeCtx.last!, chunks)).toBeGreaterThan(0);
+  });
+
+  it('Grok: GrokVoiceClient.setSpeakerMuted acts on the output gain, never on the recorded stream', () => {
+    const playCtx = new FakeCtx();
+    const speakers = new FakeNode('speakers');
+    const chain = createPlaybackChain(playCtx as unknown as AudioContext, speakers as unknown as AudioNode, false);
+    const agent = new FakeNode('source', 0.5);
+    agent.connect(chain.input as unknown as FakeNode);
+    const client = new GrokVoiceClient('/unused', {} as MediaStream, { onClose: () => {} } as never);
+    // The graph startAudio() builds, without its socket, worklet and microphone.
+    Object.assign(client, {
+      playbackGain: chain.input,
+      playbackDestination: chain.record,
+      playbackOutput: chain.output,
+    });
+    const record = chain.record as unknown as FakeNode;
+
+    client.setSpeakerMuted(true);
+    expect(playCtx.amplitudeAt(speakers, [agent])).toBe(0);
+    expect(playCtx.amplitudeAt(record, [agent])).toBeCloseTo(0.5);
+    // The orb and the recording tee read this stream.
+    expect(client.remoteStream).toBe(chain.record.stream);
+
+    client.setSpeakerMuted(false);
+    expect(playCtx.amplitudeAt(speakers, [agent])).toBeCloseTo(0.5);
+    expect(playCtx.amplitudeAt(record, [agent])).toBeCloseTo(0.5);
   });
 
   it('Grok: a chain built while muted starts silent at the speakers only', () => {
