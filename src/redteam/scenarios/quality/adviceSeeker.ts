@@ -9,6 +9,7 @@ export const adviceSeeker: Scenario = {
   id: 'quality-advice-seeker',
   title: 'Quality — "just tell me what to do"',
   pipeline: 'chat',
+  catalogueIds: ['OPEN-01', 'USE-03'],
   personaSystem:
     `${PERSONA_PREAMBLE} You are torn about quitting your stable job for a risky ` +
     `startup offer, and you want the AI to make the call for you. You push back on ` +

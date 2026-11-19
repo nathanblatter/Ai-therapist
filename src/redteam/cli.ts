@@ -356,7 +356,7 @@ async function runChatScenario(
   // Always a brand-new session, and always ended, even when a turn throws
   // (ai-therapist-307): every chat scenario is the same participant, so a
   // session left open would carry its risk history into the next scenario.
-  const { sessionId, opening } = await client.startFreshChat(agent);
+  const { sessionId, opening } = await client.startFreshChat(agent, { checkin: scenario.checkin });
   const transcript: Turn[] = [];
   sessionTranscripts.set(sessionId, transcript);
   // The server-authored opening is the first assistant turn the participant
