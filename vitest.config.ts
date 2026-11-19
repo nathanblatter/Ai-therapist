@@ -19,6 +19,13 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // The CI runner is the stage host and is often busy (deploys, other test
+    // runs). Vitest's default 5 s limit failed four correct but CPU-heavy
+    // tests on main in two days (sampling simulation, tick-bounded waits, the
+    // SMS combination sweep), each time skipping a stage deploy. A hung test
+    // still fails, just later; tests that need a tighter bound set their own.
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
     // supertest servers bind 127.0.0.1 so no other process on the machine can
     // answer a test's request (ai-therapist-279; see the file's header).
     setupFiles: ['src/server/testing/supertestLoopback.ts', 'src/server/testing/shiftedClock.ts'],
