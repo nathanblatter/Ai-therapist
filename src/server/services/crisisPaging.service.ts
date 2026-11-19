@@ -662,7 +662,8 @@ export function composeVendorCutPage(
           `Why: VENDOR CUT, NOT a high risk score. Risk before the cut was MEDIUM${score}, below the paging ` +
             "threshold. The filter often cuts the assistant's screening question, so the participant's answer " +
             'may be what was lost.',
-          `Why: VENDOR CUT, NOT a high risk score. Risk before the cut was MEDIUM${score}.`,
+          // The reason this pages at all stays in part 1: the lost answer.
+          `Why: VENDOR CUT, NOT a high risk score: MEDIUM${score} before the cut; their answer may be what was lost.`,
         )
       : field(
           'why',
@@ -766,7 +767,8 @@ export function composeVendorCutSilencePage(
           'why',
           `${cutThenSilence} NOT a high risk score: risk was MEDIUM${score}, ` +
             'but the filter can end a session before their last words reach us, so those may not have been assessed.',
-          `${cutThenSilence} NOT a high risk score: risk was MEDIUM${score}.`,
+          // The caveat is why a silent participant is paged at all; it stays.
+          `${cutThenSilence} Risk MEDIUM${score}; last words may not have been assessed.`,
         )
       : peak.severity === 'unknown'
         ? field(
@@ -778,7 +780,8 @@ export function composeVendorCutSilencePage(
             'why',
             `${cutThenSilence} NOT a high risk score: nothing they said was flagged, ` +
               'but the filter can end a session before their last words reach us, so those may not have been assessed.',
-            `${cutThenSilence} NOT a high risk score: nothing they said was flagged.`,
+            // "Nothing flagged" without the caveat reads as all clear; it is not.
+            `${cutThenSilence} Nothing flagged; last words may not have been assessed.`,
           ),
     field('detail', `Session ${shortId(sessionId)}`),
     followUpLine(ctx),

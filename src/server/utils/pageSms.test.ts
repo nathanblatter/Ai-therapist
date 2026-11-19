@@ -161,6 +161,42 @@ describe('SMS part 1 of every page, in every combination of its lines', () => {
     }
   });
 
+  it('a short Why line never reads as lower urgency: the reason the page was sent stays in part 1', () => {
+    for (const [name, message] of PAGES) {
+      const first = splitPageForSms(message)[0];
+      // A silent participant after a cut is paged because their last words
+      // may not have been assessed; "nothing flagged" alone reads as all clear.
+      if (/^silence \d+ (none|medium) /.test(name)) expect(first, name).toContain('may not have been assessed');
+      // A medium cut pages because the participant's answer may be what was lost.
+      if (/^vendor cut medium /.test(name)) expect(first, name).toContain('may be what was lost');
+      if (/^(vendor cut|silence \d+) unknown /.test(name)) expect(first, name).toMatch(/could NOT be read/);
+      if (/^risk third_party .* model_escalation/.test(name) === false && /^risk third_party/.test(name)) {
+        expect(first, name).toMatch(/report/);
+      }
+    }
+  });
+
+  it('fields are shortened in the fixed order (Why, who is at risk, headline, what changed, link) and no further', () => {
+    const ORDER = ['why', 'subject', 'headline', 'change', 'link'] as const;
+    for (const [name, message] of PAGES) {
+      const parts = splitPageForSms(message);
+      if (parts.length === 1) continue;
+      const firstLines = unlabel(parts[0]).split('\n');
+      const shortUsed = (role: string) =>
+        message.fields.some(
+          (f) => f.role === role && f.short && !firstLines.includes(toGsm7(f.text)) && firstLines.includes(f.short),
+        );
+      const hasShort = (role: string) => message.fields.some((f) => f.role === role && f.short);
+      // Once a role is shortened, every earlier role that can be is shortened too.
+      ORDER.forEach((role, i) => {
+        if (!shortUsed(role)) return;
+        for (const earlier of ORDER.slice(0, i)) {
+          if (hasShort(earlier)) expect(shortUsed(earlier), `${name}: ${role} short before ${earlier}`).toBe(true);
+        }
+      });
+    }
+  });
+
   it('the short forms are used only when the full lines do not fit, and the link last of all', () => {
     for (const [name, message, sessionId] of PAGES) {
       const parts = splitPageForSms(message);
@@ -338,6 +374,23 @@ describe('characters outside GSM-7, and the septet count', () => {
     for (const part of parts) expect(gsmLength(part)).toBeLessThanOrEqual(SMS_PART_MAX);
     expect(parts.join('\n')).toContain('https://x.example/admin#session=abc');
     expect(parts.join('\n')).toContain('Review the transcript.');
+  });
+
+  it('at the part cap only trailing detail is dropped: part 1 whole, the link kept, the cut said', () => {
+    const link = 'https://x.example/admin#session=abc';
+    const message = page(
+      field('headline', `URGENT: AI-Therapist HIGH crisis flag ${'x'.repeat(150)}`),
+      field('why', `Why: RISK SCORE 99/100 ${'y'.repeat(60)}`, 'Why: RISK SCORE 99/100.'),
+      field('link', link, 'Open Crisis Management: session abc...'),
+      field('action', 'Review the transcript.'),
+      ...Array.from({ length: 12 }, (_, i) => field('detail', `Detail ${i}: ${'z'.repeat(200)}`)),
+    );
+    const parts = splitPageForSms(message);
+    expect(parts).toHaveLength(SMS_MAX_PARTS);
+    expect(parts[0]).toMatch(/^\(1\/6\) URGENT: AI-Therapist HIGH crisis flag x+\nWhy: RISK SCORE 99\/100\./);
+    expect(parts.slice(0, 2).some((p) => p.includes(link))).toBe(true);
+    expect(parts[SMS_MAX_PARTS - 1]).toMatch(/\[more on the dashboard\]$/);
+    for (const part of parts) expect(gsmLength(part)).toBeLessThanOrEqual(SMS_PART_MAX);
   });
 
   it('an empty page is no SMS at all', () => {
