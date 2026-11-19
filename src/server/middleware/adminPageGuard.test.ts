@@ -3,6 +3,9 @@
 // mounts `app.get('/admin', ...adminPageGuard, <serve admin.html>)` in both
 // prod and dev; this mirrors that wiring next to a gated API route, with the
 // session faked from a header (no session store, no database).
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect, vi } from 'vitest';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import request from 'supertest';
@@ -120,5 +123,18 @@ describe('signedOutPageToLogin', () => {
     const { redirect, next } = run({ method: 'GET', session: { userId: 1 } as unknown as Request['session'] });
     expect(redirect).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalledOnce();
+  });
+});
+
+// PR #92 review: the tests above mirror index.ts's wiring, so nothing failed
+// when a registration in index.ts lost the guard (admin.html served to anyone).
+// startProdServer needs a built dist, so the wiring is checked in the source:
+// every GET /admin page registration, prod and dev, goes through adminPageGuard.
+describe('index.ts mounts the admin page behind the guard', () => {
+  it('both /admin page registrations (prod and dev) carry ...adminPageGuard first', () => {
+    const source = fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../index.ts'), 'utf8');
+    const registrations = source.match(/app\.(?:get|all|use)\(\s*['"`]\/admin['"`][^\n]*/g) ?? [];
+    expect(registrations).toHaveLength(2);
+    for (const line of registrations) expect(line).toMatch(/^app\.get\(\s*'\/admin',\s*\.\.\.adminPageGuard,/);
   });
 });
