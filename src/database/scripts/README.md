@@ -66,6 +66,7 @@ widens the `intervention_actions` action-type constraint after 011.
 | `runCounterfactual.ts` | `npm run counterfactual -- --session <id>` | Counterfactual backend-model sweep from a session (replay or fork mode). | Model-selection research; fork mode is non-study sessions only. |
 | `ingestKnowledge.js` | `npx tsx ...` | Embeds and upserts the RAG seed corpora from `../seeds/` into `knowledge_chunks`. See `../seeds/README.md`. | After migrations 031 + 032, and whenever a seed file changes. |
 | `approveKnowledge.js` | `npx tsx ...` | Lists pending knowledge chunks and flips them active (`--all`, `--kind`, `--topic`, `--dry-run`, `--by <name>`). | After each content review. Spec: `docs/rag-approval-review.md`. |
+| `recheckErroredLeakChecks.ts` | `npx tsx ... [--session <id>] [--limit <n>] [--include-reviewed] [--requeue]` | Lists redacted messages whose leak check errored (ai-therapist-288; the ai-therapist-284 outage rows included) with a count, error texts and an estimated re-check cost. Default is list only: no OpenAI call, no write. `--requeue` re-runs the verifier over the unreviewed ones (one OpenAI call each) and overwrites their `redaction_check`. Never prints message text. | After a verifier outage. Stage first. `docs/db.md`, "Redaction leak-check". |
 | `importToSquawk.ts` | `npx tsx ... [--dry-run]` | One-time import of local accounts and organisations into Squawk (needs `SQUAWK_ADMIN_TOKEN` on the command line, never in `.env`). | Done once per deployment at the Squawk cutover; idempotent. `docs/squawk-auth.md`. |
 
 ## Rules of thumb

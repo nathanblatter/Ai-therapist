@@ -88,32 +88,39 @@ describe('recordRedactionApproval', () => {
   });
 });
 
-describe('leak-check review queue (ai-therapist-262)', () => {
-  it('lists flagged-unreviewed rows first and exposes the verdict', async () => {
+describe('leak-check review queue (ai-therapist-262, 288)', () => {
+  it('lists flagged-unreviewed rows first, errored-unreviewed next, then a random sample, and exposes the verdict', async () => {
     queryMock.mockResolvedValueOnce({ rows: [] });
     const { getRandomRedactedMessages } = await import('./redaction.queries.js');
     await getRandomRedactedMessages(2);
     const [sql, params] = queryMock.mock.calls.at(-1) as [string, unknown[]];
     expect(sql).toContain("metadata->'redaction_check' AS redaction_check");
-    expect(sql).toMatch(/ORDER BY \(\(metadata->'redaction_check'->>'flagged'\) = 'true'/);
-    expect(sql).toContain('RANDOM()');
+    const order = sql.slice(sql.indexOf('ORDER BY'));
+    const flaggedAt = order.indexOf("->>'flagged', 'false') = 'true'");
+    const erroredAt = order.indexOf("->>'status', '') = 'errored'");
+    expect(flaggedAt).toBeGreaterThan(-1);
+    expect(erroredAt).toBeGreaterThan(flaggedAt);
+    expect(order.indexOf('RANDOM()')).toBeGreaterThan(erroredAt);
+    // Rows from before the status field (the 284 outage) are errored by their `error` key.
+    expect(order).toContain("? 'error'");
     expect(params).toEqual([2]);
   });
 
-  it('counts only flagged rows nobody has reviewed', async () => {
-    queryMock.mockResolvedValueOnce({ rows: [{ n: '3' }] });
-    const { countFlaggedUnreviewed } = await import('./redaction.queries.js');
-    expect(await countFlaggedUnreviewed(2)).toBe(3);
+  it('counts flagged and errored unreviewed rows separately, one query', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ flagged: '3', errored: '5' }] });
+    const { countLeakCheckBacklog } = await import('./redaction.queries.js');
+    expect(await countLeakCheckBacklog(2)).toEqual({ flaggedUnreviewed: 3, erroredUnreviewed: 5 });
     const [sql, params] = queryMock.mock.calls.at(-1) as [string, unknown[]];
-    expect(sql).toContain("->>'reviewed', 'false') <> 'true'");
+    expect(sql).toContain("->>'reviewed', 'false') = 'true'");
+    expect(sql).toMatch(/COUNT\(\*\) FILTER/);
     expect(params).toEqual([2]);
   });
 
-  it('scopes the queue and the count to the caller org, anonymous sessions irb-study only (ai-therapist-272)', async () => {
-    queryMock.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{ n: '0' }] });
-    const { getRandomRedactedMessages, countFlaggedUnreviewed } = await import('./redaction.queries.js');
+  it('scopes the queue and the counts to the caller org, anonymous sessions irb-study only (ai-therapist-272)', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{ flagged: '0', errored: '0' }] });
+    const { getRandomRedactedMessages, countLeakCheckBacklog } = await import('./redaction.queries.js');
     await getRandomRedactedMessages(2);
-    await countFlaggedUnreviewed(2);
+    await countLeakCheckBacklog(2);
     for (const call of queryMock.mock.calls) {
       const sql = String(call[0]);
       expect(sql).toMatch(

@@ -244,6 +244,32 @@ Authenticated with the project API key plus `OpenAI-Safety-Identifier`. It is
 how the backend executes tools, persists transcripts, meters usage, and steers
 the conversation.
 
+### OpenAI safety identifier (ai-therapist-168, salted since ai-therapist-306)
+
+OpenAI scopes abuse enforcement, including a permanent block, to the safety
+identifier a request carries. Every identifier the app sends is derived in one
+place, `src/server/utils/safetyIdentifier.ts`:
+
+| Call | How it gets the identifier |
+|---|---|
+| GPT-Live mint (`POST /v1/live/sessions`, `liveSession.routes.ts`) | `safetyIdentifierForUser`, or `safetyIdentifierForParticipantCookie` for an anonymous browser |
+| Sideband attach (above), the sideband's mid-session summary | `safetyIdentifierForSession` |
+| Chat reply (`chatTherapy.service.ts`) | `safetyIdentifierForSession` |
+| Crisis assessor (`crisisDetection.service.ts`) | `safetyIdentifierForSession` |
+
+`safetyIdentifierForSession` resolves the session's user, so the voice mint and
+the text calls for one participant carry the same value. The moderation screen
+(`moderation.service.ts`) sends no identifier.
+
+The value is HMAC-SHA256 keyed with `OPENAI_SAFETY_IDENTIFIER_SALT`, a secret
+set once per environment (`.env.example`). Without the salt it is a plain
+sha256 of `user:<id>`: identical for user 7 on stage, on prod and in every test
+database, and computable by anyone who knows a user id. With the variable
+unset the app keeps that derivation and logs one warning at startup in
+production. Setting the salt, or changing it, changes every participant's
+identifier and resets OpenAI's abuse history for all of them, so it is set
+once, before Phase 2 enrolment, not during the study.
+
 The manager's public surface (`tryInject` / `isConnected` / `disconnect` /
 `getActiveConnections` / `reattachActiveSessions` / `injectMessage` /
 `updateSession` / `interrupt` / `createResponse` / `triggerTool`) was preserved

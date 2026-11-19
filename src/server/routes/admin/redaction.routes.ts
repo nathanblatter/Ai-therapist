@@ -10,7 +10,7 @@ import { requireMessageClientAccess } from '../../middleware/caseload.js';
 import { orgIdFor } from '../../middleware/org.js';
 import {
   getRandomRedactedMessages,
-  countFlaggedUnreviewed,
+  countLeakCheckBacklog,
   updateRedactedContent,
   recordRedactionApproval,
 } from '../../db/index.js';
@@ -31,15 +31,17 @@ export default function redactionRoutes(): Router {
   const router = Router();
 
   // GET /redact/api/messages - review queue: leak-flagged messages first
-  // (ai-therapist-262), then a random sample; plus the flagged backlog size.
+  // (ai-therapist-262), then errored checks (ai-therapist-288), then a random
+  // sample; plus the size of each backlog.
   router.get('/redact/api/messages', requireRole('researcher'), async (req, res) => {
     try {
       const orgId = await callerOrgId(req);
-      const [messages, flaggedUnreviewed] = await Promise.all([
-        getRandomRedactedMessages(orgId),
-        countFlaggedUnreviewed(orgId),
-      ]);
-      res.json({ messages, flagged_unreviewed: flaggedUnreviewed });
+      const [messages, backlog] = await Promise.all([getRandomRedactedMessages(orgId), countLeakCheckBacklog(orgId)]);
+      res.json({
+        messages,
+        flagged_unreviewed: backlog.flaggedUnreviewed,
+        errored_unreviewed: backlog.erroredUnreviewed,
+      });
     } catch (err) {
       log.error({ err }, 'Failed to fetch redacted messages');
       res.status(500).json({ error: 'Failed to fetch messages' });

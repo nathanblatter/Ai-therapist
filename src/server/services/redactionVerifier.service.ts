@@ -28,10 +28,16 @@
 //   auto       decisions first; on "not enabled" / 404 fall back to responses
 //              for the rest of the process lifetime (re-probed on restart).
 //
-// Fail-soft everywhere: a verifier failure is logged on the row
-// (redaction_check.error, flagged=false, p_leak=-1) and never blocks
-// redaction, naming, or the wipe. The cost of that policy: a row whose check
-// errored is NOT verified and NOT prioritised in the review queue.
+// Fail-soft for the pipeline: a verifier failure never blocks redaction,
+// naming, or the wipe. It is NOT fail-soft for the row (ai-therapist-288): a
+// check that did not produce an answer is recorded as its own state,
+// status='errored' with flagged=null ("unknown", never "clean"), p_leak=-1 and
+// the error. db/leakCheckSql.ts defines the states; an errored row is listed
+// in the review queue and counted as needing review, and it is kept out of
+// researcher semantic search exactly like a flagged one, until a researcher
+// reviews it or a re-check (src/database/scripts/recheckErroredLeakChecks.ts)
+// overwrites it with an answer. Rows written before 2026-11-19 carry only
+// `error` (flagged=false); the SQL treats them as errored too.
 
 import OpenAI from 'openai';
 import { getOpenAIKey } from '../config/secrets.js';
@@ -78,15 +84,45 @@ export interface DecisionAnswer {
   tokensOut: number | null;
 }
 
+/** 'checked': the model answered. 'errored': it did not (ai-therapist-288). */
+export type RedactionCheckStatus = 'checked' | 'errored';
+
 export interface RedactionCheck {
+  status: RedactionCheckStatus;
+  /** Probability of a leak, 0..1; -1 when the check errored. */
   p_leak: number;
-  flagged: boolean;
+  /** null when the check errored: unknown, which is not the same as clean. */
+  flagged: boolean | null;
   backend: 'decisions' | 'responses';
   model: string;
   checked_at: string;
   /** Set by the review tool once a researcher corrected or approved the row. */
   reviewed?: boolean;
+  /** Present only when status is 'errored'. */
   error?: string;
+}
+
+/** The verdict recorded for a check that could not run to an answer. */
+export function erroredCheck(cfg: Pick<VerifierConfig, 'backend'>, checkedAt: string, err: unknown): RedactionCheck {
+  const message = err instanceof Error ? err.message : String(err);
+  return {
+    status: 'errored',
+    p_leak: -1,
+    flagged: null,
+    backend: cfg.backend === 'responses' ? 'responses' : 'decisions',
+    model: 'n/a',
+    checked_at: checkedAt,
+    error: (message || 'unknown error').slice(0, 300),
+  };
+}
+
+export interface VerifySummary {
+  /** Rows the model answered for. */
+  checked: number;
+  /** Of those, rows at or above the threshold. */
+  flagged: number;
+  /** Rows recorded as errored (no answer). */
+  errored: number;
 }
 
 // ---- config ----------------------------------------------------------------
@@ -292,8 +328,8 @@ const CONCURRENCY = 4;
 export async function verifyRedactedMessages(
   sessionId: string,
   items: Array<{ id: number; text: string }>,
-): Promise<{ checked: number; flagged: number }> {
-  const summary = { checked: 0, flagged: 0 };
+): Promise<VerifySummary> {
+  const summary: VerifySummary = { checked: 0, flagged: 0, errored: 0 };
   let cfg: VerifierConfig;
   try {
     cfg = await getVerifierConfig();
@@ -302,15 +338,29 @@ export async function verifyRedactedMessages(
   }
   if (!cfg.enabled || items.length === 0) return summary;
 
+  const queue = items.filter((i) => i.text.trim().length > 0);
+
+  // Every row that was due a check and did not get an answer is recorded as
+  // errored, including when no request could be made at all.
+  const recordErrored = async (id: number, checkedAt: string, err: unknown): Promise<void> => {
+    try {
+      await persistCheck(id, erroredCheck(cfg, checkedAt, err));
+      summary.errored++;
+    } catch (persistErr) {
+      log.error({ err: persistErr }, `could not record the errored leak-check for message ${id}`);
+    }
+  };
+
   let client: OpenAI;
   try {
     client = new OpenAI({ apiKey: await getOpenAIKey(), timeout: 60_000 });
   } catch (err) {
     log.error({ err }, 'verifier could not build an OpenAI client');
+    const checkedAt = new Date().toISOString();
+    for (const item of queue) await recordErrored(item.id, checkedAt, err);
     return summary;
   }
 
-  const queue = items.filter((i) => i.text.trim().length > 0);
   let next = 0;
   async function worker() {
     while (next < queue.length) {
@@ -319,6 +369,7 @@ export async function verifyRedactedMessages(
       try {
         const answer = await askLeakCheck(item.text, cfg, client);
         const check: RedactionCheck = {
+          status: 'checked',
           p_leak: Number(answer.pLeak.toFixed(4)),
           flagged: answer.pLeak >= cfg.threshold,
           backend: answer.backend,
@@ -337,14 +388,7 @@ export async function verifyRedactedMessages(
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error(`leak-check failed for message ${item.id}: ${message}`);
-        await persistCheck(item.id, {
-          p_leak: -1,
-          flagged: false,
-          backend: cfg.backend === 'responses' ? 'responses' : 'decisions',
-          model: 'n/a',
-          checked_at: checkedAt,
-          error: message.slice(0, 300),
-        }).catch(() => undefined);
+        await recordErrored(item.id, checkedAt, err);
       }
     }
   }
@@ -353,6 +397,11 @@ export async function verifyRedactedMessages(
   if (summary.flagged > 0) {
     log.warn(
       `session ${sessionId.substring(0, 12)}... : ${summary.flagged}/${summary.checked} redacted message(s) flagged for leak review`,
+    );
+  }
+  if (summary.errored > 0) {
+    log.warn(
+      `session ${sessionId.substring(0, 12)}... : ${summary.errored} redacted message(s) could not be leak-checked; queued for review as errored`,
     );
   }
   return summary;
