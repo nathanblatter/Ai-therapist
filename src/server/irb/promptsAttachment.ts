@@ -121,6 +121,8 @@ import {
 } from '../../shared/recoveryPrompt.js';
 import {
   LIVE_DELEGATION_STALLED_COMMENTARY,
+  LIVE_DELEGATION_GAP_COMMENTARY,
+  DELEGATION_QUIET_CEILING_MS,
   LIVE_RECOVERY_NO_LOOKUP_COMMENTARY,
   LIVE_STEER_KEEP_SPEAKING,
   LIVE_STEER_RESUME_COMMENTARY,
@@ -860,10 +862,26 @@ function buildItems(): Item[] {
     'When the voice model hands a question to the reasoning model (A.9) and the reasoning model does not come ' +
       'back (no activity for 12 seconds at the reasoning setting the study runs, longer at higher settings), the ' +
       'server sends the instruction below so the participant is not left waiting. It is not sent if any guidance ' +
-      'in B.1 to B.5 was delivered since the question was handed over, and it waits until the participant has ' +
-      'stopped speaking:',
+      'in B.1 to B.4 (or the crisis notice that cancels a wrap-up, B.6) was delivered since the question was ' +
+      'handed over; after B.5 or a B.6 crisis time notice it waits one more such period. It waits until the ' +
+      'participant has stopped speaking:',
   );
   add('pre', LIVE_DELEGATION_STALLED_COMMENTARY);
+  add(
+    'note',
+    `If the participant keeps speaking for ${DELEGATION_QUIET_CEILING_MS / 1000} seconds, nothing is sent: ` +
+      'the unanswered question is recorded and left alone, so the assistant is never prompted to speak over them.',
+  );
+  add(
+    'note',
+    "If the server's monitoring connection to a voice session is re-established after a break longer than the " +
+      'few seconds the voice service replays, a question may have been handed over while it was away. If ' +
+      'nothing has been handed over again 12 seconds later, it sends this, under the same conditions. It is not ' +
+      'armed at all while the session is flagged at high crisis severity, or when any guidance in B.1 to B.4 (or the ' +
+      'crisis notice that cancels a wrap-up, B.6) was delivered in the 12 seconds before the break ended; such ' +
+      'guidance delivered after it cancels the instruction:',
+  );
+  add('pre', LIVE_DELEGATION_GAP_COMMENTARY);
 
   add('h2', 'B.1 Risk-adaptive de-escalation steering');
   add(
