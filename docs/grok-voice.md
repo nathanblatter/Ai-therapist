@@ -297,8 +297,13 @@ work — and returns a `function_call_output` item followed by one
 that ordering). Tool call/response rows and `tool_invocations` are recorded
 as on GPT-Live.
 
-The browser receives a UI-only `{ type: 'tool_call', callId, name, args }` so
-it can open the matching overlay (worksheet, scale, resources…). It never
+The browser receives a UI-only `{ type: 'tool_call', callId, name, args }`
+before the tool runs, and, for a tool with an overlay, a
+`{ type: 'tool_outcome', callId, name, args, overlay }` once it has run
+(`overlay`: `shown`, `hidden` or `unconfirmed`; the same outcome also goes to
+the session room as `session:tool-outcome`). The browser opens the crisis-
+resource card on `tool_call` at once; every other overlay opens only on the
+outcome, exactly as on GPT-Live (`shared/toolOverlayPolicy.ts`). It never
 submits a result; the model gets exactly one per call.
 
 ## 7. Usage and billing

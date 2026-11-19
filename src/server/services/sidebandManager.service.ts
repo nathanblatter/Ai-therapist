@@ -50,6 +50,7 @@ import { insertMessagesBatch } from '../db/index.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { emitCrisisResources } from './crisisResources.js';
 import { isToolTimeoutError, toolTimeoutMs } from './toolTimeouts.js';
+import { reportVoiceToolOutcome, voiceOverlayEvent, withScreenNote } from './toolOverlays.js';
 import { buildRecoverySpeakFirstNudge, type RecoveryCrisisContact } from '../../shared/recoveryPrompt.js';
 
 /**
@@ -2246,11 +2247,26 @@ export class SidebandManager {
     state.pendingCalls.delete(callId);
 
     const output = failure ? { error: failure, success: false } : result;
+    // The participant's screen follows the call's outcome, not the model's
+    // request (shared/toolOverlayPolicy.ts): the browser opens the overlay
+    // only on this message (the crisis-resource card excepted, which it opens
+    // at once). Unparseable arguments never reached the handler: a refusal.
+    const overlayEvent = voiceOverlayEvent(
+      callId,
+      call.name,
+      args,
+      parseError ? { result: output, success: true } : { result: output, success: !failure, timedOut },
+    );
+    if (overlayEvent) reportVoiceToolOutcome(sessionId, overlayEvent);
     try {
       this.sendEvent(sessionId, {
         type: 'response.item.create',
         event_id: `tool_result_${callId}`,
-        item: { type: 'function_call_output', call_id: callId, output: JSON.stringify(output) },
+        item: {
+          type: 'function_call_output',
+          call_id: callId,
+          output: JSON.stringify(withScreenNote(output, overlayEvent)),
+        },
       });
       // Continue the backend only once every outstanding call for this session
       // has a submitted result. Continuing early would run the backend while it

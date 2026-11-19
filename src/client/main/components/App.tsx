@@ -12,6 +12,7 @@ import SessionLimitScreen from './SessionLimitScreen';
 import { sessionLimitNotice, type SessionLimitNotice } from '../lib/sessionLimitNotice';
 import ExerciseOverlay, { type ActiveExercise } from './ExerciseOverlay';
 import ToolOverlays, { type ToolUI, type SafetyPlanData } from './ToolOverlays';
+import PendingToolNotice from './PendingToolNotice';
 import PostSessionScreen, {
   type PostSessionData,
   type SessionRecapData,
@@ -30,6 +31,8 @@ import { startMixedTee, type AudioTeeHandle } from '../lib/audioTee';
 import { createAudioUploader, type AudioUploader } from '../lib/audioUploader';
 import { createParticipantSocket } from '../lib/participantSocket';
 import { GrokVoiceClient } from '../lib/grokVoiceClient';
+import { VoiceOverlayGate, type PendingOverlay } from '../lib/voiceOverlayGate';
+import type { ToolOverlayOutcome } from '../../../shared/toolOverlayPolicy';
 import type { GrokServerMessage } from '../../../shared/grokVoiceProtocol';
 import { getUserSocket, closeUserSocket } from '../lib/userSocket';
 import {
@@ -263,6 +266,42 @@ export default function App() {
   // Tool calls arrive on the data channel AND on the server's sideband. Ours is
   // UI-only, but a redelivered envelope must not re-open an overlay.
   const handledToolCallsRef = useRef<Set<string>>(new Set());
+  // Voice overlays open on the server's outcome, not on the model's call
+  // (lib/voiceOverlayGate.ts, shared/toolOverlayPolicy.ts); the crisis-
+  // resource card excepted, which opens at once. Created once; it reaches the
+  // per-tool fns and the session id through refs.
+  const overlayFnsRef = useRef<
+    Record<string, ((args: unknown, opts?: { unconfirmed?: boolean }) => Promise<unknown>) | undefined>
+  >({});
+  const [pendingOverlays, setPendingOverlays] = useState<PendingOverlay[]>([]);
+  const voiceOverlayGateRef = useRef<VoiceOverlayGate | null>(null);
+  if (voiceOverlayGateRef.current === null) {
+    voiceOverlayGateRef.current = new VoiceOverlayGate({
+      open: (name, args, opts) => {
+        const fn = overlayFnsRef.current[name];
+        if (!fn) return;
+        void fn(args, opts).then((result) =>
+          logConversation({
+            sessionId: liveSessionIdRef.current,
+            role: 'system',
+            type: 'function_call',
+            message: `Function ${name} called`,
+            extras: { args, result, ...(opts.unconfirmed ? { unconfirmed: true } : {}) },
+          }),
+        );
+      },
+      fetchOutcome: async (callId) => {
+        const id = liveSessionIdRef.current;
+        if (!id) return null;
+        const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/tool-outcome/${encodeURIComponent(callId)}`, {
+          credentials: 'include',
+        });
+        if (!res.ok) return null;
+        return ((await res.json()) as { outcome?: ToolOverlayOutcome | null }).outcome ?? null;
+      },
+      onPendingChange: setPendingOverlays,
+    });
+  }
   // The server flagged THIS voice session high (session:crisis-emergency).
   // Decides whether the vendor's 60-minute expiry is an ordinary end or a
   // conversation that must be recovered (ai-therapist-281). A recovery session
@@ -1576,6 +1615,7 @@ export default function App() {
     // event as arriving during a teardown.
     isTearingDownRef.current = false;
     handledToolCallsRef.current = new Set();
+    voiceOverlayGateRef.current?.reset();
     // Always: caption rows are grouped by position on the SESSION timeline,
     // which restarts at zero here. Carrying rows across would let the first
     // words of the recovery session merge into the last row of the terminated
@@ -2214,10 +2254,16 @@ export default function App() {
     setMessages((prev) => [...prev, { id, role: msg.role, text: msg.text }]);
   }
 
-  /** UI-only: open the overlay for a tool the SERVER is executing. */
+  /**
+   * UI-only notice of a tool the SERVER is executing. An overlay tool goes
+   * through the gate: the crisis-resource card opens now, anything else on the
+   * `tool_outcome` that follows (same as GPT-Live). Other tools (end_session)
+   * are handled here as before.
+   */
   async function handleGrokToolCall(msg: Extract<GrokServerMessage, { type: 'tool_call' }>) {
     if (handledToolCallsRef.current.has(msg.callId)) return;
     handledToolCallsRef.current.add(msg.callId);
+    if (voiceOverlayGateRef.current?.onModelCall(msg.callId, msg.name, msg.args ?? {})) return;
     const fn = (fns as Record<string, ((args: unknown) => Promise<unknown>) | undefined>)[msg.name];
     if (fn === undefined) return;
     const result = await fn(msg.args);
@@ -2237,6 +2283,9 @@ export default function App() {
         return; // several a second; not worth an events-panel entry
       case 'tool_call':
         void handleGrokToolCall(msg);
+        break;
+      case 'tool_outcome':
+        voiceOverlayGateRef.current?.onOutcome(msg);
         break;
       case 'error':
         reportClientEvent(
@@ -2292,6 +2341,7 @@ export default function App() {
     liveClosedWaiterRef.current = null;
     isTearingDownRef.current = false;
     handledToolCallsRef.current = new Set();
+    voiceOverlayGateRef.current?.reset();
     grokRowsRef.current = new Map();
     captionRowsRef.current = { user: [], assistant: [] };
     moderationHandledRef.current = false;
@@ -2614,6 +2664,12 @@ export default function App() {
       void moderationHandlerRef.current(data?.sessionId ?? null, data?.reason);
     });
 
+    // How a voice tool call ended (both backends; Grok also sends it on its own
+    // socket). Overlays other than the crisis card open only on this.
+    socket.on('session:tool-outcome', (data: ToolOverlayOutcome | undefined) => {
+      voiceOverlayGateRef.current?.onOutcome(data);
+    });
+
     // The server refused the model's end_session on a crisis-flagged session.
     // The end_session tool handler consults this before tearing down.
     socket.on('session:end-vetoed', (data: { reason?: string } | undefined) => {
@@ -2766,6 +2822,10 @@ export default function App() {
     } catch (err) {
       console.error(`[Live] Could not parse arguments for ${item.name}:`, err);
     }
+    // An overlay opens on the server's outcome, not here (the crisis-resource
+    // card excepted: the gate opens it at once).
+    const gateArgs = args && typeof args === 'object' ? (args as Record<string, unknown>) : {};
+    if (voiceOverlayGateRef.current?.onModelCall(item.call_id, item.name, gateArgs)) return;
     const result = await fn(args);
     logConversation({
       sessionId: liveSessionIdRef.current,
@@ -2778,6 +2838,8 @@ export default function App() {
 
   async function stopSession() {
     setActiveExercise(null);
+    // No overlay may open after the call ends; pending ones are dropped.
+    voiceOverlayGateRef.current?.reset();
     // A vendor cut (ai-therapist-293) keeps the crisis resource card: this
     // teardown runs underneath the recovery screen, and clearing the card here
     // is how a card the server had just opened used to vanish with the call.
@@ -3148,7 +3210,7 @@ export default function App() {
         // same fns map the realtime data channel drives so overlays (resource
         // card, safety plan, thought record, ...) render identically. Unknown
         // or teardown-related names are skipped gracefully. The server sends
-        // only the overlays the call's outcome allows (chatToolOverlays.ts);
+        // only the overlays the call's outcome allows (shared/toolOverlayPolicy.ts);
         // `unconfirmed` marks a safety plan whose save did not confirm.
         const toolEvents = (data.toolEvents ?? []) as Array<{ name: string; args?: unknown; unconfirmed?: boolean }>;
         for (const ev of toolEvents) {
@@ -3505,6 +3567,10 @@ export default function App() {
       return { ending: true };
     },
   };
+  overlayFnsRef.current = fns as Record<
+    string,
+    ((args: unknown, opts?: { unconfirmed?: boolean }) => Promise<unknown>) | undefined
+  >;
 
   // NOTE: the whole session config (model, voice, instructions, delegated
   // backend, tools) is applied server-side when POST /api/live/session creates
@@ -3689,6 +3755,9 @@ export default function App() {
           );
         }}
       />
+
+      {/* A voice screener, worksheet or safety plan the server has not confirmed yet */}
+      {isSessionActive && sessionType === 'realtime' && <PendingToolNotice pending={pendingOverlays.length > 0} />}
 
       {/* Wave-2 tool surfaces: resource card, thought record, journal, recap, safety plan, screeners */}
       <ToolOverlays

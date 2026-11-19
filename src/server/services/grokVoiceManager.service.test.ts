@@ -104,6 +104,10 @@ vi.mock('./sessionLifecycle.service.js', () => ({ serverEndSession: serverEndSes
 vi.mock('./crisisDetection.service.js', () => ({ logInterventionAction: logInterventionActionMock }));
 
 import { grokVoiceManager } from './grokVoiceManager.service.js';
+import { ToolTimeoutError, toolTimeoutMs } from './toolTimeouts.js';
+import { EXPECTED_OVERLAY, OUTCOME_CASES, OVERLAY_ARGS, REGISTRY_RESULT } from './toolOverlays.testTable.js';
+import { OVERLAY_NOT_SHOWN_NOTE, OVERLAY_UNCONFIRMED_NOTE } from '../../shared/toolOverlayPolicy.js';
+import { getVoiceToolOutcome } from './toolOverlays.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Internal = any;
@@ -576,6 +580,96 @@ describe('tool execution', () => {
     const out = sent(upstream).find((e) => e.item?.type === 'function_call_output');
     expect(JSON.parse(out!.item.output)).toEqual({ error: 'boom', success: false });
     expect(insertToolInvocationMock).toHaveBeenCalledWith(SESSION, 'run_risk_check', null, false);
+  });
+});
+
+// Voice overlays follow the call's outcome (shared/toolOverlayPolicy.ts),
+// exactly as on GPT-Live: `tool_call` is a pre-execution notice (the browser
+// opens only the crisis-resource card on it); `tool_outcome` follows on this
+// socket and `session:tool-outcome` on the session room.
+describe('overlay outcome to the browser, per tool and outcome', () => {
+  function captureRoom(): Array<{ room: string; event: string; data: Record<string, unknown> }> {
+    const seen: Array<{ room: string; event: string; data: Record<string, unknown> }> = [];
+    (global as unknown as { io: unknown }).io = {
+      to: (room: string) => ({
+        emit: (event: string, data: Record<string, unknown>) => seen.push({ room, event, data }),
+      }),
+    };
+    return seen;
+  }
+
+  function call(upstream: InstanceType<typeof FakeWs>, callId: string, name: string, args: string): void {
+    fire(upstream, { type: 'response.function_call_arguments.done', call_id: callId, name, arguments: args });
+  }
+
+  for (const [tool, byOutcome] of Object.entries(EXPECTED_OVERLAY)) {
+    for (const outcome of OUTCOME_CASES) {
+      const want = byOutcome[outcome];
+      it(`${tool}, ${outcome}: ${want}`, async () => {
+        const { client, upstream } = await bringUp();
+        const seen = captureRoom();
+        if (outcome === 'success') executeToolMock.mockResolvedValueOnce(REGISTRY_RESULT.success);
+        else if (outcome === 'refused') executeToolMock.mockResolvedValueOnce(REGISTRY_RESULT.refused);
+        else if (outcome === 'error') executeToolMock.mockRejectedValueOnce(new Error('db down'));
+        else executeToolMock.mockRejectedValueOnce(new ToolTimeoutError(tool, toolTimeoutMs(tool)));
+
+        call(upstream, `call_${outcome}`, tool, JSON.stringify(OVERLAY_ARGS[tool]));
+        await flush();
+
+        const expected = { callId: `call_${outcome}`, name: tool, args: OVERLAY_ARGS[tool], overlay: want };
+        const toClient = sent(client).filter((m) => m.type === 'tool_call' || m.type === 'tool_outcome');
+        expect(toClient).toEqual([
+          { type: 'tool_call', callId: `call_${outcome}`, name: tool, args: OVERLAY_ARGS[tool] },
+          { type: 'tool_outcome', ...expected },
+        ]);
+        expect(seen.filter((e) => e.event === 'session:tool-outcome')).toEqual([
+          { room: `session:${SESSION}`, event: 'session:tool-outcome', data: { sessionId: SESSION, ...expected } },
+        ]);
+        expect(getVoiceToolOutcome(SESSION, `call_${outcome}`)).toEqual(expected);
+
+        const out = sent(upstream).find((e) => e.item?.type === 'function_call_output');
+        const output = JSON.parse(out!.item.output);
+        if (want === 'shown') expect(output).not.toHaveProperty('screen');
+        else expect(output.screen).toBe(want === 'hidden' ? OVERLAY_NOT_SHOWN_NOTE : OVERLAY_UNCONFIRMED_NOTE);
+      });
+    }
+  }
+
+  it('the crisis-resource card notice reaches the browser BEFORE the tool runs, even if the tool never returns', async () => {
+    const { client, upstream } = await bringUp();
+    executeToolMock.mockReturnValueOnce(new Promise(() => {}));
+    call(upstream, 'call_card', 'show_resource_card', '{"resource_type":"all"}');
+    await flush();
+    expect(sent(client)).toContainEqual({
+      type: 'tool_call',
+      callId: 'call_card',
+      name: 'show_resource_card',
+      args: { resource_type: 'all' },
+    });
+    expect(sent(client).some((m) => m.type === 'tool_outcome')).toBe(false);
+  });
+
+  it('a screener the 7-day cadence refused is reported hidden, and the model is told nothing is on screen', async () => {
+    const { client, upstream } = await bringUp();
+    const refusal = { error: 'scale_recently_administered', scale: 'phq2', guidance: 'Do not mention this.' };
+    executeToolMock.mockResolvedValueOnce(refusal);
+    call(upstream, 'call_scale', 'administer_scale', '{"scale":"phq2"}');
+    await flush();
+    expect(sent(client).find((m) => m.type === 'tool_outcome')).toMatchObject({ overlay: 'hidden' });
+    const out = sent(upstream).find((e) => e.item?.type === 'function_call_output');
+    expect(JSON.parse(out!.item.output)).toEqual({ ...refusal, screen: OVERLAY_NOT_SHOWN_NOTE });
+  });
+
+  it('a timed-out tool is logged as timed out', async () => {
+    const { upstream } = await bringUp();
+    executeToolMock.mockRejectedValueOnce(new ToolTimeoutError('create_safety_plan', 5_000));
+    call(upstream, 'call_t', 'create_safety_plan', JSON.stringify(OVERLAY_ARGS.create_safety_plan));
+    await flush();
+    const rows = insertMessagesBatchMock.mock.calls.flatMap((c: unknown[]) => c[0] as Array<Record<string, Internal>>);
+    expect(rows.find((r) => r.message_type === 'tool_response')?.metadata).toMatchObject({
+      status: 'failed',
+      timed_out: true,
+    });
   });
 });
 

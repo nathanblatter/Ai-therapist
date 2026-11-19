@@ -59,6 +59,8 @@ import WebSocket from 'ws';
 import { pool } from '../config/db.js';
 import { insertMessagesBatch } from '../db/index.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
+import { isToolTimeoutError } from './toolTimeouts.js';
+import { reportVoiceToolOutcome, voiceOverlayEvent, withScreenNote } from './toolOverlays.js';
 import { grokRealtimeUrl } from '../utils/grokVoiceConfig.js';
 import {
   GROK_DEFAULT_REFUSAL_GUARD,
@@ -1087,8 +1089,11 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
       parseError = err instanceof Error ? err.message : String(err);
     }
 
-    // UI-only notification: the browser opens the matching overlay. Execution
-    // stays here, so the model receives exactly one result per call.
+    // UI-only notice that the model called a tool. Execution stays here, so
+    // the model receives exactly one result per call. The browser opens the
+    // crisis-resource card on this notice; every other overlay waits for the
+    // `tool_outcome` sent below, once the call has run
+    // (shared/toolOverlayPolicy.ts), exactly as on GPT-Live.
     //
     // end_session is the exception: the browser tears the call down when it
     // hears that one, and the registry may REFUSE it (crisis-flagged session,
@@ -1127,17 +1132,33 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
 
     let result: unknown;
     let failure: string | null = parseError;
+    let timedOut = false;
     if (!failure) {
       try {
         const { toolRegistry } = await import('./toolRegistry.service.js');
         result = await toolRegistry.executeTool(call.name, args, { sessionId, channel: 'realtime' });
       } catch (err) {
         failure = err instanceof Error ? err.message : String(err);
+        timedOut = isToolTimeoutError(err);
       }
     }
 
     state.pendingCalls.delete(callId);
     const output = failure ? { error: failure, success: false } : result;
+    // The overlay follows the call's outcome (shared/toolOverlayPolicy.ts):
+    // sent on this socket and on the session room (with an HTTP fallback), so
+    // a dropped voice socket cannot lose it. Unparseable arguments never
+    // reached the handler: a refusal.
+    const overlayEvent = voiceOverlayEvent(
+      callId,
+      call.name,
+      args,
+      parseError ? { result: output, success: true } : { result: output, success: !failure, timedOut },
+    );
+    if (overlayEvent) {
+      this.sendToClient(sessionId, { type: 'tool_outcome', ...overlayEvent });
+      reportVoiceToolOutcome(sessionId, overlayEvent);
+    }
     if (deferClientNotice) {
       // Only a confirmed end reaches the browser: a refusal or an error means
       // the server scheduled no backstop and the model was not told goodbye.
@@ -1149,7 +1170,11 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     try {
       this.sendUpstream(sessionId, {
         type: 'conversation.item.create',
-        item: { type: 'function_call_output', call_id: callId, output: JSON.stringify(output ?? {}) },
+        item: {
+          type: 'function_call_output',
+          call_id: callId,
+          output: JSON.stringify(withScreenNote(output, overlayEvent) ?? {}),
+        },
       });
       // Per the xAI docs: no response.create until every outstanding call has
       // its output submitted.
@@ -1171,7 +1196,9 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
           tool_name: call.name,
           call_id: callId,
           channel: 'grok',
-          ...(failure ? { error: failure, status: 'failed' } : { response: result, status: 'completed' }),
+          ...(failure
+            ? { error: failure, status: 'failed', ...(timedOut ? { timed_out: true } : {}) }
+            : { response: result, status: 'completed' }),
         },
       },
     ]).catch((err) => console.error('[Grok] Failed to log tool response:', err));

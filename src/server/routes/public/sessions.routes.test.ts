@@ -158,6 +158,89 @@ describe('POST /api/sessions/:id/scale-response weekly cadence gate', () => {
   });
 });
 
+// A screener the server REFUSED to administer (administer_scale returned an
+// error envelope) but that the participant's browser showed anyway, as voice
+// did before 2026-11-19, and then submitted. It must not be stored as a new
+// administration, and the live model must not be told of a result.
+describe('POST /scale-response for a screener the server refused to administer', () => {
+  const body = { scale: 'phq2', answers: [2, 1] };
+
+  it('refused by the 7-day cadence: 409, nothing stored, nothing sent to the model', async () => {
+    // The tool's refusal and the route's gate read the same latest score.
+    dbMocks.getUserLatestScaleScore.mockResolvedValue({
+      score: 1,
+      created_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
+      session_id: 'earlier',
+    });
+    const res = await request(makeApp()).post(`/api/sessions/${SESSION_ID}/scale-response`).send(body);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('scale_recently_administered');
+    expect(dbMocks.insertScaleResponse).not.toHaveBeenCalled();
+    const { sidebandManager } = await import('../../services/sidebandManager.service.js');
+    expect(sidebandManager.tryInject).not.toHaveBeenCalled();
+  });
+
+  it('refused because screeners are switched off (administer_scale kill switch): 409, nothing stored', async () => {
+    helperMocks.getSystemConfig.mockResolvedValue({ features: { disabled_tools: ['administer_scale'] } });
+    const res = await request(makeApp()).post(`/api/sessions/${SESSION_ID}/scale-response`).send(body);
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: 'scale_unavailable', scale: 'phq2' });
+    expect(dbMocks.insertScaleResponse).not.toHaveBeenCalled();
+  });
+
+  it('the kill switch also holds for anonymous sessions, which have no cadence to check', async () => {
+    helperMocks.getSystemConfig.mockResolvedValue({ features: { disabled_tools: ['administer_scale'] } });
+    dbMocks.getSessionAccessInfo.mockResolvedValue({ status: 'active', user_id: null, session_type: 'realtime' });
+    const res = await request(makeApp()).post(`/api/sessions/${SESSION_ID}/scale-response`).send(body);
+    expect(res.status).toBe(409);
+    expect(dbMocks.insertScaleResponse).not.toHaveBeenCalled();
+  });
+
+  it('another tool switched off does not block screeners', async () => {
+    helperMocks.getSystemConfig.mockResolvedValue({ features: { disabled_tools: ['start_fear_ladder'] } });
+    const res = await request(makeApp()).post(`/api/sessions/${SESSION_ID}/scale-response`).send(body);
+    expect(res.status).toBe(200);
+    expect(dbMocks.insertScaleResponse).toHaveBeenCalledWith(SESSION_ID, 'phq2', [2, 1], 3);
+  });
+});
+
+describe('GET /api/sessions/:id/tool-outcome/:callId (voice overlay fallback)', () => {
+  beforeEach(async () => {
+    const { clearVoiceToolOutcomes } = await import('../../services/toolOverlays.js');
+    clearVoiceToolOutcomes();
+  });
+
+  it('returns the outcome the voice manager reported, to the session owner', async () => {
+    const { reportVoiceToolOutcome } = await import('../../services/toolOverlays.js');
+    const event = { callId: 'call_1', name: 'administer_scale', args: { scale: 'phq2' }, overlay: 'hidden' as const };
+    reportVoiceToolOutcome(SESSION_ID, event);
+    const res = await request(makeApp()).get(`/api/sessions/${SESSION_ID}/tool-outcome/call_1`);
+    expect(res.status).toBe(200);
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect(res.body).toEqual({ outcome: event });
+  });
+
+  it('answers outcome: null while the call has not finished', async () => {
+    const res = await request(makeApp()).get(`/api/sessions/${SESSION_ID}/tool-outcome/call_unknown`);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ outcome: null });
+  });
+
+  it('refuses anyone who does not own the session', async () => {
+    dbMocks.getSessionAccessInfo.mockResolvedValue({ status: 'active', user_id: 7, session_type: 'realtime' });
+    const res = await request(makeApp({ ownedSessions: [], userId: 99 })).get(
+      `/api/sessions/${SESSION_ID}/tool-outcome/call_1`,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it('404 for an unknown session', async () => {
+    dbMocks.getSessionAccessInfo.mockResolvedValue(null);
+    const res = await request(makeApp()).get(`/api/sessions/${SESSION_ID}/tool-outcome/call_1`);
+    expect(res.status).toBe(404);
+  });
+});
+
 // ai-therapist-322: the consent form says nothing is collected after
 // withdrawal. Study submissions are refused 403; audio is dropped with 204.
 describe('writes from a withdrawn participant', () => {
