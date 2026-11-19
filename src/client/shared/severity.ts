@@ -64,6 +64,19 @@ export function riskScoreLevel(score: number): SeverityLevel {
   return 'low';
 }
 
+/**
+ * Tone for a STORED risk row: the severity it was given when it was scored,
+ * and the score only when none was stored. The high band moved from 75 to 65
+ * on 2026-11-18; a turn scored 70 before that was medium and paged nobody, and
+ * must not turn red in a timeline afterwards.
+ */
+export function storedRiskTextClass(score: number, storedSeverity: string | null | undefined): string {
+  if (storedSeverity === 'high') return 'text-red-600';
+  if (storedSeverity === 'medium') return 'text-amber-600';
+  if (storedSeverity === 'low') return 'text-green-600';
+  return riskScoreTextClass(score);
+}
+
 /** Inline text tone for a numeric risk score (sub-25 'none' band renders muted). */
 export function riskScoreTextClass(score: number): string {
   if (score >= RISK_BANDS.high) return 'text-red-600';

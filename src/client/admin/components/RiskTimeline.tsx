@@ -5,7 +5,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getJson, HttpError } from '../../shared/http';
 import { ChevronDown, ChevronRight, Activity } from 'react-feather';
-import { riskScoreTextClass } from '../../shared/severity';
+import { storedRiskTextClass } from '../../shared/severity';
 import { RISK_BANDS } from '../../../shared/riskBands';
 
 interface RiskEntry {
@@ -26,11 +26,12 @@ interface RiskTimelineProps {
   sessionId: string;
 }
 
-// Shared score bands (src/client/shared/severity) mirror the server's
-// crisisDetection thresholds; medium renders amber, sub-25 muted.
-const scoreColor = riskScoreTextClass;
+// Each row is coloured by the severity STORED with it (what the pipeline did
+// at the time), not by today's bands: the high cutoff moved from 75 to 65 on
+// 2026-11-18, and an older turn at 70 was medium and paged nobody.
+const DOT_FILL: Record<string, string> = { high: '#dc2626', medium: '#d97706', low: '#16a34a' };
 
-function Sparkline({ scores }: { scores: number[] }) {
+function Sparkline({ scores, severities }: { scores: number[]; severities: Array<string | null> }) {
   const w = 220;
   const h = 36;
   if (scores.length < 2) return null;
@@ -65,13 +66,14 @@ function Sparkline({ scores }: { scores: number[] }) {
             cy={h - (s / 100) * h}
             r={2.5}
             fill={
-              s >= RISK_BANDS.high
+              DOT_FILL[severities[i] ?? ''] ??
+              (s >= RISK_BANDS.high
                 ? '#dc2626'
                 : s >= RISK_BANDS.medium
                   ? '#d97706'
                   : s >= RISK_BANDS.low
                     ? '#16a34a'
-                    : '#9ca3af'
+                    : '#9ca3af')
             }
           />
         ) : null,
@@ -124,7 +126,11 @@ export default function RiskTimeline({ sessionId }: RiskTimelineProps) {
           <Activity size={16} />
           Risk timeline
           {history !== null && maxScore > 0 && (
-            <span className={`text-xs font-bold ${scoreColor(maxScore)}`}>peak {maxScore}/100</span>
+            <span
+              className={`text-xs font-bold ${storedRiskTextClass(maxScore, (history ?? []).find((e) => e.risk_score === maxScore)?.severity)}`}
+            >
+              peak {maxScore}/100
+            </span>
           )}
         </span>
       </button>
@@ -139,7 +145,7 @@ export default function RiskTimeline({ sessionId }: RiskTimelineProps) {
 
           {history !== null && history.length >= 2 && (
             <div className="bg-white rounded p-3">
-              <Sparkline scores={history.map((e) => e.risk_score)} />
+              <Sparkline scores={history.map((e) => e.risk_score)} severities={history.map((e) => e.severity)} />
               <p className="text-xs text-gray-400 mt-1">
                 {history.length} scored messages · dashed lines at {RISK_BANDS.medium} (medium) and {RISK_BANDS.high}{' '}
                 (high)
@@ -154,7 +160,9 @@ export default function RiskTimeline({ sessionId }: RiskTimelineProps) {
                 return (
                   <div key={e.history_id} className="border-b border-gray-100 last:border-0 pb-2 last:pb-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`font-bold ${scoreColor(e.risk_score)}`}>{e.risk_score}</span>
+                      <span className={`font-bold ${storedRiskTextClass(e.risk_score, e.severity)}`}>
+                        {e.risk_score}
+                      </span>
                       {e.severity && (
                         <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{e.severity}</span>
                       )}

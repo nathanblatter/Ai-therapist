@@ -765,3 +765,149 @@ describe("a subject label never stands on a turn that also carries the participa
     expect(riskRow().subject_overridden).toBeUndefined();
   });
 });
+
+describe('ai-therapist-357: the trajectory bonus cannot carry a turn across the page line', () => {
+  /** A run-up that earns the bonus: three rising scores, the last a jump. */
+  const runUp = (scores: number[]) =>
+    queryMock.mockImplementation(async (sql: unknown) => {
+      const text = String(sql);
+      if (text.includes('session-risk-context')) {
+        return { rows: [{ crisis_flagged: false, crisis_severity: null, recent: [] }] };
+      }
+      if (text.includes('LIMIT 5'))
+        return { rows: scores.map((risk_score) => ({ risk_score, calculated_at: new Date() })) };
+      return { rows: [] };
+    });
+
+  it('REPRODUCTION: a second passive statement (assessor 55, +10 spike) stays medium at 64, it used to be 65 and a page', async () => {
+    runUp([55, 20]); // most recent first: 20 then 55, a jump of 35
+    createMock.mockResolvedValue(assess(55, 'genuine', ['passive ideation']));
+
+    const result = await analyzeMessageRisk(turn("Honestly, I wouldn't mind not waking up tomorrow."), []);
+
+    expect(result.riskScore).toBe(64);
+    expect(result.severity).toBe('medium');
+    expect(riskRow()).toMatchObject({ llm_score: 55, trajectory_score: 10, trajectory_capped_below_high: true });
+  });
+
+  it('the bonus still lifts a turn inside its band and from low to medium', async () => {
+    runUp([30, 20, 10]);
+    createMock.mockResolvedValue(assess(40, 'genuine'));
+    const result = await analyzeMessageRisk(turn('I feel hopeless'), []);
+    expect(result.riskScore).toBe(55);
+    expect(riskRow().trajectory_capped_below_high).toBeUndefined();
+  });
+
+  it('a turn the assessor already put at or above the cutoff keeps the whole bonus', async () => {
+    runUp([55, 20]);
+    createMock.mockResolvedValue(assess(65, 'genuine', ['active ideation']));
+    const result = await analyzeMessageRisk(turn("I've been thinking about killing myself"), []);
+    expect(result.riskScore).toBe(75);
+    expect(result.severity).toBe('high');
+  });
+});
+
+describe('own risk beside harm to others in the same message', () => {
+  const BOTH = "I know where he parks. And after that I don't plan on being around.";
+
+  it("a first-person farewell keeps the turn the participant's own, and says what else it was about", async () => {
+    createMock.mockResolvedValue(assess(85, 'harm_to_others', ['intent to harm another person']));
+
+    const result = await analyzeMessageRisk(turn(BOTH), []);
+
+    expect(result.severity).toBe('high');
+    expect(result.subject).toBeUndefined();
+    expect(result.alsoSubject).toBe('harm_to_others');
+    expect(result.factors).toContain('also: thoughts of harming another person (handled as own risk)');
+    expect(riskRow()).toMatchObject({ subject_overridden: 'harm_to_others' });
+    expect(riskRow().harm_to_others).toBeUndefined();
+  });
+
+  it('harm to others alone keeps its label: "I\'m going to do it" beside "I know where he parks" is about him', async () => {
+    createMock.mockResolvedValue(assess(85, 'harm_to_others'));
+    const result = await analyzeMessageRisk(turn("I know where he parks. I'm going to do it."), []);
+    expect(result.subject).toBe('harm_to_others');
+    expect(result.alsoSubject).toBeUndefined();
+  });
+
+  it("a farewell does not turn a third-party report into the participant's own risk", async () => {
+    createMock.mockResolvedValue(assess(90, 'bystander'));
+    const result = await analyzeMessageRisk(
+      turn("My roommate says she won't be around after tonight and she's going to kill herself."),
+      [],
+    );
+    expect(result.subject).toBe('third_party');
+  });
+});
+
+describe('ai-therapist-353: the assessor says what a high turn states is happening', () => {
+  const withAcute = (risk_score: number, acute: string) => ({
+    choices: [
+      {
+        message: {
+          content: JSON.stringify({
+            risk_score,
+            severity: risk_score >= 65 ? 'high' : 'medium',
+            context: 'genuine',
+            factors: [],
+            reasoning: 't',
+            states_intent: true,
+            loss_or_disclosure: true,
+            acute,
+          }),
+        },
+      },
+    ],
+  });
+
+  it.each([
+    ['attempt', 95],
+    ['plan_or_time', 85],
+  ])('%s is carried on the result and the risk row', async (acute, score) => {
+    createMock.mockResolvedValue(withAcute(score, acute));
+    const result = await analyzeMessageRisk(turn('I want to kill myself'), []);
+    expect(result.acute).toBe(acute);
+    expect(riskRow()).toMatchObject({ llm_acute: acute });
+  });
+
+  it('"none", a value outside the enum, and a turn below high carry nothing', async () => {
+    createMock.mockResolvedValue(withAcute(85, 'none'));
+    expect((await analyzeMessageRisk(turn('I want to kill myself'), [])).acute).toBeUndefined();
+    createMock.mockResolvedValue(withAcute(85, 'soon'));
+    expect((await analyzeMessageRisk(turn('I want to kill myself'), [])).acute).toBeUndefined();
+    createMock.mockResolvedValue(withAcute(55, 'plan_or_time'));
+    expect((await analyzeMessageRisk(turn("I don't want to be here"), [])).acute).toBeUndefined();
+  });
+
+  it('the strict schema requires the observation, and the rubric defines it', () => {
+    createMock.mockResolvedValue(withAcute(10, 'none'));
+    return analyzeMessageRisk(turn('I want to kill myself'), []).then(() => {
+      const schema = createMock.mock.calls[0][0].response_format.json_schema.schema;
+      expect(schema.required).toContain('acute');
+      expect(schema.properties.acute.enum).toEqual(['none', 'plan_or_time', 'attempt']);
+      expect(RISK_ASSESSMENT_PROMPT).toMatch(/"acute": what the latest participant message itself says is happening/);
+    });
+  });
+});
+
+describe('rubric bands are contiguous and agree with src/shared/riskBands.ts', () => {
+  it('passive 50-64, active 65-79, plan 80-100; risk to others 25-64 and 65-100; no unassigned gap', () => {
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/passive ideation → 50-64, medium/);
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/active ideation without plan → 65-79, high/);
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/ideation with plan, means, or timeframe → 80-100, high/);
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(
+      /→ 25-64 \(25-49, low,[^)]*; 50-64, medium,[^)]*\), context "harm_to_others"/,
+    );
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/Credible intent or planning → 65-100, high/);
+    expect(RISK_ASSESSMENT_PROMPT).not.toMatch(/50-60|65-75|75-100, high, context "harm_to_others"/);
+  });
+
+  it('"no" to "are you safe?" is the risk, not a denial', () => {
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/"no" or "not really" in reply to "are you safe\?"[^.]*is NOT a denial/);
+  });
+
+  it('a figure of speech about themselves is separated from intent by trigger and tone', () => {
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/Figures of speech about THEMSELVES → 0-10, none, context "reference"/);
+    expect(RISK_ASSESSMENT_PROMPT).toMatch(/"lol" or "jk" follows a statement that is serious by itself/);
+  });
+});

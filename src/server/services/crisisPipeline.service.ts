@@ -378,7 +378,7 @@ export async function runCrisisPipeline(
       const shouldFlag = flagByLevel || flagBySubject.first || flagByEscalation || crossedCritical;
       const escalationNote = acute
         ? `What changed: ${ESCALATION_NOTE[acute]}`
-        : crossedCritical && !flagByLevel
+        : crossedCritical
           ? 'What changed: the risk score rose into the critical range (90 or more)'
           : null;
       const alsoSubject = risk.alsoSubject ?? null;

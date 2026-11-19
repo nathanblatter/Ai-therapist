@@ -491,6 +491,32 @@ describe('flagSessionCrisis → adverse-event auto-draft hook', () => {
     expect(draftAeMock).toHaveBeenCalledWith('sess-hi');
   });
 
+  it('passes on whom the flag was about, so the draft is labelled', async () => {
+    await flagSessionCrisis(
+      'sess-3p',
+      'high',
+      90,
+      'system',
+      'auto',
+      1,
+      ['third party at risk (reported by participant)', 'stated intent'],
+      null,
+    );
+    await flagSessionCrisis(
+      'sess-harm',
+      'high',
+      85,
+      'system',
+      'auto',
+      1,
+      ['risk to others (thoughts of harming another person)'],
+      null,
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(draftAeMock).toHaveBeenCalledWith('sess-3p', { subject: 'third_party' });
+    expect(draftAeMock).toHaveBeenCalledWith('sess-harm', { subject: 'harm_to_others' });
+  });
+
   it('does NOT schedule an AE draft on medium or low flags', async () => {
     await flagSessionCrisis('sess-med', 'medium', 60, 'system', 'auto', 1, [], null);
     await flagSessionCrisis('sess-low', 'low', 30, 'system', 'auto', 1, [], null);

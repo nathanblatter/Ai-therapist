@@ -824,6 +824,13 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
         console.error('[Grok] Opening prompt failed:', err);
       }
     }
+    // A safety steer earned before this socket existed: the pre-session
+    // check-in is scored at session start, when there is nothing to inject
+    // into. Delivered now, so the model does not open a conversation with
+    // someone whose check-in was flagged without the guidance for it.
+    void import('./crisisIntervention.service.js')
+      .then((m) => m.deliverPendingSteer(sessionId))
+      .catch((err) => console.error('[Grok] Delivering the held safety steer failed:', err));
     console.log(`[Grok] Session ready for ${sessionId.substring(0, 12)}... on ${state.resolvedModel ?? state.model}`);
   }
 

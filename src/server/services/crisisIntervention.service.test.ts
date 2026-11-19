@@ -62,6 +62,11 @@ const {
   SAFETY_PROTOCOL_GUIDANCE,
   HARM_TO_OTHERS_GUIDANCE,
   RISK_TO_OTHERS_PAGE_LABEL,
+  deliverPendingSteer,
+  clearSteeringState,
+  PENDING_STEER_TTL_MS,
+  RISK_CHECK_REQUIRED_GUIDANCE,
+  CHAT_SAFETY_PROTOCOL_GUIDANCE,
 } = await import('./crisisIntervention.service.js');
 const { _resetPagingStateForTests, buildRiskPageMessage, PAGE_SUBJECT_LABEL } = await import(
   './crisisPaging.service.js'
@@ -467,5 +472,111 @@ describe('risk to others — the page says so and the steer de-escalates', () =>
     expect(g).toMatch(/Do not end the session yourself\. Stay with them\./);
     // It names no ladder tool and does not ask for the resource card.
     expect(g).not.toMatch(/run_risk_check|show_resource_card/);
+  });
+});
+
+// On Grok voice the check-in is scored before the voice socket exists. The
+// flag and the page do not wait; the steer used to be lost.
+describe('a steer earned before the voice socket is open is delivered when it opens', () => {
+  const steerRows = (s: string) =>
+    logInterventionActionMock.mock.calls
+      .filter((c) => c[0] === s)
+      .map((c) => [c[1], c[2]] as [string, Record<string, unknown>]);
+
+  it('a high check-in with no live connection: the safety protocol is held, then delivered on socket ready', async () => {
+    const s = 'grok_checkin_high';
+    sidebandManagerMock.getActiveConnections.mockReturnValue([]);
+    sidebandManagerMock.isConnected.mockReturnValue(false);
+
+    await maybeSteerSession(s, 90, 'high');
+    await executeGraduatedResponse(s, 'high', 90);
+    expect(sidebandManagerMock.injectMessage).not.toHaveBeenCalled();
+
+    sidebandManagerMock.tryInject.mockResolvedValue(true);
+    expect(await deliverPendingSteer(s)).toBe(true);
+
+    // The protocol, not the lighter steer that was held first.
+    expect(sidebandManagerMock.tryInject).toHaveBeenCalledTimes(1);
+    expect(sidebandManagerMock.tryInject).toHaveBeenCalledWith(s, 'system', SAFETY_PROTOCOL_GUIDANCE, false);
+    const delivered = steerRows(s).find(([, d]) => d['deliveredOn'] === 'socket_ready');
+    expect(delivered).toBeDefined();
+    expect(delivered![0]).toBe('safety_protocol');
+    expect(delivered![1]).toMatchObject({ delivered: true, riskScore: 90 });
+    // Once: a second socket-ready (a reconnect) delivers nothing.
+    expect(await deliverPendingSteer(s)).toBe(false);
+    expect(sidebandManagerMock.tryInject).toHaveBeenCalledTimes(1);
+  });
+
+  it('a medium check-in: the ordinary steer is held and delivered', async () => {
+    const s = 'grok_checkin_medium';
+    sidebandManagerMock.isConnected.mockReturnValue(false);
+    await maybeSteerSession(s, 55, 'medium');
+    sidebandManagerMock.tryInject.mockResolvedValue(true);
+
+    expect(await deliverPendingSteer(s)).toBe(true);
+    expect((sidebandManagerMock.tryInject.mock.calls[0] as unknown[])[2]).toContain(
+      'Risk signals in this conversation are elevated',
+    );
+  });
+
+  it('a held steer for someone else at risk keeps its own text and subject', async () => {
+    const s = 'grok_checkin_third';
+    sidebandManagerMock.getActiveConnections.mockReturnValue([]);
+    await executeGraduatedResponse(s, 'high', 90, { thirdParty: true });
+    sidebandManagerMock.tryInject.mockResolvedValue(true);
+    await deliverPendingSteer(s);
+    expect(sidebandManagerMock.tryInject).toHaveBeenCalledWith(s, 'system', THIRD_PARTY_GUIDANCE, false);
+    expect(steerRows(s).find(([, d]) => d['deliveredOn'] === 'socket_ready')![1]).toMatchObject({
+      subject: 'third_party',
+    });
+  });
+
+  it('nothing held: nothing is injected (an ordinary session start)', async () => {
+    expect(await deliverPendingSteer('grok_plain')).toBe(false);
+    expect(sidebandManagerMock.tryInject).not.toHaveBeenCalled();
+  });
+
+  it('a stale steer is dropped, not replayed into a later reconnect', async () => {
+    const s = 'grok_stale';
+    vi.useFakeTimers();
+    try {
+      sidebandManagerMock.isConnected.mockReturnValue(false);
+      await maybeSteerSession(s, 55, 'medium');
+      vi.advanceTimersByTime(PENDING_STEER_TTL_MS + 1000);
+      expect(await deliverPendingSteer(s)).toBe(false);
+      expect(sidebandManagerMock.tryInject).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ending the session clears what was held', async () => {
+    const s = 'grok_ended';
+    sidebandManagerMock.isConnected.mockReturnValue(false);
+    await maybeSteerSession(s, 55, 'medium');
+    clearSteeringState(s);
+    expect(await deliverPendingSteer(s)).toBe(false);
+  });
+});
+
+// Voice-layer measurement (2026-11-19): GPT-Live's own filter cut the
+// assistant's screening question in 9 of 20 calm sessions when the guidance
+// led it to say "thoughts of ending your life" (25 of 67 asks), against 1 of
+// 43 asks when the question used the word "suicide".
+describe('the screening question is asked with the word "suicide"', () => {
+  it.each([
+    ['RISK_CHECK_REQUIRED_GUIDANCE', () => RISK_CHECK_REQUIRED_GUIDANCE],
+    ['SAFETY_PROTOCOL_GUIDANCE', () => SAFETY_PROTOCOL_GUIDANCE],
+    ['CHAT_SAFETY_PROTOCOL_GUIDANCE', () => CHAT_SAFETY_PROTOCOL_GUIDANCE],
+  ])('%s', (_name, text) => {
+    expect(text()).toMatch(/thoughts of suicide/);
+    expect(text()).toMatch(/use the word "suicide" when you ask/);
+    expect(text()).not.toMatch(/thoughts of ending their life/);
+  });
+
+  it("the requirement tells the model not to put words in the participant's mouth", () => {
+    expect(RISK_CHECK_REQUIRED_GUIDANCE).toMatch(
+      /Ask the question plainly\. Do not say or imply that the participant told you something they did not say, and do not describe their feelings for them\.$/,
+    );
   });
 });

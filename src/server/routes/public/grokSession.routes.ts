@@ -289,8 +289,10 @@ export default function grokSessionRoutes(): Router {
         // The check-in's free text goes through the crisis pipeline as a first
         // participant turn would (score, flag, page); until now it only
         // reached the prompt. Not awaited: it never delays or fails the start.
-        // The voice socket is not open yet, so a steer from this turn is
-        // recorded as undelivered; the flag and the page do not depend on it.
+        // The voice socket is not open yet: the flag and the page do not wait
+        // for it, and the steer this turn earns is held and delivered when the
+        // socket is ready (crisisIntervention deliverPendingSteer, called from
+        // the voice manager).
         if (checkin) {
           void import('../../services/crisisPipeline.service.js')
             .then((m) => m.runCheckinCrisisScreen(sessionId, checkin, 'realtime'))

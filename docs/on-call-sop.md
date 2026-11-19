@@ -71,35 +71,23 @@ A text counts as delivered when the SMS relay accepts it. If your phone was
 off or out of coverage, texts for that participant may have been folded for
 up to 15 minutes: on coming back into coverage, check the dashboard.
 
-**A page that says "third party" (since 2026-11-18).** When the participant
-is reporting that SOMEONE ELSE is in crisis (a roommate, a friend, a family
-member), the page's first line ends `(third party)` and its second line reads
-`THIRD PARTY AT RISK: the participant is reporting someone else in crisis, not
-their own.` The dashboard alert and the crisis event carry the same label. The
-person at risk is not the participant and is not known to the study; the
-participant is the only route to them. The agent has been steered to help the
-participant act (911 if the danger is immediate, 988 for guidance on helping
-someone else) and then to check on the participant. [What the on-call does
-for a third-party page, beyond reviewing the session and supporting the
-participant, is not yet written: to be set by the PI and the clinical
-consultant.]
-
-**A page that says "risk to others" (since 2026-11-18).** When the
-participant describes credible thoughts of harming another person (not a
-figure of speech), the page's first line ends `(risk to others)` and its
-second line reads `RISK TO OTHERS: the participant is describing thoughts of
-harming another person, not self-harm.` The agent has been steered to
-de-escalate: stay with the participant, slow down, ask calmly what is
-happening and whether they intend to act, and give 911 guidance only if harm
-is imminent. It does not run the suicide assessment and does not open the
-crisis-line card for these messages. [What the on-call does on a
-risk-to-others page, including any duty to warn or report, is not yet
-written: to be set by the PI, the clinical consultant and the IRB.]
-
 **Where "high" starts (since 2026-11-18).** A risk score of 65 or more is
 high and pages (it was 75). Expect pages for active suicidal ideation without
 a plan ("I've been thinking about ending my life a lot lately"), which used
 to be flagged on the dashboard only.
+
+**A page that says what changed (since 2026-11-19).** When a participant you
+were already paged about gets worse inside the 15-minute window, you are
+paged again and the text says so in words: `WHAT CHANGED: STATED INTENT WITH A
+TIME OR PLAN` or `WHAT CHANGED: ATTEMPT IN PROGRESS, or an act already taken`.
+Treat the second as section 4 step 3 (imminent risk) at once. [Whether a
+stated time or plan below a score of 90 should page a second time is the PI's
+clinical decision; it does today (`REPAGE_ON_STATED_TIME_OR_PLAN`).]
+
+**Pages that are not about the participant's own risk** are labelled on their
+first two lines: `(third party)` / `THIRD PARTY AT RISK: ...` and
+`(risk to others)` / `RISK TO OTHERS: ...`. What to do for each is in sections
+4a and 4b below. Both sections are DRAFTS.
 
 ## 2. On-call rotation
 
@@ -150,6 +138,144 @@ On acknowledging a page:
    - Notify the PI (Dr. Gaskin) the same day.
 4. **Document everything** in the crisis event record: timestamps, what was
    reviewed, determination, actions, who was consulted.
+
+## 4a. DRAFT: a "third party at risk" page
+
+> **DRAFT, NOT YET APPROVED.** Written 2026-11-19 so that nobody is paged with
+> no instruction at all. To be confirmed or replaced by the PI (Dr. Gaskin),
+> the study owner and the clinical consultant before it is relied on. Where
+> this draft and their instruction differ, theirs governs.
+
+**What the page means.** The participant told the agent that SOMEONE ELSE (a
+roommate, a friend, a relative) is suicidal right now: that person stated
+intent, has a plan or a time, has made or is making an attempt, left a note,
+or said something suicidal and cannot be reached. The participant is the
+REPORTER, not the person at risk. The study does not know who the other
+person is and has no way to reach them except through the participant.
+
+**What the agent has already done.** It was steered to take the report
+seriously, to tell the participant to call 911 (or campus police or a resident
+assistant) if the danger is immediate, to tell them they can call or text 988
+themselves for guidance on helping someone else, to encourage them not to
+carry it alone or keep it secret, and then to ask how the participant is. It
+does not run the suicide assessment on the participant for this.
+
+**What to check in the dashboard.**
+
+1. Open the session from the link in the page. The crisis event's first risk
+   factor reads `third party at risk (reported by participant)`.
+2. Read the flagged turn and what follows. Is the danger to the other person
+   happening now (tonight, an attempt under way, cannot be reached)?
+3. Did the agent's reply give the emergency steps, and did the participant say
+   what they are going to do?
+4. Look for any sign of the participant's OWN risk in the same session. If
+   the participant discloses thoughts of their own, the system raises a
+   separate flag and a separate page that reads `PARTICIPANT'S OWN RISK`;
+   handle that under section 4 as usual.
+
+**When to contact the participant.**
+
+- If the session is still active and the agent has given the emergency steps:
+  do not interrupt. Keep the session open on the dashboard.
+- If the danger to the other person looks imminent and the participant has
+  not said they are getting help (no call made, nobody with the person), or
+  the session ended abruptly: contact the participant by [the contact pathway
+  consented to: in-app message first; phone if a number is on file] and repeat
+  the emergency steps: call 911 now; 988 can advise them.
+- In every case, follow up with the participant within [24 hours] through the
+  in-app channel: hearing this is a heavy thing to carry.
+
+**Imminent danger to anyone.** If there is reason to believe a specific
+person is in immediate danger and the participant has not called for help,
+the on-call does not wait for a second opinion to tell the participant to
+call 911. The on-call usually cannot call 911 for the third party directly,
+because the study does not know who or where they are; if the participant has
+given a name or a location in the session, treat it as section 4 step 3 and
+call the PI immediately.
+
+**Duty-to-warn and reporting questions go to the PI and the IRB protocol.**
+The on-call does not decide alone whether the study must report anything about
+a third party. The consent form every participant accepted says, under
+Mandatory reporting: "If you share information regarding ongoing abuse,
+neglect, sexual exploitation, or risk of harm toward yourself or others, we
+are required to report this to legal authorities, along with information
+about your identity." Whether a third party's suicide risk reported by a
+participant falls under that sentence, and who reports to whom, is for the PI
+to decide against the approved protocol. Notify the PI the same day.
+
+**Document** in the crisis event record: what was reviewed, what the
+participant said they would do, any contact made, who was consulted. An
+adverse-event draft is created automatically and is marked
+`SUBJECT: THIRD PARTY AT RISK`; the reviewer decides whether it is a
+reportable event for this participant.
+
+## 4b. DRAFT: a "risk to others" page
+
+> **DRAFT, NOT YET APPROVED.** Written 2026-11-19 so that nobody is paged with
+> no instruction at all. To be confirmed or replaced by the PI (Dr. Gaskin),
+> the study owner, the clinical consultant and, for the reporting questions,
+> the IRB. Where this draft and their instruction differ, theirs governs.
+
+**What the page means.** The participant described thoughts of harming
+ANOTHER person in a way the risk assessor judged to be more than venting:
+thoughts presented as real together with something concrete (knowing where
+the person will be, having thought through what they would do, a plan, the
+means, a time). A figure of speech ("I could kill my lab partner") is not
+supposed to page; if you get a page for one, record it as a false positive.
+This page is not about suicide or self-harm, unless a second page says so.
+
+**What the agent has already done.** It was steered to de-escalate: stay with
+the participant, slow down, acknowledge the anger without agreeing anyone
+deserves harm, ask calmly what is happening and whether they intend to act,
+give no help finding or approaching the person, and give 911 guidance only if
+harm seems imminent. It does not run the suicide assessment and does not open
+the crisis-line card for these messages.
+
+**What to check in the dashboard.**
+
+1. Open the session from the link in the page. The crisis event's first risk
+   factor reads `risk to others (thoughts of harming another person)`.
+2. Read the flagged turn and what follows. Is there a specific, identifiable
+   person? A stated intent, a plan, the means, a time? Or does the participant
+   say the thoughts frighten them and they would never act?
+3. Did the participant calm down, or say they will stay away from the person?
+4. Is there any sign of the participant's own risk? ("...and after that I
+   don't plan on being around" is handled as the participant's OWN high risk,
+   and that page adds `ALSO: the same message describes thoughts of harming
+   another person.`)
+
+**When to contact the participant.**
+
+- If the session is still active and the participant is talking: do not
+  interrupt. Keep the session open on the dashboard.
+- If the participant states that they are about to act, or the session ends
+  with a stated intent and no sign of de-escalation: this is section 4 step 3
+  (imminent risk). Call the PI immediately.
+- Otherwise follow up within [24 hours] through the in-app channel with a
+  check-in. Do not accuse; the participant may have been frightened by their
+  own thoughts.
+
+**Imminent danger to anyone.** If there is reason to believe a specific
+person is in immediate danger, call 911. Give what the study knows; identity
+information may be disclosed as the consent form's mandatory-reporting
+paragraph describes. Then call the PI.
+
+**Duty-to-warn and reporting questions go to the PI and the IRB protocol.**
+The on-call does not decide alone whether the study must warn anyone or report
+to the authorities. The consent form every participant accepted says, under
+Mandatory reporting: "If you share information regarding ongoing abuse,
+neglect, sexual exploitation, or risk of harm toward yourself or others, we
+are required to report this to legal authorities, along with information
+about your identity." What that requires for a statement made to the agent,
+and who makes the report, is for the PI to decide against the approved
+protocol [and with university counsel if the PI says so]. Notify the PI the
+same day, sooner if the threat is specific.
+
+**Document** in the crisis event record: what was said (in summary, not
+verbatim), whether a specific person was named, what the participant said
+about acting, any contact made, who was consulted and what they decided. An
+adverse-event draft is created automatically and is marked
+`SUBJECT: RISK TO OTHERS`.
 
 ## 5. Weekly review + IRB reporting
 

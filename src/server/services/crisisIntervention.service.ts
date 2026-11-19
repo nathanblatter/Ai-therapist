@@ -206,6 +206,7 @@ export function shouldSteer(sessionId: string, riskScore: number, force = false)
 /** Clear a session's steering cooldown entry (chat end / cleanup). */
 export function clearSteeringState(sessionId: string): void {
   steeringLastSent.delete(sessionId);
+  pendingSteers.delete(sessionId);
   riskCheckRequiredAt.delete(sessionId);
   clearCrisisResourceState(sessionId);
 }
@@ -346,6 +347,77 @@ export function subjectGuidance(
       : null;
 }
 
+// ============================================
+// A STEER EARNED BEFORE THE VOICE SOCKET IS OPEN
+// ============================================
+// The pre-session check-in is scored at session start. On Grok voice that is
+// before the browser has attached and the upstream socket exists, so the steer
+// a check-in earns ("I'm going to kill myself tonight" in the form) had no
+// socket to travel on and was recorded as undeliverable: the flag and the
+// page went out, and the model then opened the conversation with no safety
+// guidance at all. A steer that cannot be delivered because there is no live
+// connection is now held here and delivered the moment the socket is ready
+// (deliverPendingSteer, called by the voice manager once the session is
+// configured). One per session, the most serious; dropped after
+// PENDING_STEER_TTL_MS, so a steer for something said long ago is never
+// replayed into a later reconnect.
+export const PENDING_STEER_TTL_MS = 5 * 60 * 1000;
+
+interface PendingSteer {
+  text: string;
+  riskScore: number;
+  severity: string;
+  subject: CrisisSubject | null;
+  /** 2: the high-severity protocol; 1: an ordinary steer. */
+  rank: 1 | 2;
+  at: number;
+}
+const pendingSteers = new Map<string, PendingSteer>();
+
+function holdSteer(sessionId: string, steer: Omit<PendingSteer, 'at'>): void {
+  const now = Date.now();
+  for (const [id, held] of pendingSteers) {
+    if (now - held.at > PENDING_STEER_TTL_MS) pendingSteers.delete(id);
+  }
+  const held = pendingSteers.get(sessionId);
+  if (held && held.rank > steer.rank) return;
+  pendingSteers.set(sessionId, { ...steer, at: now });
+}
+
+/** Test hook. */
+export function _pendingSteerCountForTests(): number {
+  return pendingSteers.size;
+}
+
+/**
+ * Deliver the steer this session earned while it had no live connection, if
+ * there is one and it is still fresh. Called by a voice manager when its
+ * socket becomes ready. Returns true when a steer was delivered. Never throws.
+ */
+export async function deliverPendingSteer(sessionId: string): Promise<boolean> {
+  const held = pendingSteers.get(sessionId);
+  if (!held) return false;
+  pendingSteers.delete(sessionId);
+  if (Date.now() - held.at > PENDING_STEER_TTL_MS) return false;
+  try {
+    const { sidebandManager } = await import('./sidebandManager.service.js');
+    const delivered = await sidebandManager.tryInject(sessionId, 'system', held.text, false);
+    await logInterventionAction(sessionId, held.rank === 2 ? 'safety_protocol' : 'risk_steering', {
+      riskScore: held.riskScore,
+      severity: held.severity,
+      delivered,
+      deliveredOn: 'socket_ready',
+      heldForMs: Date.now() - held.at,
+      ...(held.subject ? { subject: held.subject } : {}),
+    });
+    if (delivered) steeringLastSent.set(sessionId, Date.now());
+    return delivered;
+  } catch (error) {
+    console.error('[crisis] delivering the held steer failed:', error);
+    return false;
+  }
+}
+
 // Sessions already recorded as having undeliverable steering. Keeps the signal
 // to one row per session rather than one per risky turn, while still making the
 // session countable.
@@ -396,6 +468,14 @@ export async function maybeSteerSession(
     // requires readyState OPEN), leaving the steer recorded as neither
     // delivered nor undelivered, and the cooldown spent.
     if (!sidebandManager.isConnected(sessionId)) {
+      // Held for the moment the socket is ready (deliverPendingSteer).
+      holdSteer(sessionId, {
+        text: guidanceOverride ?? steeringGuidance(riskScore, severity),
+        riskScore,
+        severity,
+        subject: guidanceOverride ? (subject ?? 'third_party') : null,
+        rank: 1,
+      });
       if (!steeringSuppressed.has(sessionId)) {
         steeringSuppressed.add(sessionId);
         // Bounded so a long-lived process can't grow this without limit.
@@ -694,6 +774,16 @@ async function executeHighRiskResponse(
           ...subjectDetail,
         });
         console.log(`Safety protocol injected for session ${sessionId}`);
+      } else {
+        // No live connection yet (a check-in scored before the voice socket
+        // opened): held, and delivered when the socket is ready.
+        holdSteer(sessionId, {
+          text: subjectGuidance(subject, 'realtime') ?? SAFETY_PROTOCOL_GUIDANCE,
+          riskScore,
+          severity: 'high',
+          subject,
+          rank: 2,
+        });
       }
     } catch (err) {
       console.error('Error injecting safety protocol:', err);
