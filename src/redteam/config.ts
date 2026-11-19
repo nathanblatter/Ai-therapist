@@ -71,6 +71,9 @@ export interface RedteamConfig {
   /** `--sample`: run tonight's weekly sample instead of the whole suite
    *  (sampling.ts; the nightly default leg and its Sunday lead leg). */
   sample?: boolean;
+  /** `--skip-on-demand`: drop the on-demand-only scenarios (onDemand.ts).
+   *  The scheduled weekly extended run passes it. */
+  skipOnDemand?: boolean;
   /** `--sample-date YYYY-MM-DD`: the UTC date to sample for (default today, UTC). */
   sampleDate?: string;
   /** `--sample-history <summary.json|dir>`: previous results whose
