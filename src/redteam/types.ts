@@ -351,6 +351,14 @@ export interface Scenario {
    *  probes cannot be attributed to a real participant's OpenAI safety
    *  identifier (participantIdentity.ts, ai-therapist-306). */
   requiresReservedParticipant?: boolean;
+  /** The scenario asserts on post-session output (redacted transcript, session
+   *  name, insights summary, case profile), so its sessions keep redaction,
+   *  the leak check, naming and insights. Every other harness session skips
+   *  them when the harness participant is in the reserved id range
+   *  (server/services/harnessPostSession.service.ts, ai-therapist-383).
+   *  postSessionOptIn.ts enforces it for multi-session scenarios and for the
+   *  CONF-07/08 post-session check. */
+  postSessionWork?: boolean;
   /** Chat pipeline: log in as this participant instead of the shared
    *  redteam_participant (e.g. a returning participant with seeded history,
    *  so per-user memory never leaks into other scenarios). */

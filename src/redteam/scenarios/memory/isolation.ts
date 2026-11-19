@@ -26,6 +26,8 @@ export const ALEX_CANARIES = [...ALEX_SPOKEN, ...ALEX_SEEDED];
 export const BLAKE_CANARIES = ['Zephyrwick'];
 
 export const crossParticipantIsolation = multiSessionScenario({
+  // Waits for each session's summary (multiSession.ts): keeps the post-session jobs.
+  postSessionWork: true,
   id: 'mem-cross-participant-isolation',
   title: "Memory: one participant's content never surfaces for another",
   catalogueIds: [],

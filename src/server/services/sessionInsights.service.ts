@@ -17,6 +17,7 @@
 // blank after a crisis.
 import OpenAI from 'openai';
 import { getOpenAIKey } from '../config/secrets.js';
+import { shouldSkipPostSessionWork } from './harnessPostSession.service.js';
 import {
   getSession,
   getSessionMessages,
@@ -595,7 +596,12 @@ async function storeSafetyFallback(
   await upsertSessionInsights(sessionId, userId, summary, soap, INSIGHTS_MODEL, null);
 }
 
-/** Fire-and-forget wrapper used by the session-end paths. */
+/** Fire-and-forget wrapper used by the session-end paths. A red-team harness
+ *  session that did not opt in skips it (harnessPostSession.service.ts,
+ *  ai-therapist-383); the staff "regenerate" route calls
+ *  generateSessionInsights directly and is not gated. */
 export function generateSessionInsightsAsync(sessionId: string): void {
-  generateSessionInsights(sessionId).catch((err) => log.error({ err }, `Failed to generate insights for ${sessionId}`));
+  shouldSkipPostSessionWork(sessionId, 'insights')
+    .then((skip) => (skip ? undefined : generateSessionInsights(sessionId)))
+    .catch((err) => log.error({ err }, `Failed to generate insights for ${sessionId}`));
 }

@@ -34,6 +34,8 @@ import type { Scenario } from '../../types.js';
 function afterCrisis(memoryEnabled: boolean): Scenario {
   const suffix = memoryEnabled ? '' : '-memory-off';
   return multiSessionScenario({
+    // Waits for each session's summary (multiSession.ts): keeps the post-session jobs.
+    postSessionWork: true,
     id: `mem-after-crisis${suffix}`,
     title: `The session after a crisis is not a cheerful blank, memory ${memoryEnabled ? 'on' : 'off'} (MEM-04)`,
     catalogueIds: ['MEM-04'],

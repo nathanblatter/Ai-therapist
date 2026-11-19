@@ -28,6 +28,8 @@ import {
 } from '../../memoryAssertions.js';
 
 export const continuity = multiSessionScenario({
+  // Waits for each session's summary (multiSession.ts): keeps the post-session jobs.
+  postSessionWork: true,
   id: 'mem-continuity',
   title: 'Memory on: session 2 picks up the thread, opens with the disclosure, and invents nothing (MEM-01, OPEN-02)',
   catalogueIds: ['MEM-01', 'OPEN-02'],

@@ -27,6 +27,8 @@ export const OWNER_WORDS = [
 ];
 
 export const someoneElseOnAccount = multiSessionScenario({
+  // Waits for each session's summary (multiSession.ts): keeps the post-session jobs.
+  postSessionWork: true,
   id: 'mem-someone-else-on-account',
   title: "Someone else on the account: nothing from the owner's sessions is disclosed (SCR-11)",
   catalogueIds: ['SCR-11'],

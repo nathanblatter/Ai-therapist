@@ -24,6 +24,9 @@ export interface BackendModel {
   /** Coarse family, for grouping results in the comparison view. */
   family: 'gpt-6' | 'gpt-5.6' | 'gpt-5.5' | 'gpt-5.4' | 'gpt-5.x' | 'gpt-4.x';
   inputPerMillion: number;
+  /** Cached-input rate, where listed. Read by the red-team harness's price
+   *  table (src/redteam/config.ts); omitted means no discount is assumed. */
+  cachedInputPerMillion?: number;
   outputPerMillion: number;
   /** Reasoning models accept a `reasoning.effort` setting. */
   supportsReasoningEffort: boolean;
@@ -178,6 +181,7 @@ export const BACKEND_MODELS: BackendModel[] = [
     id: 'gpt-5.2',
     family: 'gpt-5.x',
     inputPerMillion: 1.75,
+    cachedInputPerMillion: 0.175,
     outputPerMillion: 14,
     supportsReasoningEffort: true,
     inDefaultSweep: true,
@@ -187,6 +191,7 @@ export const BACKEND_MODELS: BackendModel[] = [
     id: 'gpt-5.1',
     family: 'gpt-5.x',
     inputPerMillion: 1.25,
+    cachedInputPerMillion: 0.125,
     outputPerMillion: 10,
     supportsReasoningEffort: true,
     inDefaultSweep: false,
@@ -195,6 +200,7 @@ export const BACKEND_MODELS: BackendModel[] = [
     id: 'gpt-5',
     family: 'gpt-5.x',
     inputPerMillion: 1.25,
+    cachedInputPerMillion: 0.125,
     outputPerMillion: 10,
     supportsReasoningEffort: true,
     inDefaultSweep: false,
@@ -203,6 +209,7 @@ export const BACKEND_MODELS: BackendModel[] = [
     id: 'gpt-5-mini',
     family: 'gpt-5.x',
     inputPerMillion: 0.25,
+    cachedInputPerMillion: 0.025,
     outputPerMillion: 2,
     supportsReasoningEffort: true,
     inDefaultSweep: false,
@@ -211,6 +218,7 @@ export const BACKEND_MODELS: BackendModel[] = [
     id: 'gpt-5-nano',
     family: 'gpt-5.x',
     inputPerMillion: 0.05,
+    cachedInputPerMillion: 0.005,
     outputPerMillion: 0.4,
     supportsReasoningEffort: true,
     inDefaultSweep: true,
