@@ -4,7 +4,6 @@ import { describe, it, expect } from 'vitest';
 import {
   MULTI_SESSION_USERID_MIN,
   MULTI_SESSION_USERNAME_PREFIX,
-  SUMMARY_LOSS_GAP,
   ageParticipantHistory,
   ageTableSql,
   ageableTables,
@@ -273,24 +272,30 @@ describe('the runner’s own summary assertion', () => {
     expect(r.knownGap).toBeUndefined();
   });
 
-  it('FAILS when nothing was stored, reported under the known gap and not gating', () => {
+  it('FAILS and gates when nothing was stored (regression check for ai-therapist-346, now fixed)', () => {
     const r = summaryStoredResult(record(null));
-    expect(r.passed).toBe(false);
-    expect(r.gating).toBe(false);
-    expect(r.knownGap).toBe('ai-therapist-346');
-    expect(r.detail).toMatch(/KNOWN GAP ai-therapist-346: no summary in session_insights for chat_1/);
-  });
-
-  it('gates again as soon as the marker is taken away', () => {
-    const r = summaryStoredResult(record(null), null);
     expect(r).toMatchObject({ passed: false, gating: true });
     expect(r.knownGap).toBeUndefined();
+    expect(r.detail).toMatch(/no summary in session_insights for chat_1/);
   });
 
-  it('the marker says what the product does and carries its Flightdeck ref', () => {
-    expect(SUMMARY_LOSS_GAP.reason).toMatch(/max_tokens/);
-    expect(SUMMARY_LOSS_GAP.ref).toBe('ai-therapist-346');
-    expect(SUMMARY_LOSS_GAP.assertionIds).toBeUndefined();
+  it('FAILS and gates when only the safety fallback row was stored', () => {
+    const r = summaryStoredResult(
+      record({
+        headline: 'Summary unavailable: automatic generation failed',
+        incomplete: true,
+        incomplete_reason: 'full: reply cut off at max_completion_tokens=3200',
+        safety: 'Safety: this session recorded a crisis flag, highest severity high.',
+      }),
+    );
+    expect(r).toMatchObject({ passed: false, gating: true });
+    expect(r.detail).toMatch(/only the safety fallback was stored for chat_1/);
+    expect(r.detail).toContain('max_completion_tokens=3200');
+  });
+
+  it('a known-gap marker can still be attached to a failure', () => {
+    const r = summaryStoredResult(record(null), { reason: 'example', ref: 'ai-therapist-0' });
+    expect(r).toMatchObject({ passed: false, gating: false, knownGap: 'ai-therapist-0' });
   });
 
   it('a scenario cut short says which sessions did not run, and never gates by itself', () => {

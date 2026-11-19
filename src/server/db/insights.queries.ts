@@ -16,6 +16,64 @@ export interface SessionSummary {
    *  Never injected into participant-facing memory (see promptContext.ts) —
    *  it is for the researcher/caseworker catch-up read. */
   safety?: string;
+  /** True only on the last-resort fallback row (ai-therapist-346): the model
+   *  failed twice, so the headline is a placeholder and there is no thematic
+   *  content. The safety line and the crisis fields below are still stored. */
+  incomplete?: boolean;
+  /** Why generation failed, for staff and monitoring. Fallback rows only. */
+  incomplete_reason?: string;
+  /** Deterministic crisis snapshot from the session row and crisis_events,
+   *  stored on the fallback row so a failed summary is never blank about a
+   *  crisis. Fallback rows only. */
+  crisis_flagged?: boolean;
+  peak_severity?: CrisisSeverity | null;
+  peak_risk_score?: number | null;
+}
+
+export type CrisisSeverity = 'low' | 'medium' | 'high';
+
+/** The worst the session got, whatever the summarizer says (ai-therapist-346). */
+export interface SessionRiskPeak {
+  /** Flagged now, or flagged at any point during the session. */
+  crisis_flagged: boolean;
+  peak_severity: CrisisSeverity | null;
+  peak_risk_score: number | null;
+}
+
+const SEVERITIES: CrisisSeverity[] = ['low', 'medium', 'high'];
+
+/** Peak crisis severity and risk score for one session: the session row's
+ *  current flag plus every crisis_events row, so a flag that was later
+ *  lowered or cleared still counts. Read-only. */
+export async function getSessionRiskPeak(sessionId: string): Promise<SessionRiskPeak> {
+  const result = await pool.query<{
+    crisis_flagged: boolean | null;
+    crisis_severity: string | null;
+    crisis_risk_score: number | null;
+    ever_flagged: boolean | null;
+    max_event_rank: number | null;
+    max_event_score: number | null;
+  }>(
+    `SELECT ts.crisis_flagged, ts.crisis_severity, ts.crisis_risk_score,
+            EXISTS (SELECT 1 FROM crisis_events ce WHERE ce.session_id = ts.session_id AND ce.event_type = 'flagged')
+              AS ever_flagged,
+            (SELECT MAX(CASE ce.severity WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 END)
+               FROM crisis_events ce WHERE ce.session_id = ts.session_id) AS max_event_rank,
+            (SELECT MAX(ce.risk_score) FROM crisis_events ce WHERE ce.session_id = ts.session_id) AS max_event_score
+     FROM therapy_sessions ts
+     WHERE ts.session_id = $1`,
+    [sessionId],
+  );
+  const row = result.rows[0];
+  if (!row) return { crisis_flagged: false, peak_severity: null, peak_risk_score: null };
+  const rowRank = SEVERITIES.indexOf(row.crisis_severity as CrisisSeverity) + 1;
+  const rank = Math.max(rowRank, row.max_event_rank ?? 0);
+  const scores = [row.crisis_risk_score, row.max_event_score].filter((s): s is number => typeof s === 'number');
+  return {
+    crisis_flagged: Boolean(row.crisis_flagged) || Boolean(row.ever_flagged),
+    peak_severity: rank > 0 ? SEVERITIES[rank - 1] : null,
+    peak_risk_score: scores.length > 0 ? Math.max(...scores) : null,
+  };
 }
 
 export interface SoapNote {
