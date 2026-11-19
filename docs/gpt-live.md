@@ -328,11 +328,19 @@ because it ran three words long is not an acceptable failure mode:
   In production it is logged as `CLINICAL STEER TOO LONG` and shortened at
   sentence boundaries, keeping the marker and every sentence that names 911,
   988 or 741741, staying with them, or ending the session
-  (`fitClinicalSteer`).
+  (`fitClinicalSteer`; if those do not all fit, as many as fit, earliest
+  first).
 - **Not yet verified live.** If the vendor nevertheless rejects a clinical
   steer longer than 1600 characters (an `error` carrying its event id), the
   sideband sends it once more fitted to 1600 the same way and logs
-  `CLINICAL STEER REJECTED`, which would mean 1850 is too high.
+  `CLINICAL STEER REJECTED (<code>)`, which would mean 1850 is too high. An
+  error with code `context_injection_incomplete` is not treated as a
+  rejection: the API returns it for every append still pending when the
+  session closes (see "A delegation must not leave the participant waiting"
+  below). The backstop covers only an
+  explicit error: if the vendor silently dropped or cut an over-long append,
+  nothing would notice, because a `*.appended` acknowledgement can legitimately
+  stay pending.
 
 The matching `*.appended` events are **acknowledgements only**. They are
 explicitly not proof that the model consumed the update, spoke it, or that the

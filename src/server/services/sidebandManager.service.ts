@@ -346,9 +346,11 @@ const SAFETY_SENTENCE = /\b(?:911|988|741741)\b|\bend the session\b|\bend_sessio
  * Shorten a clinical steer to `maxChars` at sentence boundaries. The opening
  * `[Clinical guidance ...]` marker is always kept, then every safety sentence
  * (SAFETY_SENTENCE), then the other sentences in their original order while
- * they fit; what is kept stays in its original order. Only if the marker and
- * the safety sentences alone do not fit is the text cut mid-sentence. Pure; a
- * fallback that should never run (clinicalSteerLength.test.ts).
+ * they fit; what is kept stays in its original order. If the safety sentences
+ * do not all fit, as many as fit are kept, in order, rather than cutting the
+ * text at `maxChars` (which would keep the leading filler and lose every one of
+ * them). Only if the marker itself does not fit is the text cut mid-sentence.
+ * Pure; a fallback that should never run (clinicalSteerLength.test.ts).
  */
 export function fitClinicalSteer(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
@@ -361,9 +363,9 @@ export function fitClinicalSteer(text: string, maxChars: number): string {
     used += 1 + units[i].length;
   };
   take(0);
+  if (!keep[0]) return text.slice(0, maxChars);
   const safety = units.map((u, i) => (i > 0 && SAFETY_SENTENCE.test(u) ? i : -1)).filter((i) => i > 0);
   for (const i of safety) take(i);
-  if (!keep[0] || safety.some((i) => !keep[i])) return text.slice(0, maxChars);
   for (let i = 1; i < units.length; i++) take(i);
   return units.filter((_, i) => keep[i]).join(' ');
 }
@@ -2031,7 +2033,11 @@ export class SidebandManager {
       case 'error': {
         const err = event.error as { code?: string; message?: string; client_event_id?: string } | undefined;
         console.error(`[Live] API error for ${sessionId.substring(0, 12)}...:`, err);
-        this.resendRejectedSteer(sessionId, err?.client_event_id);
+        this.resendRejectedSteer(
+          sessionId,
+          err?.client_event_id ?? (typeof event.client_event_id === 'string' ? event.client_event_id : undefined),
+          err?.code,
+        );
         // OpenAI's moderation stopped the assistant mid-reply. The docs give
         // two outcomes ("Some moderation events end the session. Others cut
         // off assistant audio for the remainder of its current speech and emit
@@ -2535,19 +2541,31 @@ export class SidebandManager {
    * reaches the model) and send it once more, fitted to the generic cap at
    * sentence boundaries with every safety sentence kept (fitClinicalSteer).
    * Logged loudly: it means CLINICAL_STEER_MAX_CHARS is too high. Never throws.
+   *
+   * Not for `context_injection_incomplete`: that is what the API returns for
+   * every append still pending when the session closes ("Closing the session
+   * returns errors for appends that are still pending"; seen in production
+   * after a content-filter stop, docs/gpt-live.md). A long steer stays pending
+   * longest, so treating that as a rejection would resend into a closing
+   * session and log a false "too high" that invites lowering the cap.
    */
-  private resendRejectedSteer(sessionId: string, clientEventIdOfError: string | undefined): void {
+  private resendRejectedSteer(
+    sessionId: string,
+    clientEventIdOfError: string | undefined,
+    code: string | undefined,
+  ): void {
     if (!clientEventIdOfError) return;
     const rejected = this.oversizeSteers.get(clientEventIdOfError);
     if (!rejected || rejected.sessionId !== sessionId) return;
     this.oversizeSteers.delete(clientEventIdOfError);
+    if (code === 'context_injection_incomplete') return;
     const tail = ` ${LIVE_STEER_KEEP_SPEAKING}`;
     const body = rejected.content.endsWith(tail) ? rejected.content.slice(0, -tail.length) : rejected.content;
     const fitted = rejected.content.endsWith(tail)
       ? `${fitClinicalSteer(body, LIVE_APPEND_MAX_CHARS - tail.length)}${tail}`
       : fitClinicalSteer(body, LIVE_APPEND_MAX_CHARS);
     console.error(
-      `[Live] CLINICAL STEER REJECTED at ${rejected.content.length} characters for ${sessionId.substring(0, 12)}...; ` +
+      `[Live] CLINICAL STEER REJECTED (${code ?? 'no code'}) at ${rejected.content.length} characters for ${sessionId.substring(0, 12)}...; ` +
         `sending it again at ${fitted.length} (safety sentences kept). CLINICAL_STEER_MAX_CHARS is too high.`,
     );
     try {

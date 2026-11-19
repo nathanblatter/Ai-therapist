@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // No clinical steer may be cut on its way to a live voice model
 // (ai-therapist-381). Until this file existed the sideband sliced every steer
@@ -73,8 +76,14 @@ function exportedSteers(): Array<[string, string]> {
 function everyClinicalSteer(): Array<[string, string]> {
   const steers: Array<[string, string]> = [...exportedSteers()];
   for (const severity of SEVERITIES) {
-    for (const score of SCORES)
+    for (const score of SCORES) {
       steers.push([`steeringGuidance(${score}, ${severity})`, steeringGuidance(score, severity)]);
+      // Chat only (no sideband), checked anyway so the source scan below can count it as enumerated.
+      steers.push([
+        `buildChatSteeringGuidance(${score}, ${severity})`,
+        crisis.buildChatSteeringGuidance(score, severity),
+      ]);
+    }
   }
   // The heads-up rides on the risk steer whenever fitsWithHeadsUp says so.
   for (const severity of ['medium', 'high'] as const) {
@@ -169,6 +178,67 @@ describe('clinical steers are delivered whole (ai-therapist-381)', () => {
   });
 });
 
+describe('every clinical steer in the source is one this file enumerates', () => {
+  // exportedSteers() only sees exported constants of the five modules it
+  // imports. A steer written as a non-exported constant, in another module, or
+  // built by a new function would slip past the length check above; this scan
+  // of the source makes that a failure instead.
+  const ENUMERATED_BUILDERS = new Set([
+    'services/crisisIntervention.service.ts:steeringGuidance',
+    'services/crisisIntervention.service.ts:buildChatSteeringGuidance',
+    'utils/sessionAutoTerminate.ts:crisisTimeNotice',
+  ]);
+  const MODULE_FILES: Record<string, Record<string, unknown>> = {
+    'services/sidebandManager.service.ts': sideband,
+    'services/crisisIntervention.service.ts': crisis,
+    'services/voiceHeadsUp.service.ts': headsUp,
+    'services/minorSafeguard.service.ts': minor,
+    'utils/sessionAutoTerminate.ts': autoTerminate,
+  };
+
+  function sourceFiles(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) return sourceFiles(full);
+      return entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts') ? [full] : [];
+    });
+  }
+
+  it('finds no clinical steer text outside an exported constant or an enumerated builder', () => {
+    const serverDir = join(dirname(fileURLToPath(import.meta.url)), '..');
+    const stray: string[] = [];
+    let seen = 0;
+    for (const file of sourceFiles(serverDir)) {
+      const rel = relative(serverDir, file).split(sep).join('/');
+      const lines = readFileSync(file, 'utf8').split('\n');
+      lines.forEach((line, n) => {
+        if (!/^\s*[`'"]\[Clinical guidance\b|\$\{CLINICAL_STEER_MARKER\}/.test(line)) return;
+        seen++;
+        let decl = '';
+        for (let i = n; i >= 0 && !decl; i--) {
+          const m = /^(export )?(?:const (\w+)\s*=|(?:async )?function (\w+)\()/.exec(lines[i]);
+          if (m) decl = `${m[1] ? 'export ' : ''}${m[2] ?? m[3]}`;
+        }
+        const name = decl.replace(/^export /, '');
+        const ok = decl.startsWith('export ')
+          ? ENUMERATED_BUILDERS.has(`${rel}:${name}`) || typeof MODULE_FILES[rel]?.[name] === 'string'
+          : ENUMERATED_BUILDERS.has(`${rel}:${name}`);
+        if (!ok) stray.push(`${rel}:${n + 1} (${decl || 'no declaration found'})`);
+      });
+    }
+    expect(seen).toBeGreaterThanOrEqual(15);
+    expect(stray).toEqual([]);
+  });
+
+  it('no clinical steer contains an abbreviation that fitClinicalSteer would take for a sentence end', () => {
+    // "Only if harm seems imminent, e.g. a weapon, call 911." would split after
+    // "e.g." and could lose its condition while keeping the 911 half.
+    for (const [name, text] of everyClinicalSteer()) {
+      expect(text, name).not.toMatch(/\b(?:e\.g|i\.e|etc|vs|approx|Dr|Mr|Mrs|Ms|St|No)\.\s/);
+    }
+  });
+});
+
 describe('other appends stay inside the generic cap', () => {
   it('time notices, wrap-up, phase nudges, resume and delegation commentary, the recovery opening', () => {
     const texts: Array<[string, string]> = [
@@ -214,9 +284,30 @@ describe('fitClinicalSteer (the production fallback)', () => {
     expect(fitted).toBe(`${MARK} Alpha alpha alpha. Do not end the session yourself.`);
   });
 
-  it('only when the marker and the safety sentences cannot fit is the text cut mid-sentence', () => {
+  it('when the safety sentences do not all fit, keeps as many as fit rather than cutting into the filler before them', () => {
+    const filler = 'Keep a calm and warm tone and reflect what they say back to them gently.';
+    const text = `${MARK} ${filler} ${filler} If harm is imminent, ask them to call 911 now. Do not end the session yourself. Stay with them.`;
+    const room = MARK.length + ' If harm is imminent, ask them to call 911 now. Stay with them.'.length;
+    const fitted = fitClinicalSteer(text, room);
+    expect(fitted).toBe(`${MARK} If harm is imminent, ask them to call 911 now. Stay with them.`);
+    expect(fitted.length).toBeLessThanOrEqual(room);
+    // Earlier safety sentences take precedence over later ones.
+    expect(fitClinicalSteer(text, MARK.length + ' If harm is imminent, ask them to call 911 now.'.length + 3)).toBe(
+      `${MARK} If harm is imminent, ask them to call 911 now.`,
+    );
+  });
+
+  it('never returns an empty steer or more than the room; only a marker too long for the room is cut mid-text', () => {
     const text = `${MARK} Call 911 right now please. Stay with them.`;
-    expect(fitClinicalSteer(text, MARK.length + 5)).toBe(text.slice(0, MARK.length + 5));
+    expect(fitClinicalSteer(text, MARK.length + 5)).toBe(MARK);
+    expect(fitClinicalSteer(text, 20)).toBe(text.slice(0, 20));
+    const unbroken = `${MARK}${'x'.repeat(300)}`;
+    expect(fitClinicalSteer(unbroken, 100)).toBe(unbroken.slice(0, 100));
+    for (let room = 1; room <= text.length; room++) {
+      const fitted = fitClinicalSteer(text, room);
+      expect(fitted.length, `room ${room}`).toBeLessThanOrEqual(room);
+      expect(fitted.length, `room ${room}`).toBeGreaterThan(0);
+    }
   });
 
   it('treats a quoted sentence end as a boundary', () => {

@@ -928,6 +928,48 @@ describe('clinical steers keep the assistant speaking', () => {
     }
   });
 
+  it('the error the API returns for a steer still pending at session close is not a rejection: nothing is resent', async () => {
+    const sessionId = 's-steer-pending-at-close';
+    const ws = await attach(sessionId);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await sidebandManager.tryInject(sessionId, 'system', HARM_TO_OTHERS_GUIDANCE, false);
+      const first = sentEvents(ws)[0];
+      await fire(sessionId, {
+        type: 'error',
+        error: { code: 'context_injection_incomplete', message: 'session closed', client_event_id: first.event_id },
+      });
+      expect(sentEvents(ws).filter((e) => e.type === 'session.instructions.append')).toHaveLength(1);
+      expect(error).not.toHaveBeenCalledWith(expect.stringContaining('CLINICAL STEER REJECTED'));
+      // Forgotten, too: a later error naming it changes nothing.
+      await fire(sessionId, { type: 'error', error: { code: 'x', client_event_id: first.event_id } });
+      expect(sentEvents(ws).filter((e) => e.type === 'session.instructions.append')).toHaveLength(1);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('a rejection that names the steer only at the top level of the error event is answered too', async () => {
+    const sessionId = 's-steer-rejected-top-level';
+    const ws = await attach(sessionId);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await sidebandManager.tryInject(sessionId, 'system', HARM_TO_OTHERS_GUIDANCE, false);
+      const first = sentEvents(ws)[0];
+      await fire(sessionId, {
+        type: 'error',
+        client_event_id: first.event_id,
+        error: { type: 'invalid_request_error', code: 'string_above_max_length', message: 'too long' },
+      });
+      const appends = sentEvents(ws).filter((e) => e.type === 'session.instructions.append');
+      expect(appends).toHaveLength(2);
+      expect((appends[1].content as string).length).toBeLessThanOrEqual(LIVE_APPEND_MAX_CHARS);
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('CLINICAL STEER REJECTED (string_above_max_length)'));
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   it('an acknowledged oversize steer is forgotten, and an error for a short append is not answered', async () => {
     const sessionId = 's-steer-acked';
     const ws = await attach(sessionId);

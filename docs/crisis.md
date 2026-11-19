@@ -42,7 +42,9 @@ Consequences the study team should know:
 **Steering delivery.** Realtime injected a hidden `conversation.item.create` with
 `role: 'system'`. GPT-Live has no conversation item list; steering is delivered
 as `session.instructions.append` (capped at 500 tokens, enforced client-side by
-character count so a steer is never rejected for running slightly long).
+character count so a steer is never rejected for running slightly long; a
+clinical steer has its own measured cap of 1850 characters so none is cut, see
+`docs/gpt-live.md`, "The three append channels").
 
 Two behaviour changes follow:
 
