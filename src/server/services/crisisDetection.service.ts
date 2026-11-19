@@ -5,6 +5,8 @@ import { getRecentSessionMessages, recordCrisisEvent } from '../db/crisis.querie
 import { CRISIS_EVENT_ADJUDICATIONS_SQL } from '../db/crisisAdjudications.queries.js';
 import { IRB_STUDY_ORG_ID_SQL } from '../db/organizations.queries.js';
 import { createLogger } from '../utils/logger.js';
+import { readWithin } from '../utils/readDeadline.js';
+import { trackBackground } from '../utils/backgroundWork.js';
 import type { HistoryMessage } from './minorSafeguard.service.js';
 import { withFlex } from '../utils/flexTier.js';
 import {
@@ -1206,6 +1208,35 @@ export const DEFAULT_RISK_MODEL = 'gpt-4o-mini';
 /** Admin-configurable assessor model (system_config crisis.risk_model,
  *  mirroring evals.judge_model) so a candidate model can be A/B'd without a
  *  deploy. Any swap must pass the red-team suite first. */
+interface AssessorCallSetup {
+  riskModel: string;
+  safetyIdentifier: string | undefined;
+}
+
+/**
+ * The model setting and the participant's safety identifier for an assessor
+ * call. Both are database reads on a cache miss: read together, each bounded
+ * (ai-therapist-369), so a slow database holds the assessment, and the page
+ * after it, for one read deadline rather than two pool timeouts. Never
+ * rejects.
+ */
+function prepareAssessorCall(sessionId?: string): Promise<AssessorCallSetup> {
+  return Promise.all([
+    readWithin(resolveRiskModel(), DEFAULT_RISK_MODEL, 'risk model setting'),
+    // safety_identifier scopes any OpenAI-side enforcement to this participant
+    // rather than the org key; best-effort, never blocks the assessment.
+    sessionId
+      ? readWithin(
+          import('../utils/safetyIdentifier.js')
+            .then((m) => m.safetyIdentifierForSession(sessionId))
+            .catch((): string | undefined => undefined),
+          undefined,
+          'safety identifier',
+        )
+      : Promise.resolve(undefined),
+  ]).then(([riskModel, safetyIdentifier]) => ({ riskModel, safetyIdentifier }));
+}
+
 async function resolveRiskModel(): Promise<string> {
   try {
     const { getSystemConfig } = await import('../utils/sessionHelpers.js');
@@ -1520,7 +1551,11 @@ async function recordAssessorFailure(err: unknown, sessionId: string | null): Pr
       .then((m) => m.reportOpenAIQuotaExhausted('risk_assessor', info.code))
       .catch((reportErr) => log.error({ err: reportErr }, '[risk] failed to report assessor quota exhaustion'));
   }
-  await noteAssessorFailure(sessionId, info);
+  // Not awaited (ai-therapist-369): the first failure in a session writes a
+  // 'degraded' row, and on a slow database that write would hold the
+  // fallback verdict, and the page after it, for a pool timeout. The failure
+  // counter is updated synchronously when this is called.
+  trackBackground(noteAssessorFailure(sessionId, info));
   return info;
 }
 
@@ -1557,6 +1592,9 @@ async function assessRiskWithLLM(
   /** What earlier turns established, and whether a keyword tripped the screen
    *  (false for a context wake: the message matched no crisis keyword). */
   framing: RiskAssessmentFraming = {},
+  /** The model setting and safety identifier, when the caller started
+   *  reading them earlier (prepareAssessorCall). */
+  prepared?: Promise<AssessorCallSetup>,
 ): Promise<LlmRiskAssessment> {
   const client = await getClient();
 
@@ -1566,19 +1604,7 @@ async function assessRiskWithLLM(
     .join('\n')
     .slice(-6000);
 
-  const riskModel = await resolveRiskModel();
-
-  // safety_identifier scopes any OpenAI-side enforcement to this participant
-  // rather than the org key; best-effort, never blocks the assessment.
-  let safetyIdentifier: string | undefined;
-  if (sessionId) {
-    try {
-      const { safetyIdentifierForSession } = await import('../utils/safetyIdentifier.js');
-      safetyIdentifier = await safetyIdentifierForSession(sessionId);
-    } catch {
-      /* proceed without */
-    }
-  }
+  const { riskModel, safetyIdentifier } = await (prepared ?? prepareAssessorCall(sessionId));
 
   const requestAssessment = (useStrictSchema: boolean) => {
     const body = {
@@ -1983,6 +2009,23 @@ interface RiskAnalysisResult {
    *  writes a flag event for the first such turn of each kind in a session
    *  and the page says so in words (ai-therapist-353). */
   acute?: Exclude<AcuteStage, 'none'>;
+  /** Whether the session was already flagged HIGH when this turn was scored,
+   *  as the session risk context read it: null when that read failed or did
+   *  not answer in time. The pipeline uses it to decide whether a high turn is
+   *  paged at once, before its own reads (ai-therapist-369). */
+  sessionFlaggedHigh?: boolean | null;
+}
+
+export type { RiskAnalysisResult };
+
+export interface AnalyzeHooks {
+  /**
+   * Called once, synchronously, the moment the verdict is known: after the
+   * score, before the turn's risk_score_history row is written. The crisis
+   * pipeline pages and shows the crisis card from here, so neither waits on
+   * that write (ai-therapist-369). An error thrown here is logged and ignored.
+   */
+  onScored?: (result: RiskAnalysisResult) => void;
 }
 
 /**
@@ -2013,6 +2056,7 @@ interface RiskAnalysisResult {
 export async function analyzeMessageRisk(
   message: MessageInput,
   conversationHistory: HistoryMessage[] = [],
+  hooks: AnalyzeHooks = {},
 ): Promise<RiskAnalysisResult> {
   try {
     const keywordAnalysis = detectCrisisKeywords(message.content);
@@ -2031,9 +2075,27 @@ export async function analyzeMessageRisk(
     // Trajectory across the session's recent scores (computed BEFORE this
     // message's insert, so it reflects the run-up, not the current message),
     // and what the session already knows about this participant's risk.
+    // Each bounded (ai-therapist-369): past CRISIS_READ_DEADLINE_MS a read is
+    // treated as failed, with its own failure default (no trajectory bonus; a
+    // context that could not be read assesses the turn), so a slow database
+    // does not hold the verdict, and the page that follows it, for seconds.
+    const short = message.session_id.substring(0, 12);
+    // A keyword turn is assessed: its model setting and safety identifier are
+    // read alongside (prepareAssessorCall), not after these reads.
+    const assessorSetup = keywordAnalysis.keywordScore > 0 ? prepareAssessorCall(message.session_id) : undefined;
     const [trajectory, sessionContext] = await Promise.all([
-      trackEmotionalTrajectory(message.session_id, message.stitched_message_ids ?? []),
-      getSessionRiskContext(message.session_id),
+      readWithin(
+        trackEmotionalTrajectory(message.session_id, message.stitched_message_ids ?? []),
+        { trajectoryScore: 0, trend: 'error' },
+        'trajectory read',
+        (err) => log.error({ err }, `[risk] trajectory read for ${short}... is slow; scoring without it`),
+      ),
+      readWithin(
+        getSessionRiskContext(message.session_id),
+        { ...CALM_CONTEXT, elevated: true, lookupFailed: true },
+        'session risk context read',
+        (err) => log.error({ err }, `[risk] session risk context for ${short}... is slow; assessing the turn anyway`),
+      ),
     ]);
     const contextSignals = keywordAnalysis.keywordScore === 0 ? detectContextSignals(message.content) : [];
 
@@ -2119,16 +2181,24 @@ export async function analyzeMessageRisk(
         // patience has already been spent: use the short budget so each turn
         // of a flagged session does not queue another 30s of retries.
         const callBudget = isContextWake && assessorIncidentOpen() ? 'fast' : budget;
-        llm = await assessRiskWithLLM(message.content, conversationHistory, message.session_id, {}, callBudget, {
-          sessionContext: describeSessionRiskContext(sessionContext),
-          // The keyword and sweep framings are unchanged; only a context wake
-          // tells the assessor that no keyword matched.
-          keywordFree: isContextWake,
-          // Whatever woke the assessor, tell it when the turn answers a safety
-          // question (a sweep or a moderation wake can land on one too).
-          answersSafetyQuestion,
-          fromCheckin: message.source === 'checkin',
-        });
+        llm = await assessRiskWithLLM(
+          message.content,
+          conversationHistory,
+          message.session_id,
+          {},
+          callBudget,
+          {
+            sessionContext: describeSessionRiskContext(sessionContext),
+            // The keyword and sweep framings are unchanged; only a context wake
+            // tells the assessor that no keyword matched.
+            keywordFree: isContextWake,
+            // Whatever woke the assessor, tell it when the turn answers a safety
+            // question (a sweep or a moderation wake can land on one too).
+            answersSafetyQuestion,
+            fromCheckin: message.source === 'checkin',
+          },
+          assessorSetup,
+        );
         noteAssessorSuccess();
         // A context wake does not reset the periodic sweep: the sweep stays an
         // independent every-8-quiet-turns check with its own audit label.
@@ -2360,6 +2430,38 @@ export async function analyzeMessageRisk(
     if (thirdParty) factors = [THIRD_PARTY_FACTOR, ...factors];
     if (subject === 'harm_to_others') factors = [HARM_TO_OTHERS_FACTOR, ...factors];
 
+    const result: RiskAnalysisResult = {
+      riskScore,
+      severity,
+      factors,
+      breakdown: {
+        keywords: keywordAnalysis.keywordScore,
+        ...(trajectoryApplies ? { trajectory: trajectory.trajectoryScore } : {}),
+        ...(moderationScore > 0 ? { moderation: moderationScore } : {}),
+        ...(llm ? { llm: llm.risk_score } : {}),
+      },
+      method,
+      contextWake: isContextWake,
+      degraded: llmErrorKind !== null,
+      thirdParty,
+      ...(subject ? { subject } : {}),
+      ...(ownRiskToo && labelled ? { alsoSubject: labelled } : {}),
+      ...(acute ? { acute } : {}),
+      sessionFlaggedHigh: sessionContext.lookupFailed
+        ? null
+        : sessionContext.flagged && sessionContext.flaggedSeverity === 'high',
+    };
+
+    // The verdict is known: the caller may page and show the crisis card now,
+    // before the history row below is written (ai-therapist-369).
+    if (hooks.onScored) {
+      try {
+        hooks.onScored(result);
+      } catch (hookErr) {
+        log.error({ err: hookErr }, '[risk] onScored hook failed (the verdict stands)');
+      }
+    }
+
     // Passive logging — insert unconditionally regardless of flagging.
     // severity column has CHECK (severity IN ('low','medium','high')), so use NULL when no keyword matched.
     // Best-effort: a failed history insert must never zero an already-computed
@@ -2454,24 +2556,7 @@ export async function analyzeMessageRisk(
       console.error('Error logging risk_score_history (non-fatal, verdict stands):', insertError);
     }
 
-    return {
-      riskScore,
-      severity,
-      factors,
-      breakdown: {
-        keywords: keywordAnalysis.keywordScore,
-        ...(trajectoryApplies ? { trajectory: trajectory.trajectoryScore } : {}),
-        ...(moderationScore > 0 ? { moderation: moderationScore } : {}),
-        ...(llm ? { llm: llm.risk_score } : {}),
-      },
-      method,
-      contextWake: isContextWake,
-      degraded: llmErrorKind !== null,
-      thirdParty,
-      ...(subject ? { subject } : {}),
-      ...(ownRiskToo && labelled ? { alsoSubject: labelled } : {}),
-      ...(acute ? { acute } : {}),
-    };
+    return result;
   } catch (error) {
     console.error('Error in analyzeMessageRisk:', error);
     return {
@@ -2499,6 +2584,12 @@ export async function flagSessionCrisis(
   messageId: string | number | null,
   factors: string[],
   notes: string | null,
+  /** `retry`: this is a background retry of a high flag whose first write
+   *  failed (ai-therapist-369). Seconds or minutes may have passed, and a
+   *  later turn may have flagged the session at a higher score meanwhile: the
+   *  session row keeps the higher score (its crisis event still records this
+   *  turn's own). Only used for HIGH flags, which no flag can outrank. */
+  options: { retry?: boolean } = {},
 ): Promise<void> {
   const client = await pool.connect();
   try {
@@ -2506,7 +2597,24 @@ export async function flagSessionCrisis(
 
     // Update therapy_sessions
     await client.query(
-      `UPDATE therapy_sessions
+      options.retry
+        ? `UPDATE therapy_sessions
+       SET crisis_flagged = TRUE,
+           crisis_severity = $2::VARCHAR,
+           crisis_risk_score = CASE
+             WHEN crisis_flagged IS TRUE AND crisis_severity = 'high'
+               THEN GREATEST(COALESCE(crisis_risk_score, 0), $3)
+             ELSE $3
+           END,
+           crisis_flagged_at = CURRENT_TIMESTAMP,
+           crisis_flagged_by = $4,
+           monitoring_frequency = CASE
+             WHEN $2::VARCHAR = 'high' THEN 'critical'
+             WHEN $2::VARCHAR = 'medium' THEN 'high'
+             ELSE 'normal'
+           END
+       WHERE session_id = $1`
+        : `UPDATE therapy_sessions
        SET crisis_flagged = TRUE,
            crisis_severity = $2::VARCHAR,
            crisis_risk_score = $3,

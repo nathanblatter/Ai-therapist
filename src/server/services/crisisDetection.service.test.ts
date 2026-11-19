@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Mock the DB pool, secrets, and OpenAI so the tests exercise the two-stage
 // risk pipeline (keyword screen → LLM context assessment → fallback) without
@@ -39,6 +39,14 @@ const {
   getActiveCrisisSessions,
   _sweepCounterSizeForTests,
 } = await import('./crisisDetection.service.js');
+const { _settleBackgroundForTests } = await import('../utils/backgroundWork.js');
+
+// A failed assessment records the session as degraded in the background
+// (ai-therapist-369: it no longer holds the verdict). Let that write land in
+// the test that caused it, not in the next one's query mock.
+afterEach(async () => {
+  await _settleBackgroundForTests();
+});
 
 // /admin/api/crisis/active list (ai-therapist-276): the researcher org rule
 // is the by-id gate's — owner in the caller's org, or anonymous and the

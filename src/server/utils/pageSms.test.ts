@@ -54,16 +54,21 @@ function everyPage(): Array<[string, PageMessage, string]> {
               for (const cut of [false, true]) {
                 for (const source of ['participant_turn', 'model_escalation'] as const) {
                   for (const score of [65, 89, 90, 100]) {
-                    const ctx = {
-                      previousPage: prior ? previous(sessionId, prior, kinds) : null,
-                      unpagedCut: cut ? { sessionId, at: NOW - 80_000 } : null,
-                      now: NOW,
-                    };
-                    out.push([
-                      `risk ${subject} ${escalation} also=${alsoSubject} prior=${prior}:${kinds} cut=${cut} ${source} ${score}`,
-                      composeRiskPage(sessionId, score, ctx, source, subject, { escalation, alsoSubject }),
-                      sessionId,
-                    ]);
+                    // historyUnread: sent without the stored paging history
+                    // (ai-therapist-369); only ever without a previous page.
+                    for (const historyUnread of prior ? [false] : [false, true]) {
+                      const ctx = {
+                        previousPage: prior ? previous(sessionId, prior, kinds) : null,
+                        unpagedCut: cut ? { sessionId, at: NOW - 80_000 } : null,
+                        now: NOW,
+                        historyUnread,
+                      };
+                      out.push([
+                        `risk ${subject} ${escalation} also=${alsoSubject} prior=${prior}:${kinds} cut=${cut} ${source} ${score} unread=${historyUnread}`,
+                        composeRiskPage(sessionId, score, ctx, source, subject, { escalation, alsoSubject }),
+                        sessionId,
+                      ]);
+                    }
                   }
                 }
               }
@@ -93,7 +98,13 @@ function everyPage(): Array<[string, PageMessage, string]> {
           }
         }
       }
-      out.push([`vendor ceiling prior=${!!prior}`, composeVendorCeilingPage(sessionId, ctx), sessionId]);
+      for (const stateSource of ['database', 'in_process', 'unknown'] as const) {
+        out.push([
+          `vendor ceiling ${stateSource} prior=${!!prior}`,
+          composeVendorCeilingPage(sessionId, ctx, stateSource),
+          sessionId,
+        ]);
+      }
     }
     for (const kind of ['risk', 'vendor_cut', 'vendor_ceiling'] as const) {
       out.push([`minimal ${kind}`, composeMinimalPage(sessionId, kind), sessionId]);

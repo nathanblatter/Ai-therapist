@@ -15,6 +15,7 @@ import {
 } from '../../db/index.js';
 import { getSystemPrompt } from '../../utils/sessionHelpers.js';
 import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
+import { rememberSessionAccount } from '../../utils/sessionAccounts.js';
 import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
 
 import { createLogger } from '../../utils/logger.js';
@@ -106,6 +107,9 @@ export default function logsRoutes(): Router {
             isNonStudyUser(req.session?.userRole, req.session?.username) || req.session?.isSandbox === true,
           );
           recordSessionOwnership(req, sessionId);
+          // Created for this requester: its account is known from here on
+          // (the crisis pipeline's demo check needs no read, ai-therapist-369).
+          rememberSessionAccount(sessionId, req.session?.userRole);
           log.info(`Created session ${sessionId.substring(0, 12)}... with user_id: ${userId}`);
 
           try {

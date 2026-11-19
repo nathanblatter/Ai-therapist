@@ -53,10 +53,11 @@ vi.mock('./workQueue.service.js', () => ({ enqueueWorkItem: vi.fn(async () => nu
 vi.mock('./crisisPaging.service.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./crisisPaging.service.js')>()),
   pageHighRisk: vi.fn(async () => ({ outcome: 'paged' })),
+  retryCrisisRecord: vi.fn(),
 }));
 vi.mock('./adverseEvent.service.js', () => ({ draftAdverseEventFromCrisis: vi.fn(async () => 1) }));
 
-const { runCrisisPipeline } = await import('./crisisPipeline.service.js');
+const { runCrisisPipeline, _resetEarlyPageStateForTests } = await import('./crisisPipeline.service.js');
 
 const TURN = { sessionId: 'chat_1', messageId: 42, content: 'hi' };
 const acquireTimeout = () => new Error('timeout exceeded when trying to connect');
@@ -67,6 +68,7 @@ function risk(riskScore: number, severity: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  _resetEarlyPageStateForTests();
   (global as unknown as { io: unknown }).io = { to: vi.fn(() => ({ emit: vi.fn() })) };
   isDemoAccountSessionMock.mockResolvedValue(false);
   getRecentSessionMessagesMock.mockResolvedValue([]);
@@ -106,7 +108,7 @@ describe('runCrisisPipeline: an unreadable crisis state never lowers a flag (ai-
       [],
       expect.any(String),
     );
-    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 85);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 85, { pageAlreadyRequested: true });
     expect(r.flagged).toBe(true);
   });
 

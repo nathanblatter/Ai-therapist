@@ -36,6 +36,12 @@ vi.mock('openai', () => ({
 }));
 
 const { analyzeMessageRisk, analyzeStandaloneRisk } = await import('./crisisDetection.service.js');
+// Loaded up front: the scorer imports these lazily, and since ai-therapist-369
+// it starts reading the assessor's settings alongside its other reads, so a
+// cold import would land while the fake clock is being advanced.
+await import('./moderation.service.js');
+await import('../utils/sessionHelpers.js');
+await import('../utils/safetyIdentifier.js');
 
 /** An error carrying the fields the SDK's APIError carries. */
 function apiError(status: number, code: string, type?: string, headers: Record<string, string> = {}): Error {

@@ -10,6 +10,7 @@ import QuietHoursScreen from './QuietHoursScreen';
 import StudyStatusScreen from './StudyStatusScreen';
 import SessionLimitScreen from './SessionLimitScreen';
 import { sessionLimitNotice, type SessionLimitNotice } from '../lib/sessionLimitNotice';
+import { requeueLogBatch, shouldRequeueLogBatch } from '../lib/logBatch';
 import ExerciseOverlay, { type ActiveExercise } from './ExerciseOverlay';
 import ToolOverlays, { type ToolUI, type SafetyPlanData } from './ToolOverlays';
 import PostSessionScreen, {
@@ -688,15 +689,21 @@ export default function App() {
     flushInFlightRef.current = true;
     logBufferRef.current = [];
     try {
-      await fetch('/logs/batch', {
+      const res = await fetch('/logs/batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ records: batch }),
         keepalive: true,
       });
+      // A 5xx stored nothing (ai-therapist-369): keep the batch for the next
+      // flush rather than lose those turns from the transcript.
+      if (shouldRequeueLogBatch(res.status)) {
+        console.error(`Batch log not stored (${res.status}), re-queueing`);
+        logBufferRef.current = requeueLogBatch(batch, logBufferRef.current);
+      }
     } catch (err) {
       console.error('Failed to batch log, re-queueing:', err);
-      logBufferRef.current = [...batch, ...logBufferRef.current];
+      logBufferRef.current = requeueLogBatch(batch, logBufferRef.current);
     } finally {
       flushInFlightRef.current = false;
     }

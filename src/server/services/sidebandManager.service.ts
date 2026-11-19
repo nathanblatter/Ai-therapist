@@ -48,7 +48,8 @@ import WebSocket from 'ws';
 import { pool } from '../config/db.js';
 import { insertMessagesBatch } from '../db/index.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
-import { emitCrisisResources } from './crisisResources.js';
+import { emitCrisisResources, hasEmittedHighRiskResources } from './crisisResources.js';
+import type { CrisisStateSource } from './crisisPaging.service.js';
 import { isToolTimeoutError, toolTimeoutMs } from './toolTimeouts.js';
 import { buildRecoverySpeakFirstNudge, type RecoveryCrisisContact } from '../../shared/recoveryPrompt.js';
 
@@ -1018,6 +1019,22 @@ export class SidebandManager {
    *   3. Record it, so how often the vendor terminates a therapeutic
    *      conversation is a measurable number rather than an anecdote.
    */
+  /**
+   * Does this server already know the session is at high risk, without a
+   * database read? It showed the participant the crisis card for a high turn
+   * (the risk pipeline or the escalate tool), or lifted the session timer for
+   * a crisis (ai-therapist-369). Never throws.
+   */
+  private async sessionKnownHighRisk(sessionId: string): Promise<boolean> {
+    try {
+      if (hasEmittedHighRiskResources(sessionId)) return true;
+      const { getSessionTimeStatus } = await import('../utils/sessionAutoTerminate.js');
+      return getSessionTimeStatus(sessionId)?.liftedForCrisis === true;
+    } catch {
+      return false;
+    }
+  }
+
   private async handleModerationTermination(sessionId: string, cause: 'content_filter' | 'expired'): Promise<void> {
     const short = sessionId.substring(0, 12);
     const announce = (): void => {
@@ -1049,6 +1066,7 @@ export class SidebandManager {
     // unflagged or lower-severity session that expires is an ordinary end.
     let flagged = false;
     let severity: string | null = null;
+    let stateSource: CrisisStateSource = 'database';
     try {
       const result = await pool.query<{ crisis_flagged: boolean | null; crisis_severity: string | null }>(
         'SELECT crisis_flagged, crisis_severity FROM therapy_sessions WHERE session_id = $1',
@@ -1057,10 +1075,31 @@ export class SidebandManager {
       flagged = result.rows[0]?.crisis_flagged === true;
       severity = result.rows[0]?.crisis_severity ?? null;
     } catch (err) {
-      console.error(`[Live] Could not read crisis state for ${short}...:`, err);
+      // ai-therapist-369: an unreadable row used to mean "not flagged", so a
+      // vendor ceiling in a session at high risk was neither announced nor
+      // paged. Use what this server already knows: it showed the session the
+      // high-risk crisis card (a turn scored high, or the escalate tool), or
+      // lifted its timer for a crisis. Failing that, the state is unknown,
+      // which is not "calm" (see below).
+      stateSource = (await this.sessionKnownHighRisk(sessionId)) ? 'in_process' : 'unknown';
+      if (stateSource === 'in_process') {
+        flagged = true;
+        severity = 'high';
+      }
+      console.error(
+        `[Live] Could not read crisis state for ${short}...` +
+          (stateSource === 'in_process' ? ' (this server handled it as high risk):' : ' (unknown):'),
+        err,
+      );
     }
     if (cause === 'expired') {
-      if (!flagged || severity !== 'high') return;
+      // The vendor ceiling is the crisis hand-off for a session at high risk.
+      // Unknown fails toward it: the participant is shown the resources and
+      // reconnected, and the on-call is paged at the lowest level with a text
+      // that says the state could not be read. Our own timer ends ordinary
+      // sessions before the vendor's ceiling, so a session that reaches it
+      // with no readable state is not an ordinary end to assume.
+      if (stateSource === 'database' && (!flagged || severity !== 'high')) return;
       announce();
     }
 
@@ -1077,7 +1116,9 @@ export class SidebandManager {
     // the participant) a record for review is decided in crisisPaging.service.
     try {
       const { pageVendorTermination } = await import('./crisisPaging.service.js');
-      await pageVendorTermination({ sessionId, cause, flagged, severity });
+      await (stateSource === 'database'
+        ? pageVendorTermination({ sessionId, cause, flagged, severity })
+        : pageVendorTermination({ sessionId, cause, flagged, severity, stateSource }));
     } catch (err) {
       console.error(`[Live] Failed to alert on ${cause} termination for ${short}...:`, err);
     }
@@ -1089,6 +1130,7 @@ export class SidebandManager {
         event: cause === 'content_filter' ? 'moderation_terminated_session' : 'session_expired_in_crisis',
         vendor: 'openai',
         crisisFlaggedAtTermination: flagged,
+        ...(stateSource !== 'database' ? { crisisStateSource: stateSource } : {}),
       });
     } catch (err) {
       console.error(`[Live] Failed to record ${cause} termination for ${short}...:`, err);
