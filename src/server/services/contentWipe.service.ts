@@ -1,5 +1,5 @@
 import { pool } from '../config/db.js';
-import { redactableRowsSql, REDACTABLE_ROWS_SQL } from '../db/redactionScope.js';
+import { notRejectedSql, redactableRowsSql, REDACTABLE_ROWS_SQL } from '../db/redactionScope.js';
 import { wipeAgedThreadMessageBodies } from '../db/messagingRetention.queries.js';
 import { broadcastAdminEvent } from '../utils/adminBroadcast.js';
 import { withLongQueries } from '../config/dbLongQueries.js';
@@ -445,6 +445,11 @@ export async function findEndedSessionsWithRedactionGaps(limit = 200): Promise<s
         -- tool_event_% rows, which are role='system' but carry verbatim
         -- participant free text and were re-queued by migration 102.
         AND ${redactableRowsSql('m')}
+        -- A rejected redaction (ai-therapist-382) is not a gap to re-run on a
+        -- timer: the same text would be refused again every tick. It stays
+        -- unredacted, unwiped and counted as a redaction error until an
+        -- explicit re-run (findInvalidRedactions.ts --re-redact).
+        AND ${notRejectedSql('m')}
         AND u.is_sandbox IS NOT TRUE
       LIMIT $1`,
     [limit],

@@ -140,7 +140,20 @@ export async function updateMessage(
   // The redaction is a model call: made before the transaction opens, so the
   // transaction never sits idle while it runs (the pool's
   // idle_in_transaction_session_timeout would end it, ai-therapist-366).
-  const redactedContent = fieldToUpdate === 'content' ? await redactPHI(newContent) : null;
+  // A rejected redaction (a refusal or a reply instead of the message,
+  // ai-therapist-382) is not stored: the edit still saves, content_redacted is
+  // left NULL and the row is marked the same way the session job marks one.
+  let redactedContent: string | null = null;
+  let redactionMeta: Record<string, unknown> = {};
+  if (fieldToUpdate === 'content') {
+    try {
+      redactedContent = await redactPHI(newContent);
+    } catch (err) {
+      // By name, not instanceof: RedactionRejectedError (redaction.service.ts).
+      if (!(err instanceof Error && err.name === 'RedactionRejectedError')) throw err;
+      redactionMeta = { redaction_error: err.message, redaction_rejected: new Date().toISOString() };
+    }
+  }
 
   const client = await pool.connect();
   try {
@@ -155,10 +168,10 @@ export async function updateMessage(
          SET content = $1,
              content_redacted = $2,
              embedding = NULL,
-             metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb
+             metadata = (COALESCE(metadata, '{}'::jsonb) - 'redaction_error' - 'redaction_rejected') || $3::jsonb
          WHERE message_id = $4
          RETURNING *`,
-        [newContent, redactedContent, JSON.stringify(editMetadata), messageId],
+        [newContent, redactedContent, JSON.stringify({ ...editMetadata, ...redactionMeta }), messageId],
       );
     } else {
       // Researcher edit: update only content_redacted.

@@ -27,3 +27,20 @@ export function redactableRowsSql(alias?: string): string {
 
 /** Unqualified form, for queries with a single (unaliased) `messages` table. */
 export const REDACTABLE_ROWS_SQL = redactableRowsSql();
+
+/**
+ * SQL boolean fragment: the row has NOT been marked as a rejected redaction
+ * (ai-therapist-382). When the model's output for a message fails validation
+ * (a refusal, a reply, a fragment), the row keeps content_redacted NULL and
+ * gets metadata.redaction_rejected plus a redaction_error. The automatic jobs
+ * (the end-of-session job and the 15-minute gap sweep) must not pick such a
+ * row up again: the same text would most likely be refused again, every 15
+ * minutes, forever. It waits for an explicit re-run
+ * (src/database/scripts/findInvalidRedactions.ts --re-redact) or a manual
+ * redaction. COALESCE because `NULL ? key` is NULL, which would drop rows
+ * with no metadata at all.
+ */
+export function notRejectedSql(alias?: string): string {
+  const q = alias ? `${alias}.` : '';
+  return `NOT (COALESCE(${q}metadata, '{}'::jsonb) ? 'redaction_rejected')`;
+}

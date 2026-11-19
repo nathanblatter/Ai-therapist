@@ -1,7 +1,7 @@
 // Safe Harbor redaction evidence generator (ai-therapist-150 follow-up).
 // Runs a fixed battery of synthetic messages seeded with each of the 18 HIPAA
 // Safe Harbor identifier categories through the ACTUAL production batch
-// redactor (redactPHIBatch — the anchored, retry+fallback version), then
+// redactor (redactPHIBatch — the anchored, validated version), then
 // checks that (a) every planted identifier is gone from the output and (b) the
 // batch shape is preserved 1:1. Produces docs/redaction-evidence-<date>.md as
 // fresh IRB evidence that the pipeline works after the batch-mismatch fix.
