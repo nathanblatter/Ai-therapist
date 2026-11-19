@@ -55,6 +55,7 @@ import {
   insertPagingRecord,
   getUnfinishedSilenceChecks,
   claimSilenceCheck,
+  releaseSilenceCheck,
   finishSilenceCheck,
   INCIDENT_CHAIN_BACKSTOP_MS,
   type PagingRecordRow,
@@ -937,7 +938,12 @@ export async function runVendorCutSilenceCheck(sessionId: string, cutAt: number)
  *
  *   'not_claimed'  another instance has it, or it already finished: nothing
  *                  was done here.
- *   'ran'          the check ran here and its result is on the row.
+ *   'ran'          the check ran here and its result is on the row. When
+ *                  its page was NOT delivered (no channel accepted it) the
+ *                  check is handed back as still owed, with the attempt
+ *                  counted, and the next sweep tries again until
+ *                  SILENCE_CHECK_CEILING_MS, when it expires loudly. A page
+ *                  the on-call never got is not a check that is done.
  *   'failed'       it was claimed and then failed unexpectedly. The claim is
  *                  left in place, goes stale after
  *                  SILENCE_CHECK_STALE_CLAIM_MS, and the next sweep retries.
@@ -951,7 +957,7 @@ export async function runStoredSilenceCheck(
   actionId: number,
   fallback?: { sessionId: string; cutAt: number },
 ): Promise<'not_claimed' | 'ran' | 'failed' | 'unclaimed'> {
-  let claim: { sessionId: string; cutAt: Date } | null;
+  let claim: Awaited<ReturnType<typeof claimSilenceCheck>>;
   try {
     claim = await withTimeout(
       claimSilenceCheck(actionId, INSTANCE_ID, SILENCE_CHECK_STALE_CLAIM_MS / 1000),
@@ -978,6 +984,28 @@ export async function runStoredSilenceCheck(
         'its claim will go stale and the check will be retried',
     );
     return 'failed';
+  }
+  // Not delivered: the on-call has not been told. Keep the check owed so the
+  // next sweep retries it (a harness or demo session is never swept, so there
+  // it is recorded as done, as before).
+  if (result.outcome === 'not_delivered' && !claim.isDemo) {
+    const attempts = claim.attempts + 1;
+    log.error(
+      `[paging] ON-CALL PAGE NOT DELIVERED for the silence check ${actionId} ` +
+        `(${claim.sessionId.substring(0, 12)}..., attempt ${attempts}); still owed, retried on the next sweep`,
+    );
+    try {
+      await releaseSilenceCheck(actionId, {
+        attempts,
+        lastOutcome: result.outcome,
+        lastPageActionId: result.decision?.actionId ?? null,
+        lastAttemptBy: INSTANCE_ID,
+      });
+    } catch (err) {
+      // The claim stays 'running', goes stale, and is retried all the same.
+      log.error({ err }, `[paging] silence check ${actionId}: could not hand back the undelivered check`);
+    }
+    return 'ran';
   }
   try {
     await finishSilenceCheck(actionId, 'done', {
@@ -1029,7 +1057,9 @@ function scheduleSilenceCheck(sessionId: string, cutAt: number, actionId: number
  *   - due, and younger than SILENCE_CHECK_CEILING_MS: run it now;
  *   - not yet due: arm a timer for the time it has left;
  *   - older than the ceiling: mark it expired, log an error and tell the
- *     admin dashboards. No SMS: see SILENCE_CHECK_CEILING_MS.
+ *     admin dashboards. No SMS: see SILENCE_CHECK_CEILING_MS. A check whose
+ *     page was attempted and never delivered expires the same way, and the
+ *     notice says the on-call has NOT been told.
  * Never throws.
  */
 export async function sweepSilenceChecks(): Promise<{ ran: number; armed: number; expired: number }> {
@@ -1050,20 +1080,28 @@ export async function sweepSilenceChecks(): Promise<{ ran: number; armed: number
       const fallback = { sessionId: row.session_id, cutAt: Date.now() - row.age_ms };
       if (row.age_ms > SILENCE_CHECK_CEILING_MS) {
         const minutes = Math.round(row.age_ms / 60_000);
-        const summary =
-          `Silence check NOT run: the vendor content filter ended this voice session ${minutes} min ago with no ` +
-          `participant risk signal, and the check owed ${VENDOR_CUT_SILENCE_CHECK_MS / 60_000} min later was not ` +
-          `run within ${SILENCE_CHECK_CEILING_MS / 60_000} min (the server was down or restarting). On-call was ` +
-          'not paged for it. Review the transcript.';
+        const undelivered = row.attempts > 0;
+        const summary = undelivered
+          ? `Silence check page NOT DELIVERED: the vendor content filter ended this voice session ${minutes} min ` +
+            'ago with no participant risk signal, the participant stayed silent, and the page was attempted ' +
+            `${row.attempts} time(s) without any paging channel accepting it. On-call has NOT been told. ` +
+            'Contact the on-call and review the transcript now.'
+          : `Silence check NOT run: the vendor content filter ended this voice session ${minutes} min ago with no ` +
+            `participant risk signal, and the check owed ${VENDOR_CUT_SILENCE_CHECK_MS / 60_000} min later was not ` +
+            `run within ${SILENCE_CHECK_CEILING_MS / 60_000} min (the server was down or restarting). On-call was ` +
+            'not paged for it. Review the transcript.';
         const marked = await finishSilenceCheck(row.action_id, 'expired', {
-          outcome: 'not_run',
-          reason: 'older_than_ceiling',
+          outcome: undelivered ? 'not_delivered' : 'not_run',
+          reason: undelivered ? 'undelivered_until_ceiling' : 'older_than_ceiling',
           ageSeconds: Math.round(row.age_ms / 1000),
           summary,
         });
         if (marked) {
           done.expired++;
-          log.error(`[paging] silence check ${row.action_id} for ${short}... expired unrun after ${minutes} min`);
+          log.error(
+            `[paging] silence check ${row.action_id} for ${short}... expired after ${minutes} min ` +
+              (undelivered ? `(${row.attempts} undelivered attempt(s))` : 'unrun'),
+          );
           notifyAdmins(
             {
               sessionId: row.session_id,
@@ -1074,7 +1112,12 @@ export async function sweepSilenceChecks(): Promise<{ ran: number; armed: number
               summary,
               buildMessage: () => '',
             },
-            { outcome: 'no_page', kind: 'vendor_cut', level: null, actionId: row.action_id },
+            {
+              outcome: undelivered ? 'not_delivered' : 'no_page',
+              kind: 'vendor_cut',
+              level: null,
+              actionId: row.action_id,
+            },
             summary,
           );
         }

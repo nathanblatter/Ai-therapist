@@ -133,7 +133,16 @@ vi.mock('../db/paging.queries.js', () => ({
         );
       })
       .sort((a, b) => a.performed_at.getTime() - b.performed_at.getTime())
-      .map((r) => ({ action_id: r.action_id, session_id: r.session_id, age_ms: now - r.performed_at.getTime() }));
+      .map((r) => ({
+        action_id: r.action_id,
+        session_id: r.session_id,
+        age_ms: now - r.performed_at.getTime(),
+        attempts: Number(
+          ((r.action_details['paging'] as Record<string, unknown>)['silenceCheck'] as Record<string, unknown>)[
+            'attempts'
+          ] ?? 0,
+        ),
+      }));
   }),
   claimSilenceCheck: vi.fn(async (actionId: number, claimedBy: string, staleClaimSeconds: number) => {
     if (db.failClaims) throw new Error('db down');
@@ -146,16 +155,30 @@ vi.mock('../db/paging.queries.js', () => ({
       (check?.['state'] === 'running' &&
         now - new Date(String(check['claimedAt'])).getTime() > staleClaimSeconds * 1000);
     if (!row || !p || p['decision'] !== 'no_page' || !open) return null;
-    p['silenceCheck'] = { state: 'running', claimedAt: new Date(now).toISOString(), claimedBy };
+    p['silenceCheck'] = { ...check, state: 'running', claimedAt: new Date(now).toISOString(), claimedBy };
     db.claims.push([actionId, claimedBy]);
-    return { sessionId: row.session_id, cutAt: new Date(row.performed_at) };
+    return {
+      sessionId: row.session_id,
+      cutAt: new Date(row.performed_at),
+      attempts: Number(check?.['attempts'] ?? 0),
+      isDemo: db.demo.has(row.session_id),
+    };
+  }),
+  releaseSilenceCheck: vi.fn(async (actionId: number, result: Record<string, unknown>) => {
+    const row = db.rows.find((r) => r.action_id === actionId);
+    const p = row?.action_details['paging'] as Record<string, unknown> | undefined;
+    const check = p?.['silenceCheck'] as Record<string, unknown> | undefined;
+    if (!p || check?.['state'] !== 'running') return false;
+    const { claimedAt: _a, claimedBy: _b, ...kept } = check;
+    p['silenceCheck'] = { ...kept, ...result, state: 'pending' };
+    return true;
   }),
   finishSilenceCheck: vi.fn(async (actionId: number, state: string, result: Record<string, unknown>) => {
     const row = db.rows.find((r) => r.action_id === actionId);
     const p = row?.action_details['paging'] as Record<string, unknown> | undefined;
     const check = p?.['silenceCheck'] as Record<string, unknown> | undefined;
     if (!p || (check?.['state'] !== 'pending' && check?.['state'] !== 'running')) return false;
-    p['silenceCheck'] = { ...result, state, finishedAt: new Date().toISOString() };
+    p['silenceCheck'] = { ...check, ...result, state, finishedAt: new Date().toISOString() };
     return true;
   }),
   participantSpokeSince: vi.fn(async (userId: number, since: Date) => {
@@ -1249,6 +1272,48 @@ describe('ai-therapist-362: the silence check survives a restart', () => {
     expect(decision).toMatchObject({ outcome: 'no_page', actionId: null });
     await vi.advanceTimersByTimeAsync(VENDOR_CUT_SILENCE_CHECK_MS + SEC);
     expect(sendCrisisAlertMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('a silence page that no channel accepted stays owed: retried on the next sweep, attempts counted', async () => {
+    const row = await unpagedCut();
+    sendCrisisAlertMock.mockResolvedValueOnce(false);
+    await vi.advanceTimersByTimeAsync(VENDOR_CUT_SILENCE_CHECK_MS + SEC);
+    expect(sendCrisisAlertMock).toHaveBeenCalledTimes(1);
+    expect(check(row)).toMatchObject({ state: 'pending', attempts: 1, lastOutcome: 'not_delivered' });
+    expect(check(row)['claimedBy']).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(3 * MIN); // the next backstop tick
+    expect(await sweepSilenceChecks()).toEqual({ ran: 1, armed: 0, expired: 0 });
+    expect(sendCrisisAlertMock).toHaveBeenCalledTimes(2);
+    expect(check(row)).toMatchObject({ state: 'done', outcome: 'paged', attempts: 1 });
+    expect(rowsOf('not_delivered')).toHaveLength(1);
+    expect(rowsOf('paged')).toHaveLength(1);
+  });
+
+  it('a silence page never delivered by the ceiling expires saying the on-call has NOT been told', async () => {
+    const row = await unpagedCut();
+    sendCrisisAlertMock.mockResolvedValue(false);
+    await vi.advanceTimersByTimeAsync(VENDOR_CUT_SILENCE_CHECK_MS + SEC);
+    for (let tick = 0; tick < 3; tick++) {
+      await vi.advanceTimersByTimeAsync(3 * MIN);
+      await sweepSilenceChecks();
+    }
+    const attempts = sendCrisisAlertMock.mock.calls.length;
+    expect(attempts).toBeGreaterThanOrEqual(4);
+    await vi.advanceTimersByTimeAsync(3 * MIN); // past the ceiling
+    broadcastMock.mockClear();
+    expect(await sweepSilenceChecks()).toEqual({ ran: 0, armed: 0, expired: 1 });
+    expect(sendCrisisAlertMock).toHaveBeenCalledTimes(attempts);
+    expect(check(row)).toMatchObject({ state: 'expired', outcome: 'not_delivered', attempts });
+    expect(JSON.stringify(broadcastMock.mock.calls[0])).toMatch(/NOT DELIVERED.*has NOT been told/);
+  });
+
+  it('an undelivered check of a harness session is recorded as done: no sweep would ever retry it', async () => {
+    const row = await unpagedCut('harness3');
+    db.demo.add('harness3');
+    sendCrisisAlertMock.mockResolvedValueOnce(false);
+    await vi.advanceTimersByTimeAsync(VENDOR_CUT_SILENCE_CHECK_MS + SEC);
+    expect(check(row)).toMatchObject({ state: 'done', outcome: 'not_delivered' });
   });
 
   it('a sweep that cannot read the table does nothing and does not throw', async () => {

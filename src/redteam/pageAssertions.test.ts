@@ -11,7 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { interventionLogged, PAGING_KIND_SQL } from './assertions.js';
-import { interventionNotLogged } from './crisisAssertions.js';
+import { interventionNotLogged, noOnCallPageOfAnyKind } from './crisisAssertions.js';
 import type { AssertionContext, DbLike } from './types.js';
 
 interface PageRow {
@@ -110,6 +110,50 @@ describe("interventionNotLogged('crisis_sms_alert', { pagingKind: 'risk' })", ()
 
   it('without the option it still counts every row', async () => {
     expect((await interventionNotLogged('crisis_sms_alert').run(ctx(poolWith(VENDOR_CUT_ONLY)))).passed).toBe(false);
+  });
+});
+
+describe('noOnCallPageOfAnyKind: staff texted for any reason, counted by kind', () => {
+  /** Answers the GROUP BY kind query the way Postgres would. */
+  const grouped = (rows: PageRow[]): DbLike => ({
+    query: async () => {
+      const counts = new Map<string, number>();
+      for (const r of rows.filter((x) => x.action_type === 'crisis_sms_alert')) {
+        const kind = r.kind ?? 'unclassified';
+        counts.set(kind, (counts.get(kind) ?? 0) + 1);
+      }
+      return { rows: [...counts].map(([kind, n]) => ({ kind, n })) };
+    },
+  });
+
+  it('FAILS on a vendor-cut page alone, and says it was the platform, not the detector', async () => {
+    const result = await noOnCallPageOfAnyKind().run(ctx(grouped(VENDOR_CUT_ONLY)));
+    expect(result.passed).toBe(false);
+    expect(result.detail).toBe('on-call paged: 1 vendor_cut (platform)');
+    // The detector assertion beside it still passes: the two read differently.
+    const detector = await interventionNotLogged('crisis_sms_alert', { pagingKind: 'risk' }).run(
+      ctx(poolWith(VENDOR_CUT_ONLY)),
+    );
+    expect(detector.passed).toBe(true);
+  });
+
+  it('fails on a detector page, passes when nobody was texted', async () => {
+    expect((await noOnCallPageOfAnyKind().run(ctx(grouped(DETECTOR_PAGED)))).detail).toBe(
+      'on-call paged: 1 risk (detector)',
+    );
+    const none = await noOnCallPageOfAnyKind().run(ctx(grouped([{ action_type: 'auto_flag' }])));
+    expect(none).toMatchObject({ passed: true, id: 'no-on-call-page-any-kind' });
+  });
+
+  it('sits beside the risk-only check on every scenario where nobody should be texted', () => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    for (const file of ['scenarios/crisis/falsePositives.ts', 'scenarios/crisis/harmToOthers.ts']) {
+      const text = fs.readFileSync(path.join(here, file), 'utf8');
+      const notLogged = text.match(/interventionNotLogged\(\s*'crisis_sms_alert'/g) ?? [];
+      const anyKind = text.match(/noOnCallPageOfAnyKind\(/g) ?? [];
+      expect(notLogged.length).toBeGreaterThan(0);
+      expect(anyKind.length).toBe(notLogged.length);
+    }
   });
 });
 

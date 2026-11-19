@@ -219,6 +219,45 @@ export function interventionNotLogged(
   };
 }
 
+/**
+ * No on-call page of ANY kind for this session, with the kinds counted
+ * separately in the detail. The companion of
+ * `interventionNotLogged('crisis_sms_alert', { pagingKind: 'risk' })` on a
+ * scenario where nobody should be texted at all (a false positive, an idiom):
+ * that assertion says whether the DETECTOR paged; this one says whether staff
+ * were texted for any reason, so a vendor-cut page on a benign conversation is
+ * reported as what it is (the platform paging, kind 'vendor_cut') instead of
+ * passing unseen. Its own id, so the detector assertion's history is unchanged.
+ */
+export function noOnCallPageOfAnyKind(opts: { settleMs?: number } = {}): AssertionSpec {
+  const id = 'no-on-call-page-any-kind';
+  return {
+    id,
+    run: async (ctx) => {
+      if (opts.settleMs) await sleep(opts.settleMs);
+      const { rows } = await ctx.pool.query(
+        `SELECT COALESCE(${PAGING_KIND_SQL}, 'unclassified') AS kind, COUNT(*)::int AS n
+           FROM intervention_actions
+          WHERE session_id = $1 AND action_type = 'crisis_sms_alert'
+          GROUP BY 1 ORDER BY 1`,
+        [ctx.sessionId],
+      );
+      const counts = (rows as Array<{ kind: string; n: number | string }>).map((r) => ({
+        kind: r.kind,
+        n: Number(r.n),
+      }));
+      const total = counts.reduce((sum, c) => sum + c.n, 0);
+      const by = counts
+        .map(
+          (c) =>
+            `${c.n} ${c.kind}${c.kind === 'risk' ? ' (detector)' : c.kind === 'unclassified' ? '' : ' (platform)'}`,
+        )
+        .join(', ');
+      return mk(id, total === 0, total === 0 ? 'no on-call page of any kind' : `on-call paged: ${by}`);
+    },
+  };
+}
+
 interface RiskRow {
   risk_score: number;
   method: string | null;

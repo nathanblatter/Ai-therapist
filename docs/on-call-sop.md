@@ -70,7 +70,9 @@ participant has not spoken again. That check survives a server restart or
 deploy: it is stored with the record of the cut and picked up again when the
 server starts. Only if the server is down for more than 15 minutes after the
 cut is the check not run; the cut's dashboard record then says "Silence check
-NOT run", and nobody is texted for it.
+NOT run", and nobody is texted for it. If the check's text could not be sent,
+it is tried again every few minutes until the same 15-minute limit; after that
+the dashboard says "Silence check page NOT DELIVERED".
 
 A participant's first high-risk statement in a **recovery session** (the
 session the app opens after a vendor cut) pages like any other and is on the

@@ -86,6 +86,15 @@ export const INCIDENT_CHAIN_BACKSTOP_MS = 12 * 60 * 60 * 1000;
  * stamped then (markSessionCrisisContinuation), so "stamped" means "continues
  * the participant's previous session"; no column links the two.
  *
+ * "Previous" prefers the session whose vendor termination was recorded just
+ * before this one started (a paging row of kind vendor_cut / vendor_ceiling
+ * from 15 minutes before to 1 minute after its start; the row can land a few
+ * seconds after the recovery begins). Only without such a row is it the
+ * session started last. Start order alone mislinks a participant with a
+ * second session open (a typed chat on another device started between the
+ * cut session and its recovery): the walk stopped at that session, and a
+ * real high flag more than INCIDENT_LOOKBACK_MS old dropped out of the peak.
+ *
  * An incident is this chain, however long it has been running: a participant
  * flagged high whose recovery session is cut 2 h 20 min later is still the
  * same incident. `backstop` bounds the walk in time (a link that started
@@ -108,7 +117,12 @@ export async function getIncidentChainSessionIds(sessionId: string, backstop: Da
             WHERE p.user_id = c.user_id
               AND p.session_id <> c.session_id
               AND p.created_at < c.created_at
-            ORDER BY p.created_at DESC
+            ORDER BY EXISTS (SELECT 1 FROM intervention_actions ia
+                              WHERE ia.session_id = p.session_id
+                                AND ia.action_details #>> '{paging,kind}' IN ('vendor_cut', 'vendor_ceiling')
+                                AND ia.performed_at >= c.created_at - interval '15 minutes'
+                                AND ia.performed_at <= c.created_at + interval '1 minute') DESC,
+                     p.created_at DESC
             LIMIT 1
          ) prev
         WHERE c.user_id IS NOT NULL
@@ -242,9 +256,13 @@ export async function insertPagingRecord(
 //   { state: 'pending' }                         written with the row
 //   { state: 'running', claimedAt, claimedBy }   one instance has taken it
 //   { state: 'done', outcome, ... }              it ran; it never runs again
-//   { state: 'expired', ... }                    nobody ran it in time
+//   { state: 'expired', ... }                    nobody ran it in time, or
+//                                                its page was never delivered
 // so any app instance, including one that started after the cut, can find
 // what is owed and run it, and two instances cannot both run the same check.
+// A check whose page was NOT delivered goes back to 'pending' with `attempts`
+// counted (releaseSilenceCheck), so the next sweep tries again: the page is
+// still owed. Claim and finish keep the fields already on the check.
 
 export interface UnfinishedSilenceCheckRow {
   action_id: number;
@@ -252,6 +270,8 @@ export interface UnfinishedSilenceCheckRow {
   /** Age of the row by the DATABASE clock, so a skewed app clock cannot make
    *  a check run early or look expired. */
   age_ms: number;
+  /** Earlier runs whose page was not delivered (0 for a check never run). */
+  attempts: number;
 }
 
 const SILENCE_CHECK_OPEN_SQL = `(ia.action_details #>> '{paging,silenceCheck,state}' = 'pending'
@@ -274,9 +294,15 @@ export async function getUnfinishedSilenceChecks(
   lookbackSeconds: number,
   staleClaimSeconds: number,
 ): Promise<UnfinishedSilenceCheckRow[]> {
-  const result = await pool.query<{ action_id: number | string; session_id: string; age_ms: number | string }>(
+  const result = await pool.query<{
+    action_id: number | string;
+    session_id: string;
+    age_ms: number | string;
+    attempts: number | string | null;
+  }>(
     `SELECT ia.action_id, ia.session_id,
-            EXTRACT(EPOCH FROM (now() - ia.performed_at)) * 1000 AS age_ms
+            EXTRACT(EPOCH FROM (now() - ia.performed_at)) * 1000 AS age_ms,
+            COALESCE((ia.action_details #>> '{paging,silenceCheck,attempts}')::int, 0) AS attempts
        FROM intervention_actions ia
        JOIN therapy_sessions ts ON ts.session_id = ia.session_id
       WHERE ia.action_type = 'external_api_called'
@@ -292,6 +318,7 @@ export async function getUnfinishedSilenceChecks(
     action_id: Number(row.action_id),
     session_id: row.session_id,
     age_ms: Number(row.age_ms),
+    attempts: Number(row.attempts ?? 0),
   }));
 }
 
@@ -307,21 +334,56 @@ export async function claimSilenceCheck(
   actionId: number,
   claimedBy: string,
   staleClaimSeconds: number,
-): Promise<{ sessionId: string; cutAt: Date } | null> {
-  const result = await pool.query<{ session_id: string; performed_at: Date }>(
+): Promise<{ sessionId: string; cutAt: Date; attempts: number; isDemo: boolean } | null> {
+  const result = await pool.query<{
+    session_id: string;
+    performed_at: Date;
+    attempts: number | string | null;
+    is_demo: boolean | null;
+  }>(
     `UPDATE intervention_actions ia
         SET action_details = jsonb_set(
               ia.action_details,
               '{paging,silenceCheck}',
-              jsonb_build_object('state', 'running', 'claimedAt', now(), 'claimedBy', $3::text))
+              COALESCE(ia.action_details #> '{paging,silenceCheck}', '{}'::jsonb)
+                || jsonb_build_object('state', 'running', 'claimedAt', now(), 'claimedBy', $3::text))
       WHERE ia.action_id = $1
         AND ia.action_details #>> '{paging,decision}' = 'no_page'
         AND ${SILENCE_CHECK_OPEN_SQL}
-      RETURNING ia.session_id, ia.performed_at`,
+      RETURNING ia.session_id, ia.performed_at,
+                COALESCE((ia.action_details #>> '{paging,silenceCheck,attempts}')::int, 0) AS attempts,
+                (SELECT ts.is_demo FROM therapy_sessions ts WHERE ts.session_id = ia.session_id) AS is_demo`,
     [actionId, staleClaimSeconds, claimedBy],
   );
   const row = result.rows[0];
-  return row ? { sessionId: row.session_id, cutAt: new Date(row.performed_at) } : null;
+  return row
+    ? {
+        sessionId: row.session_id,
+        cutAt: new Date(row.performed_at),
+        attempts: Number(row.attempts ?? 0),
+        isDemo: row.is_demo === true,
+      }
+    : null;
+}
+
+/**
+ * Hand a claimed check back as still owed: it ran, but its page was not
+ * delivered. `result` (attempts, last outcome, the page row) is kept on the
+ * check, and the next sweep claims it again. Returns whether this call did it.
+ */
+export async function releaseSilenceCheck(actionId: number, result: Record<string, unknown>): Promise<boolean> {
+  const updated = await pool.query(
+    `UPDATE intervention_actions ia
+        SET action_details = jsonb_set(
+              ia.action_details,
+              '{paging,silenceCheck}',
+              (ia.action_details #> '{paging,silenceCheck}') - 'claimedAt' - 'claimedBy'
+                || $2::jsonb || jsonb_build_object('state', 'pending'))
+      WHERE ia.action_id = $1
+        AND ia.action_details #>> '{paging,silenceCheck,state}' = 'running'`,
+    [actionId, JSON.stringify(result)],
+  );
+  return (updated.rowCount ?? 0) > 0;
 }
 
 /**
@@ -340,7 +402,8 @@ export async function finishSilenceCheck(
         SET action_details = jsonb_set(
               ia.action_details,
               '{paging,silenceCheck}',
-              $2::jsonb || jsonb_build_object('state', $3::text, 'finishedAt', now()))
+              COALESCE(ia.action_details #> '{paging,silenceCheck}', '{}'::jsonb)
+                || $2::jsonb || jsonb_build_object('state', $3::text, 'finishedAt', now()))
       WHERE ia.action_id = $1
         AND ia.action_details #>> '{paging,silenceCheck,state}' IN ('pending', 'running')`,
     [actionId, JSON.stringify(result), state],

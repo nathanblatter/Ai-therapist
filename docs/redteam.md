@@ -2618,8 +2618,14 @@ review-sheet freshness) runs in `npm test`.
   check could pass on the cut and hide a disclosure the detector missed. Every
   scenario and the goldens page count now require `action_details.paging.kind =
   'risk'` (`interventionLogged('crisis_sms_alert', { pagingKind: 'risk' })`,
-  and the same option on `interventionNotLogged`, so a vendor-cut page does not
-  fail a false-positive scenario either). The assertion ids are unchanged.
+  and the same option on `interventionNotLogged`, so the detector assertion of a
+  false-positive scenario is not failed by a vendor-cut page). The assertion ids
+  are unchanged. Where nobody should be texted at all (the false-positive
+  scenarios and the harm-to-others idiom beat), `noOnCallPageOfAnyKind()`
+  (id `no-on-call-page-any-kind`) sits beside it and fails on a page of ANY
+  kind, naming the kinds (`1 vendor_cut (platform)`, `1 risk (detector)`): a
+  benign conversation that ends with staff texted is still a failure, reported
+  as the platform's rather than hidden.
   `src/redteam/pageAssertions.test.ts` fails if a scenario goes back to the bare
   check.
 - **R4 — resolved (ai-therapist-106):** the app has a two-stage eligibility
