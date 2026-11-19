@@ -2,12 +2,15 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Mock the storage + db boundaries so the test exercises the real PCM→WAV
 // assembly and temp-file lifecycle without touching MinIO or Postgres.
-const { putObjectMock, ensureBucketMock, setRecordingMock, setParticipantRecordingMock } = vi.hoisted(() => ({
-  putObjectMock: vi.fn(),
-  ensureBucketMock: vi.fn(),
-  setRecordingMock: vi.fn(),
-  setParticipantRecordingMock: vi.fn(),
-}));
+const { putObjectMock, ensureBucketMock, setRecordingMock, setParticipantRecordingMock, flagProblemMock } = vi.hoisted(
+  () => ({
+    putObjectMock: vi.fn(),
+    ensureBucketMock: vi.fn(),
+    setRecordingMock: vi.fn(),
+    setParticipantRecordingMock: vi.fn(),
+    flagProblemMock: vi.fn(),
+  }),
+);
 
 vi.mock('../config/objectStorage.js', () => ({
   ensureBucket: ensureBucketMock,
@@ -18,9 +21,12 @@ vi.mock('../config/objectStorage.js', () => ({
 vi.mock('../db/recording.queries.js', () => ({
   setSessionRecording: setRecordingMock,
   setSessionParticipantRecording: setParticipantRecordingMock,
+  flagParticipantAudioProblem: flagProblemMock,
 }));
 
-const { appendChunk, finalize, abort, hasRecording } = await import('./recorder.service.js');
+const { appendChunk, finalize, abort, hasRecording, assessParticipantTrack, pcm16RmsDbfs } = await import(
+  './recorder.service.js'
+);
 
 // Build a base64 PCM16 chunk of `n` samples with a constant value.
 function pcmChunk(n: number, value = 1000): string {
@@ -217,5 +223,104 @@ describe('recorder.service', () => {
     expect(hasRecording(sessionId)).toBe(false);
     await finalize(sessionId);
     expect(putObjectMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('a voice session without usable participant audio is flagged (ai-therapist-372)', () => {
+  beforeEach(() => {
+    putObjectMock.mockReset().mockResolvedValue(undefined);
+    ensureBucketMock.mockReset().mockResolvedValue(undefined);
+    setRecordingMock.mockReset().mockResolvedValue(undefined);
+    setParticipantRecordingMock.mockReset().mockResolvedValue(undefined);
+    flagProblemMock.mockReset().mockResolvedValue(true);
+  });
+
+  // Append `seconds` of audio in 4096-sample callbacks at 48 kHz.
+  function feed(sessionId: string, track: 'mixed' | 'participant', seconds: number, value = 1000) {
+    const callbacks = Math.ceil((seconds * 48000) / 4096);
+    for (let i = 0; i < callbacks; i++) appendChunk(sessionId, pcmChunk(4096, value), 48000, track);
+  }
+
+  it('flags the stage case: 0.17 s of participant audio beside a 20 s mix', async () => {
+    const sessionId = `sess-372-short-${Date.now()}`;
+    feed(sessionId, 'mixed', 20);
+    appendChunk(sessionId, pcmChunk(4096), 48000, 'participant');
+    appendChunk(sessionId, pcmChunk(4096), 48000, 'participant');
+
+    await finalize(sessionId);
+
+    expect(flagProblemMock).toHaveBeenCalledOnce();
+    expect(flagProblemMock).toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({ problem: 'short', participantMs: 171 }),
+    );
+    // The track is still stored: a partial track is evidence, not garbage.
+    expect(setParticipantRecordingMock).toHaveBeenCalledWith(sessionId, expect.objectContaining({ status: 'ready' }));
+  });
+
+  it('flags a session with a mix and no participant track at all', async () => {
+    const sessionId = `sess-372-missing-${Date.now()}`;
+    feed(sessionId, 'mixed', 12);
+    await finalize(sessionId);
+    expect(flagProblemMock).toHaveBeenCalledWith(sessionId, expect.objectContaining({ problem: 'missing' }));
+  });
+
+  it('flags a full-length participant track that is digital silence', async () => {
+    const sessionId = `sess-372-silent-${Date.now()}`;
+    feed(sessionId, 'mixed', 12);
+    feed(sessionId, 'participant', 12, 0);
+    await finalize(sessionId);
+    expect(flagProblemMock).toHaveBeenCalledWith(sessionId, expect.objectContaining({ problem: 'silent' }));
+  });
+
+  it('flags a participant track whose upload failed', async () => {
+    const sessionId = `sess-372-failed-${Date.now()}`;
+    feed(sessionId, 'mixed', 12);
+    feed(sessionId, 'participant', 12);
+    putObjectMock.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('minio hiccup'));
+    await finalize(sessionId);
+    expect(flagProblemMock).toHaveBeenCalledWith(sessionId, expect.objectContaining({ problem: 'missing' }));
+  });
+
+  it('does not flag a healthy session', async () => {
+    const sessionId = `sess-372-ok-${Date.now()}`;
+    feed(sessionId, 'mixed', 12);
+    feed(sessionId, 'participant', 12);
+    await finalize(sessionId);
+    expect(flagProblemMock).not.toHaveBeenCalled();
+  });
+
+  it('does not judge a mix too short to compare', async () => {
+    const sessionId = `sess-372-tiny-${Date.now()}`;
+    feed(sessionId, 'mixed', 3);
+    await finalize(sessionId);
+    expect(flagProblemMock).not.toHaveBeenCalled();
+  });
+
+  it('a failing flag write never breaks finalize', async () => {
+    const sessionId = `sess-372-flagfail-${Date.now()}`;
+    feed(sessionId, 'mixed', 12);
+    flagProblemMock.mockRejectedValueOnce(new Error('pool timeout'));
+    await expect(finalize(sessionId)).resolves.toBeUndefined();
+    expect(setRecordingMock).toHaveBeenCalledWith(sessionId, expect.objectContaining({ status: 'ready' }));
+  });
+
+  it('assessParticipantTrack thresholds', () => {
+    const mix = { durationMs: 60_000, rmsDbfs: 0 };
+    expect(assessParticipantTrack(null, null)).toBeNull();
+    expect(assessParticipantTrack({ durationMs: 9_999, rmsDbfs: 0 }, null)).toBeNull();
+    expect(assessParticipantTrack(mix, null)).toBe('missing');
+    expect(assessParticipantTrack(mix, { durationMs: 47_999, rmsDbfs: -30 })).toBe('short');
+    expect(assessParticipantTrack(mix, { durationMs: 48_000, rmsDbfs: -30 })).toBeNull();
+    expect(assessParticipantTrack(mix, { durationMs: 60_000, rmsDbfs: -61 })).toBe('silent');
+  });
+
+  it('pcm16RmsDbfs measures full scale, a quiet signal and digital silence', () => {
+    const full = Buffer.from(new Int16Array(100).fill(-32768).buffer);
+    expect(pcm16RmsDbfs(full)).toBeCloseTo(0, 5);
+    const quiet = Buffer.from(new Int16Array(100).fill(328).buffer); // ~ -40 dBFS
+    expect(pcm16RmsDbfs(quiet)).toBeCloseTo(-40, 0);
+    expect(pcm16RmsDbfs(Buffer.alloc(200))).toBe(-Infinity);
+    expect(pcm16RmsDbfs(Buffer.alloc(0))).toBe(-Infinity);
   });
 });

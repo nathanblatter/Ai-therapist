@@ -3,7 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { createLogger } from '../utils/logger.js';
 import { ensureBucket, putObject, RECORDINGS_BUCKET } from '../config/objectStorage.js';
-import { setSessionRecording, setSessionParticipantRecording } from '../db/recording.queries.js';
+import {
+  setSessionRecording,
+  setSessionParticipantRecording,
+  flagParticipantAudioProblem,
+} from '../db/recording.queries.js';
 
 const log = createLogger('recorder');
 
@@ -118,12 +122,85 @@ export async function finalize(sessionId: string): Promise<void> {
   if (tracks.length === 0) return;
   for (const { track } of tracks) recordings.delete(recKey(sessionId, track));
 
+  const results: Partial<Record<RecordingTrack, StoredTrack | null>> = {};
   for (const { track, rec } of tracks) {
-    await finalizeTrack(sessionId, track, rec);
+    results[track] = await finalizeTrack(sessionId, track, rec);
+  }
+  await checkParticipantTrack(sessionId, results);
+}
+
+/** What finalizeTrack stored for one track; null when nothing was stored. */
+interface StoredTrack {
+  durationMs: number;
+  rmsDbfs: number;
+}
+
+/**
+ * A voice session whose mix is long enough to judge must also have a usable
+ * participant track: prosody research reads participant.wav, so one that is
+ * missing, cut short or silent is a data-quality problem, and it used to be
+ * stored as 'ready' with nothing said (ai-therapist-372: 0.17 s of
+ * participant audio beside a 140 s mix). Both tracks are tapped from the same
+ * audio callback in the browser, so their lengths match unless batches were
+ * lost on the way.
+ */
+export const PARTICIPANT_CHECK_MIN_MIX_MS = 10_000;
+export const PARTICIPANT_MIN_LENGTH_RATIO = 0.8;
+export const PARTICIPANT_SILENT_DBFS = -60;
+
+export type ParticipantAudioProblem = 'missing' | 'short' | 'silent';
+
+export function assessParticipantTrack(
+  mixed: StoredTrack | null | undefined,
+  participant: StoredTrack | null | undefined,
+): ParticipantAudioProblem | null {
+  if (!mixed || mixed.durationMs < PARTICIPANT_CHECK_MIN_MIX_MS) return null;
+  if (!participant) return 'missing';
+  if (participant.durationMs < mixed.durationMs * PARTICIPANT_MIN_LENGTH_RATIO) return 'short';
+  if (participant.rmsDbfs < PARTICIPANT_SILENT_DBFS) return 'silent';
+  return null;
+}
+
+async function checkParticipantTrack(
+  sessionId: string,
+  results: Partial<Record<RecordingTrack, StoredTrack | null>>,
+): Promise<void> {
+  const mixed = results.mixed;
+  const participant = results.participant;
+  const problem = assessParticipantTrack(mixed, participant);
+  if (!problem || !mixed) return;
+  const details = {
+    problem,
+    mixedMs: mixed.durationMs,
+    participantMs: participant?.durationMs ?? 0,
+    participantRmsDbfs: participant ? Math.round(participant.rmsDbfs * 10) / 10 : null,
+  };
+  log.warn(details, `[rec] ${sessionId} ended without usable participant audio (${problem})`);
+  try {
+    await flagParticipantAudioProblem(sessionId, details);
+  } catch (err) {
+    log.error({ err }, `[rec] could not flag the participant-audio problem for ${sessionId}`);
   }
 }
 
-async function finalizeTrack(sessionId: string, track: RecordingTrack, rec: ActiveRecording): Promise<void> {
+/** Whole-signal RMS of little-endian PCM16, in dBFS (-Infinity for digital silence). */
+export function pcm16RmsDbfs(pcm: Buffer): number {
+  const samples = Math.floor(pcm.length / 2);
+  if (samples === 0) return -Infinity;
+  let sumSquares = 0;
+  for (let i = 0; i < samples; i++) {
+    const v = pcm.readInt16LE(i * 2) / 32768;
+    sumSquares += v * v;
+  }
+  const rms = Math.sqrt(sumSquares / samples);
+  return rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+}
+
+async function finalizeTrack(
+  sessionId: string,
+  track: RecordingTrack,
+  rec: ActiveRecording,
+): Promise<StoredTrack | null> {
   const persist = track === 'mixed' ? setSessionRecording : setSessionParticipantRecording;
   const objectName = track === 'mixed' ? 'recording.wav' : 'participant.wav';
   try {
@@ -134,7 +211,7 @@ async function finalizeTrack(sessionId: string, track: RecordingTrack, rec: Acti
     if (rec.byteLength === 0) {
       log.info(`[rec] ${sessionId} ${track} had no audio; skipping upload`);
       void cleanupTemp(rec.filePath);
-      return;
+      return null;
     }
 
     const pcm = await fs.promises.readFile(rec.filePath);
@@ -166,6 +243,7 @@ async function finalizeTrack(sessionId: string, track: RecordingTrack, rec: Acti
       `[rec] uploaded ${sessionId} ${track} → ${RECORDINGS_BUCKET}/${key} ` +
         `(${(wav.length / 1024 / 1024).toFixed(1)}MB, ${(durationMs / 1000).toFixed(0)}s)`,
     );
+    return { durationMs, rmsDbfs: track === 'participant' ? pcm16RmsDbfs(pcm) : 0 };
   } catch (err) {
     log.error({ err }, `[rec] failed to finalize ${track} recording for ${sessionId}`);
     try {
@@ -173,6 +251,7 @@ async function finalizeTrack(sessionId: string, track: RecordingTrack, rec: Acti
     } catch {
       /* swallow — best effort */
     }
+    return null;
   } finally {
     void cleanupTemp(rec.filePath);
   }
