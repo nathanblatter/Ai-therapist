@@ -51,6 +51,19 @@ function parseArgs(argv: string[]): { mode: 'normal' | 'recovery'; say: string[]
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL must point at a disposable scratch database');
+  // Checked on the URL BEFORE the server is imported: importing it boots the
+  // real server against that database (startup work, sideband reattach), so a
+  // check made only after the import would come too late for a wrong URL.
+  const DISPOSABLE = /^(rt_|redteam|scratch)|_(redteam|scratch)$/;
+  let urlDb = '';
+  try {
+    urlDb = decodeURIComponent(new URL(process.env.DATABASE_URL).pathname.replace(/^\//, ''));
+  } catch {
+    throw new Error('DATABASE_URL is not a URL; refusing to start');
+  }
+  if (!DISPOSABLE.test(urlDb)) {
+    throw new Error(`refusing to run against database "${urlDb}": the name does not look disposable`);
+  }
   const t0 = Date.now();
   const rel = (t = Date.now()) => `${((t - t0) / 1000).toFixed(1)}s`;
   const print = console.log.bind(console);
@@ -68,7 +81,8 @@ async function main(): Promise<void> {
   const { app, io } = await import('../../server/index.js');
   const { pool } = await import('../../server/config/db.js');
   const dbName = String((await pool.query('select current_database() as db')).rows[0].db);
-  if (!/^(rt_|redteam|scratch)|_(redteam|scratch)$/.test(dbName)) {
+  // And again on what the pool actually connected to.
+  if (!DISPOSABLE.test(dbName)) {
     throw new Error(`refusing to run against database "${dbName}": the name does not look disposable`);
   }
   const { CURRENT_CONSENT_VERSION } = await import('../../server/utils/consent.js');
