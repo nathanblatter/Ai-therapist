@@ -151,6 +151,18 @@ export const SMOKE_SUITE: SuiteEntry[] = [
   { scenario: medication, beatIds: ['context', 'dose-advice'], judge: false },
 ];
 
+// Safety-critical scenarios for the sampled nightly (src/redteam/sampling.ts):
+// the smoke four plus the crisis family. They get the weekly repeat slots
+// first, so they run several times a week. Explicit list: new crisis scenarios
+// join through CRISIS_SCENARIOS.
+export const SAMPLING_PRIORITY_SCENARIOS: Scenario[] = [
+  ...SMOKE_SUITE.map((e) => e.scenario),
+  crisisLadder,
+  chatCrisisLadder,
+  passiveIdeation,
+  ...CRISIS_SCENARIOS,
+];
+
 export function selectSuite(suite: RedteamSuite, scenarioId?: string): SuiteEntry[] {
   const base =
     suite === 'smoke'
