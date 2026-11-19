@@ -137,7 +137,9 @@ const Header = ({
   return (
     <header
       className={`bg-navy text-white font-sans transition-all duration-200 ${
-        isCollapsed ? 'py-1.5 px-3' : 'p-3 md:p-6 [@media(max-height:500px)]:py-1.5'
+        isCollapsed
+          ? 'py-1.5 px-3 pt-[max(0.375rem,env(safe-area-inset-top))]'
+          : 'p-3 pt-[max(0.75rem,env(safe-area-inset-top))] md:p-6 [@media(max-height:500px)]:py-1.5'
       }`}
       role="banner"
     >
@@ -146,7 +148,7 @@ const Header = ({
             The choice is persisted to localStorage so it sticks across sessions. */}
         <button
           onClick={toggleCollapsed}
-          className="absolute right-0 top-0 bg-royal hover:bg-blue-700 rounded-full p-1.5 min-h-[36px] min-w-[36px] flex items-center justify-center z-10"
+          className="absolute right-0 top-0 bg-royal hover:bg-blue-700 rounded-full p-1.5 min-h-[44px] min-w-[44px] flex items-center justify-center z-10"
           aria-label={isCollapsed ? 'Expand header' : 'Collapse header'}
           aria-expanded={!isCollapsed}
           title={isCollapsed ? 'Expand header' : 'Collapse header'}
@@ -156,7 +158,7 @@ const Header = ({
 
         {isCollapsed ? (
           /* Slim collapsed bar: title + live timer + Call 988 stay reachable. */
-          <div className="flex items-center gap-3 pr-10">
+          <div className="flex items-center gap-3 pr-12">
             <h1 className="text-base font-bold whitespace-nowrap">AI Therapist Assistant</h1>
             {timeRemaining !== null && (
               <span
@@ -170,7 +172,7 @@ const Header = ({
             )}
             <a
               href="tel:988"
-              className="ml-auto bg-royal hover:bg-red-700 px-3 py-1 rounded-full text-xs font-semibold flex items-center justify-center min-h-[36px]"
+              className="ml-auto bg-royal hover:bg-red-700 px-3 py-1 rounded-full text-xs font-semibold flex items-center justify-center min-h-[44px]"
               aria-label="Call the 988 Suicide & Crisis Lifeline at 988"
             >
               Call 988
@@ -183,7 +185,7 @@ const Header = ({
             </h1>
             {username && (
               <p
-                className="text-center text-lg text-lightBlue mt-2 [@media(max-height:500px)]:hidden"
+                className="text-center text-base sm:text-lg text-lightBlue mt-1 sm:mt-2 [@media(max-height:500px)]:hidden"
                 aria-label={`Logged in as ${username}`}
               >
                 Welcome, {capitalizeFirst(username)}
@@ -192,13 +194,13 @@ const Header = ({
             {/* Show Session ID if it exists */}
             {sessionId && (
               <p
-                className="text-center text-lg text-gray-300 mt-1 flex justify-center items-center gap-2"
+                className="text-center text-sm sm:text-lg text-gray-300 mt-1 flex justify-center items-center gap-2"
                 role="status"
                 aria-label="Active session"
               >
                 <span>Session ID:</span>
                 <code
-                  className="bg-royal px-2 py-1 rounded font-bold text-white"
+                  className="bg-royal px-2 py-0.5 sm:py-1 rounded font-bold text-white"
                   title="Session ID (Copy this value into the form)"
                   aria-label={`Session ID: ${sessionId}`}
                 >
@@ -210,8 +212,8 @@ const Header = ({
 
             {/* Show Session Timer if active */}
             {timeRemaining !== null && (
-              <div className="text-center mt-2" role="timer" aria-label="Session time remaining">
-                <p className={`text-2xl font-mono ${getTimerColor(timeRemaining)}`} aria-live="polite">
+              <div className="text-center mt-1 sm:mt-2" role="timer" aria-label="Session time remaining">
+                <p className={`text-lg sm:text-2xl font-mono ${getTimerColor(timeRemaining)}`} aria-live="polite">
                   Time Remaining: {formatTimeRemaining(timeRemaining)}
                 </p>
                 {timeRemaining <= 60000 && (
@@ -224,7 +226,7 @@ const Header = ({
             <p className="mt-2 text-xs sm:text-sm md:text-base leading-relaxed [@media(max-height:500px)]:hidden">
               If you experience emotional distress, crisis, or worsening mental health symptoms at any point during your
               session please reach out immediately to the 988 Suicide & Crisis Lifeline at
-              <a href="tel:988" className="text-blue-300 underline ml-1" title="988 Suicide & Crisis Lifeline">
+              <a href="tel:988" className="text-blue-300 underline ml-1 py-3" title="988 Suicide & Crisis Lifeline">
                 988
               </a>{' '}
               or visit
@@ -232,7 +234,7 @@ const Header = ({
                 href="https://988lifeline.org"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-blue-300 underline ml-1"
+                className="text-blue-300 underline ml-1 py-3"
                 title="988 Suicide & Crisis Lifeline website"
               >
                 988lifeline.org
