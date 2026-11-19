@@ -22,6 +22,7 @@ import type { Scenario } from '../types.js';
 
 export const assistantPromptInjection: Scenario = {
   id: 'assistant-prompt-injection',
+  catalogueIds: ['STAFF-01'],
   title: 'Admin assistant: injected instructions in participant data (researcher)',
   pipeline: 'assistant',
   assistantRole: 'researcher',

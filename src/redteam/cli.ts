@@ -94,6 +94,7 @@ import {
   type RollingBaseline,
 } from './rollingBaseline.js';
 import { applyKnownGap, reportKnownGaps } from './knownGap.js';
+import { runMultiSessionScenario, withoutMultiSession } from './multiSession.js';
 import {
   buildGeneratedVariants,
   clampVariantCount,
@@ -356,7 +357,7 @@ async function runChatScenario(
   // Always a brand-new session, and always ended, even when a turn throws
   // (ai-therapist-307): every chat scenario is the same participant, so a
   // session left open would carry its risk history into the next scenario.
-  const { sessionId, opening } = await client.startFreshChat(agent);
+  const { sessionId, opening } = await client.startFreshChat(agent, { checkin: scenario.checkin });
   const transcript: Turn[] = [];
   sessionTranscripts.set(sessionId, transcript);
   // The server-authored opening is the first assistant turn the participant
@@ -588,6 +589,7 @@ async function runAssistantScenario(
 
   const startedAt = new Date();
   await ensureAssistantFixtures(pool);
+  if (scenario.setup) await scenario.setup(pool);
   const canaries = assistantPromptCanaries();
   const defaultRole: AssistantRole = scenario.assistantRole ?? 'researcher';
   const sessions = new Map<AssistantRole, StaffSession>();
@@ -599,7 +601,8 @@ async function runAssistantScenario(
     const existing = sessions.get(role);
     if (existing) return existing;
     const agent = client.newAgent();
-    const userId = await client.loginStaff(agent, ASSISTANT_STAFF[role], ASSISTANT_STAFF_PASSWORD);
+    const username = scenario.assistantStaff?.[role] ?? ASSISTANT_STAFF[role];
+    const userId = await client.loginStaff(agent, username, ASSISTANT_STAFF_PASSWORD);
     const s: StaffSession = { agent, userId, history: [] };
     sessions.set(role, s);
     callers.push({ role, userId });
@@ -738,8 +741,15 @@ async function runEntry(
     // Voice needs a live OpenAI client (persona TTS) and a real voice backend;
     // in dry-run it falls back to the realtime-text flow so the offline
     // pipeline completes.
-    const runner =
-      scenario.pipeline === 'chat'
+    const runner: typeof runChatScenario = scenario.sessions
+      ? // Two or more sessions for the same participant (multiSession.ts).
+        (sc, _beats, _judge, cl, oa, c, co, can, po, cls) =>
+          runMultiSessionScenario(sc, cl, oa, c, co, po, cls, {
+            runAssertions,
+            noteTranscript: (id, t) => sessionTranscripts.set(id, t),
+            canaries: can,
+          })
+      : scenario.pipeline === 'chat'
         ? runChatScenario
         : scenario.pipeline === 'assistant'
           ? runAssistantScenario
@@ -888,7 +898,13 @@ async function main(): Promise<void> {
     console.error(`[redteam] ${(err as Error).message}`);
     process.exit(2);
   }
-  let entries = selectSuite(cfg.suite, cfg.scenarioId);
+  const selected = withoutMultiSession(selectSuite(cfg.suite, cfg.scenarioId), process.env.REDTEAM_TRIGGER);
+  let entries = selected.kept;
+  if (selected.skipped.length)
+    console.warn(
+      `[redteam] not run here: ${selected.skipped.join(', ')} (multi-session scenarios create accounts and age their ` +
+        'rows, so they need a disposable database; this run was started by the in-app runner)',
+    );
   if (entries.length === 0) {
     console.error(`No scenarios matched (suite=${cfg.suite}, scenario=${cfg.scenarioId ?? 'all'})`);
     process.exit(2);

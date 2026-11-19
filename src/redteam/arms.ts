@@ -42,6 +42,38 @@ export async function clearProactiveArm(): Promise<void> {
   setFeatureOverrides(await variantFeatures());
 }
 
+/** Pin feature flags (and optionally the psychoeducation-cue arm) for one
+ *  scenario, on top of the run's variant flags, in this process only. Used by
+ *  the ARM-03/05/06 scenarios: ab_test mode, lead-conversation on, and either
+ *  psychoeducation-cue arm. Nothing is written to system_config. */
+export function featureHooks(
+  features: Record<string, unknown>,
+  opts: { psychoeducationCueArm?: boolean } = {},
+): {
+  setup: (pool: DbLike) => Promise<void>;
+  teardown: (pool: DbLike) => Promise<void>;
+} {
+  return {
+    setup: async () => {
+      const { setFeatureOverrides, setPsychoeducationCueArmOverride } = await import(
+        '../server/utils/sessionHelpers.js'
+      );
+      setFeatureOverrides({ ...(await variantFeatures()), ...features });
+      if (opts.psychoeducationCueArm !== undefined) setPsychoeducationCueArmOverride(opts.psychoeducationCueArm);
+    },
+    teardown: async () => {
+      const { setFeatureOverrides, setPsychoeducationCueArmOverride } = await import(
+        '../server/utils/sessionHelpers.js'
+      );
+      const { getVariant } = await import('./variants.js');
+      setFeatureOverrides(await variantFeatures());
+      if (opts.psychoeducationCueArm !== undefined) {
+        setPsychoeducationCueArmOverride(getVariant(runVariantName()).psychoeducationCueArm ?? null);
+      }
+    },
+  };
+}
+
 /** Scenario setup/teardown pair for an arm scenario. */
 export function armHooks(arm: ProactiveArm): {
   setup: (pool: DbLike) => Promise<void>;

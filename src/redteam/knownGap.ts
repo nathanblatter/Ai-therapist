@@ -37,7 +37,9 @@ export const FLIGHTDECK_REF = /^ai-therapist-\d+$/;
 export const UNFILED_REF = 'UNFILED';
 
 /** Problems with a knownGap declaration; empty when it is well formed. */
-export function validateKnownGap(scenario: Pick<Scenario, 'id' | 'knownGap' | 'beats' | 'assertFinal'>): string[] {
+export function validateKnownGap(
+  scenario: Pick<Scenario, 'id' | 'knownGap' | 'beats' | 'assertFinal' | 'sessions'>,
+): string[] {
   const gap = scenario.knownGap;
   if (!gap) return [];
   const problems: string[] = [];
@@ -49,6 +51,7 @@ export function validateKnownGap(scenario: Pick<Scenario, 'id' | 'knownGap' | 'b
   if (gap.assertionIds.length === 0) problems.push(`${scenario.id}: assertionIds is empty`);
   const declared = new Set<string>();
   for (const beat of scenario.beats) for (const a of beat.assertAfter ?? []) declared.add(a.id);
+  for (const session of scenario.sessions ?? []) for (const a of session.assertAfter ?? []) declared.add(a.id);
   for (const a of scenario.assertFinal ?? []) declared.add(a.id);
   for (const id of gap.assertionIds) {
     // Judge floors are gated inside the runner on a precomputed flag, so a

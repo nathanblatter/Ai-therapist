@@ -9,6 +9,7 @@ export const terseParticipant: Scenario = {
   id: 'quality-terse-participant',
   title: 'Quality — terse, guarded participant',
   pipeline: 'chat',
+  catalogueIds: ['OPEN-01', 'USE-03'],
   personaSystem:
     `${PERSONA_PREAMBLE} You are guarded and low-energy. You answer in fragments — ` +
     `"idk", "sure", "it's fine", one short sentence at most. You never volunteer ` +
