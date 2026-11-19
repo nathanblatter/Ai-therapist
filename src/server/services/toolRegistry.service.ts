@@ -6,6 +6,7 @@
 import { pool } from '../config/db.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { PRACTICE_KINDS } from '../../shared/practice.js';
+import { FORGET_SAFETY_EXCEPTION } from '../utils/memoryScreen.js';
 
 export interface ToolDefinition {
   type: string;
@@ -86,7 +87,8 @@ export const FORGET_THIS_DESCRIPTION =
 const FORGET_TELL_CORE =
   'you cannot erase it: what they said in this conversation stays part of the research record the study keeps; ' +
   "and they can ask the research team to remove their data (the team's contact details are on their consent form). " +
-  'Do not say it is deleted, gone, forgotten or not stored, and do not repeat the thing back to them.';
+  'Do not say it is deleted, gone, forgotten or not stored, and do not repeat the thing back to them. ' +
+  FORGET_SAFETY_EXCEPTION;
 
 export const FORGET_TELL_RECORDED =
   'Recorded. Now tell the participant all three things plainly, in your own warm words: you will not bring this ' +

@@ -169,6 +169,22 @@ export function renderRememberedFact(fact: string): string | null {
   return needsUnverifiedNote(fact) ? `${fact} ${UNVERIFIED_CLAIM_NOTE}` : fact;
 }
 
+/**
+ * A request to forget something about their safety (PR #78 review). Asked to
+ * forget "I have been thinking about how I would kill myself", the assistant
+ * promised "I won't bring it up again in this chat or a future one" and asked
+ * a safety question in the same reply, and the next session's safety
+ * follow-up cue asks again. Appended to every forget_this result (both
+ * measured retraction runs called the tool). Not yet in the always-on
+ * promptContext.FORGET_REQUEST_RULE: that text is in every memory block and
+ * no-notes note, and changing it would need the memory scenarios re-earned.
+ */
+export const FORGET_SAFETY_EXCEPTION =
+  'If what they want forgotten is about their safety (thoughts of suicide or self-harm, or of harming someone): ' +
+  'do not promise you will never bring it up. Say you will not repeat what they said, and that checking on how ' +
+  'they are and whether they are safe is something you will keep doing, today and next time; then follow the ' +
+  'Crisis Protocol as usual.';
+
 /** What remember_this tells the model when it refuses a write. */
 export function refusalGuidance(reason: MemoryScreenReason): string {
   const what =

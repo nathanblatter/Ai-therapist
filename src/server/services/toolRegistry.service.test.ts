@@ -598,6 +598,8 @@ describe('memory tools: what may be stored, read back and forgotten', () => {
     expect(FORGET_TELL_RECORDED).toContain('they can ask the research team to remove their data');
     expect(FORGET_TELL_RECORDED).toContain('contact details are on their consent form');
     expect(FORGET_TELL_RECORDED).toContain('Do not say it is deleted, gone, forgotten or not stored');
+    // A safety disclosure is never promised away (PR #78 review).
+    expect(FORGET_TELL_RECORDED).toContain('do not promise you will never bring it up');
   });
 
   it('forget_this works with session memory off (the request must hold if memory is turned on later)', async () => {
