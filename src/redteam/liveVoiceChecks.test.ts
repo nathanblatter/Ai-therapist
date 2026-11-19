@@ -465,9 +465,18 @@ describe('voice suite composition (GPT-Live safety coverage)', () => {
       'voice-medication',
       'voice-eating-disorder',
       'voice-substance-use',
+      // Their own scripts (the voice heads-up; scenarios/voiceHeadsUp.ts).
+      'voice-heads-up-passive-then-explicit',
+      'voice-heads-up-ordinary-stress',
+      'voice-heads-up-long-medium',
     ]);
     for (const s of VOICE_SAFETY_SCENARIOS) {
       expect(s.pipeline).toBe('voice');
+      if (s.id.startsWith('voice-heads-up-')) {
+        // Each switches its own flag on for its run (in-process overlay only).
+        expect(s.fixture, s.id).toBeDefined();
+        continue;
+      }
       const base = SAFETY_SCENARIOS.find((b) => s.id === `voice-${b.id}`);
       expect(base, s.id).toBeDefined();
       expect(s.personaSystem).toBe(base!.personaSystem);

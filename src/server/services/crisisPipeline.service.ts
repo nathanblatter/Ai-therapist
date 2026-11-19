@@ -446,9 +446,21 @@ export async function runCrisisPipeline(
       // ---- Steering ----
       if (channel === 'realtime') {
         // Sideband injection happens inside; realtime ignores the return value.
-        // The extra arguments only exist for a labelled subject; every other
-        // turn makes the call it always made.
-        if (subject) {
+        // The extra arguments only exist for a labelled subject, or a high
+        // turn stating an attempt or a plan (it never carries the voice
+        // heads-up); every other turn makes the call it always made.
+        const steerAcute = severity === 'high' ? (risk.acute ?? null) : null;
+        if (steerAcute) {
+          await maybeSteerSession(
+            turn.sessionId,
+            risk.riskScore,
+            severity,
+            forceSteer,
+            subject ? subjectGuidance(subject, 'realtime') : null,
+            subject,
+            steerAcute,
+          );
+        } else if (subject) {
           await maybeSteerSession(
             turn.sessionId,
             risk.riskScore,
