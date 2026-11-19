@@ -78,6 +78,19 @@ describe('the wording', () => {
     expect(hu.VOICE_HEADS_UP_GUIDANCE).toMatch(/not a warning or disclaimer/);
     expect(hu.VOICE_HEADS_UP_GUIDANCE).toMatch(/before you ask anything about their safety/);
   });
+
+  it('never ahead of emergency help: after an attempt or with harm imminent, the emergency comes first', () => {
+    // The base prompt: "If they say they have already hurt themselves or
+    // taken something, emergency help comes first ... Open your reply with
+    // it, before any question." "Early in this reply" must not override that
+    // (a request can also be answered a reply late, on the attempt turn).
+    expect(hu.VOICE_HEADS_UP_GUIDANCE).toMatch(
+      /If they have hurt themselves, taken something or are about to act, emergency help comes first, then this\.$/,
+    );
+    // "Do not add anything about ... calls" is about this sentence only, not
+    // the reply (which may need "call 911").
+    expect(hu.VOICE_HEADS_UP_GUIDANCE).toContain('Do not add anything to it about other people, calls');
+  });
 });
 
 describe('headsUpSpokenIn', () => {
@@ -165,6 +178,21 @@ describe('voiceHeadsUpEnabled (the off switch)', () => {
     expect(await hu.voiceHeadsUpEnabled()).toBe(false);
   });
 
+  it('is off, within its bound, when the config read hangs', async () => {
+    vi.useFakeTimers();
+    try {
+      getSystemConfigMock.mockImplementation(() => new Promise(() => undefined));
+      let answer: boolean | undefined;
+      void hu.voiceHeadsUpEnabled().then((v) => (answer = v));
+      await vi.advanceTimersByTimeAsync(hu.SWITCH_DEADLINE_MS - 1);
+      expect(answer).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(answer).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('is on with the key true and typed chat on', async () => {
     expect(await hu.voiceHeadsUpEnabled()).toBe(true);
   });
@@ -216,6 +244,42 @@ describe('voiceHeadsUpDue and the once-only latch', () => {
     expect(await hu.voiceHeadsUpDue(S, 'high', true)).toBe(true);
     mark();
     for (let i = 0; i < hu.VOICE_HEADS_UP_MISSED_TURNS; i++) hu.noteVoiceHeadsUpSpeech(S, 'I hear you.', true);
+    expect(await hu.voiceHeadsUpDue(S, 'high', true)).toBe(false);
+  });
+
+  it('the measured double-say: a line cut off mid-reply latches as it is spoken, so no repeat is asked for', async () => {
+    // The sequence seen live: request 1; the line starts in a later reply;
+    // a repeat request arrived while it was being said, interrupted it, and
+    // the model said it again. The sideband feeds every assistant fragment
+    // (pendingText of the open turn, final = false) and every closed turn
+    // (final = true). Replayed here through the same calls.
+    const { TranscriptAssembler } = await import('./sidebandManager.service.js');
+    await hu.voiceHeadsUpDue(S, 'medium', true);
+    mark();
+    // Two finished replies without the line.
+    hu.noteVoiceHeadsUpSpeech(S, 'That sounds so heavy.', true);
+    hu.noteVoiceHeadsUpSpeech(S, 'I hear you.', true);
+    // The third reply, fragment by fragment, cut before "in writing".
+    const turn = new TranscriptAssembler(60_000, () => undefined);
+    const fragments = ['I hear you. ', 'And if the voice part ', 'of this drops, ', "I'm not gone. ", "I'll be"];
+    fragments.forEach((delta, i) => {
+      turn.add({ delta, start_ms: i * 100, end_ms: i * 100 + 90 });
+      hu.noteVoiceHeadsUpSpeech(S, turn.pendingText(), false);
+    });
+    turn.flush();
+    expect(hu.voiceHeadsUpSpoken(S)).toBe(true);
+    // The next risky turn (which used to bring the repeat) asks for nothing.
+    expect(await hu.voiceHeadsUpDue(S, 'high', true)).toBe(false);
+  });
+
+  it('fragments of an open reply are not finished turns: a long reply never makes a request "missed"', async () => {
+    await hu.voiceHeadsUpDue(S, 'medium', true);
+    mark();
+    let text = '';
+    for (let i = 0; i < 20; i++) {
+      text += 'and that sounds so hard, ';
+      hu.noteVoiceHeadsUpSpeech(S, text, false);
+    }
     expect(await hu.voiceHeadsUpDue(S, 'high', true)).toBe(false);
   });
 

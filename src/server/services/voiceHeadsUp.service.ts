@@ -29,6 +29,7 @@
 //   describes exists only then.
 import { pool } from '../config/db.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
+import { readWithin } from '../utils/readDeadline.js';
 
 /** The `system_config.features` key. Absent or anything but `true` is off. */
 export const VOICE_HEADS_UP_FEATURE = 'voice_heads_up_enabled';
@@ -44,8 +45,9 @@ export const VOICE_HEADS_UP_GUIDANCE =
   'such as: "' +
   VOICE_HEADS_UP_EXAMPLE +
   '" Say it as calm reassurance, not a warning or disclaimer, then carry on with the rest of your reply, ' +
-  'including your question about their safety if you were going to ask one. Do not add anything about other ' +
-  'people, calls, or help arriving.';
+  'including your question about their safety if you were going to ask one. Do not add anything to it about other ' +
+  'people, calls or help arriving. If they have hurt themselves, taken something or are about to act, emergency ' +
+  'help comes first, then this.';
 
 /** The same guidance as a clinical steer of its own, when no risk steer goes out on this turn. */
 export const VOICE_HEADS_UP_STEER =
@@ -64,6 +66,8 @@ export const HEADS_UP_TRIGGER_REQUESTED = 'voice_heads_up';
 export const HEADS_UP_TRIGGER_SPOKEN = 'voice_heads_up_spoken';
 /** The durable lookup after a restart must not hold a crisis steer back. */
 const HYDRATE_DEADLINE_MS = 300;
+/** The switch read, for the same reason (voiceHeadsUpEnabled). */
+export const SWITCH_DEADLINE_MS = 300;
 
 export interface HeadsUpState {
   requests: number;
@@ -99,11 +103,28 @@ export function clearVoiceHeadsUp(sessionId: string): void {
   states.delete(sessionId);
 }
 
-/** Is the switch on, and is the text hand-off (typed chat) there to describe? Never throws. */
+/**
+ * Is the switch on, and is the text hand-off (typed chat) there to describe? Never throws.
+ *
+ * Bounded: this read sits in front of every medium or high voice steer, with
+ * the switch on or off. The config is cached, so it is normally answered from
+ * memory; on a cache miss with a slow database an unbounded read held the
+ * risk steer (and everything the pipeline does after it) back by the pool's
+ * own limit, 3 s or 10 s, with the feature switched off. Past the bound the
+ * switch counts as off.
+ */
 export async function voiceHeadsUpEnabled(): Promise<boolean> {
   try {
     const { getSystemConfig } = await import('../utils/sessionHelpers.js');
-    const features = ((await getSystemConfig()).features ?? {}) as Record<string, unknown>;
+    const config = await readWithin(
+      getSystemConfig().catch(() => null),
+      null,
+      'voice heads-up switch',
+      undefined,
+      SWITCH_DEADLINE_MS,
+    );
+    if (!config) return false;
+    const features = (config.features ?? {}) as Record<string, unknown>;
     return features[VOICE_HEADS_UP_FEATURE] === true && features.chat_enabled !== false;
   } catch {
     return false;

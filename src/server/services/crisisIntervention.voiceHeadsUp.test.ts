@@ -66,6 +66,68 @@ describe('maybeSteerSession with the voice heads-up', () => {
     expect(sidebandManagerMock.headsUpEligible).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['false', { features: { voice_heads_up_enabled: false, chat_enabled: true } }],
+    ['the string "true"', { features: { voice_heads_up_enabled: 'true' } }],
+    ['1', { features: { voice_heads_up_enabled: 1 } }],
+    ['features not an object', { features: 'voice_heads_up_enabled' }],
+    ['features null', { features: null }],
+    ['no features row', {}],
+  ])('switch %s: medium and high steers, rows and texts exactly as before', async (_name, config) => {
+    getSystemConfigMock.mockResolvedValue(config as Record<string, unknown>);
+    const s = fresh();
+    await ci.maybeSteerSession(s, 55, 'medium');
+    const h = fresh();
+    await ci.maybeSteerSession(h, 90, 'high');
+    expect(injected()).toEqual([ci.steeringGuidance(55, 'medium'), ci.steeringGuidance(90, 'high')]);
+    expect(sidebandManagerMock.tryInject).not.toHaveBeenCalled();
+    expect(logInterventionActionMock.mock.calls).toEqual([
+      [s, 'risk_steering', { riskScore: 55, severity: 'medium', delivered: true }],
+      [h, 'risk_steering', { riskScore: 90, severity: 'high', delivered: true }],
+    ]);
+    expect(poolQueryMock).not.toHaveBeenCalled();
+    expect(hu.voiceHeadsUpPending(s) || hu.voiceHeadsUpPending(h)).toBe(false);
+  });
+
+  it('config read failing: the steer is exactly as before', async () => {
+    getSystemConfigMock.mockRejectedValue(new Error('db down'));
+    const s = fresh();
+    await ci.maybeSteerSession(s, 55, 'medium');
+    expect(injected()).toEqual([ci.steeringGuidance(55, 'medium')]);
+    expect(sidebandManagerMock.tryInject).not.toHaveBeenCalled();
+  });
+
+  it('config read hanging (slow database, cold cache): the steer waits at most the switch bound', async () => {
+    vi.useFakeTimers();
+    try {
+      getSystemConfigMock.mockImplementation(() => new Promise(() => undefined));
+      const s = fresh();
+      const steering = ci.maybeSteerSession(s, 55, 'medium');
+      await vi.advanceTimersByTimeAsync(hu.SWITCH_DEADLINE_MS - 1);
+      expect(injected()).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      await steering;
+      expect(injected()).toEqual([ci.steeringGuidance(55, 'medium')]);
+      expect(sidebandManagerMock.tryInject).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['attempt', 'plan_or_time'] as const)(
+    'a high turn stating %s never carries it, even as the first risky turn (emergency help opens that reply)',
+    async (acute) => {
+      const s = fresh();
+      await ci.maybeSteerSession(s, 95, 'high', true, null, null, acute);
+      expect(injected()).toEqual([ci.steeringGuidance(95, 'high')]);
+      expect(sidebandManagerMock.tryInject).not.toHaveBeenCalled();
+      expect(hu.voiceHeadsUpPending(s)).toBe(false);
+      // A later turn without that observation may still carry it.
+      await ci.maybeSteerSession(s, 80, 'high');
+      expect(alone()).toHaveLength(1);
+    },
+  );
+
   it('first medium turn: attached to the risk steer, recorded on its row', async () => {
     const s = fresh();
     await ci.maybeSteerSession(s, 55, 'medium');

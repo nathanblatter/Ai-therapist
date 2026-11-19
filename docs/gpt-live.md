@@ -588,7 +588,13 @@ harness process only (the in-process feature overlay, nothing written to
 pipeline scores **medium**, or the first scored **high** while the call is
 still connected, on an ordinary GPT-Live session (Responses delegation, the
 sideband attached and open: `sidebandManager.headsUpEligible`). Never on a
-recovery voice session, never on Grok, never on low or none. The server
+recovery voice session, never on Grok, never on low or none, and never on a
+high turn the assessor observed as stating an attempt or a time or plan
+(`acute`): emergency help opens that reply, and the sentence must not come
+before it (a later turn without that observation may still carry it, and the
+wording itself says emergency help comes first). The switch read is bounded
+at 300 ms, so with the switch off a cold config cache on a slow database
+cannot hold the risk steer back. The server
 decides when; the model phrases it. It uses the existing steer, no new
 channel: the sentence is appended to that turn's risk steer
 (`risk_steering` row gets `voiceHeadsUp: 'attached'`); when no risk steer goes
@@ -628,13 +634,18 @@ chat.
 > voice part of this drops, I'm not gone. I'll be right there in writing on your
 > screen." Say it as calm reassurance, not a warning or disclaimer, then carry
 > on with the rest of your reply, including your question about their safety if
-> you were going to ask one. Do not add anything about other people, calls, or
-> help arriving.
+> you were going to ask one. Do not add anything to it about other people,
+> calls or help arriving. If they have hurt themselves, taken something or are
+> about to act, emergency help comes first, then this.
 
 It promises nothing about people: an on-call researcher is alerted for high
 flags, with no guaranteed response time, so "help is on the way" or
 "someone will contact you" would be false (unit-tested against a list of
 such phrases, and `voice-heads-up-no-false-promise` checks what was said).
+
+The last sentence and the "to it" were added in the PR #97 review (not
+measured live): the measured wording put the line "right after a few warm
+words", which on a turn reporting an attempt would come before "call 911".
 
 **Measured** (2026-11-19, `gpt-live-1` / `gpt-5.6-terra`, local scratch DB,
 real sessions through the harness; `docs/redteam.md` has the scenarios):

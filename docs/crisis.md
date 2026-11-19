@@ -911,8 +911,9 @@ Since 2026-11-19 the participant can be told beforehand that this may happen,
 behind a switch that is **off by default**
 (`system_config.features.voice_heads_up_enabled`): at the first medium-risk
 turn of a GPT-Live session (or the first high one while the call is still
-up), the risk steer asks the voice model to say once, early in its reply and
-before the safety question, that if the voice part drops it is not gone and
+up, and not on a turn stating an attempt or a plan), the risk steer asks the
+voice model to say once, early in its reply and before the safety question
+(after emergency help when they have hurt themselves or are about to act), that if the voice part drops it is not gone and
 the conversation continues in writing on the screen. The server sets a
 once-only latch when the line appears in the assistant's transcript
 (`risk_steering` rows with `voiceHeadsUp` / `trigger: 'voice_heads_up'` for

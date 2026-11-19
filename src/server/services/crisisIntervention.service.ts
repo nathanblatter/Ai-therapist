@@ -1,5 +1,5 @@
 import { pool } from '../config/db.js';
-import { logInterventionAction, type CrisisSubject } from './crisisDetection.service.js';
+import { logInterventionAction, type AcuteStage, type CrisisSubject } from './crisisDetection.service.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { trackBackground } from '../utils/backgroundWork.js';
 import { emitCrisisResources, clearCrisisResourceState } from './crisisResources.js';
@@ -522,6 +522,11 @@ export async function maybeSteerSession(
   guidanceOverride: string | null = null,
   /** Recorded on the steering row when an override is used. */
   subject: CrisisSubject | null = null,
+  /** The assessor's observation that this turn states an attempt, or a
+   *  time or plan (high turns only). Such a turn never carries the voice
+   *  heads-up: emergency help opens that reply (base prompt), and a sentence
+   *  about the voice dropping must not come before it. */
+  acute: Exclude<AcuteStage, 'none'> | null = null,
 ): Promise<void> {
   try {
     if (riskScore < STEER_MIN_SCORE) return;
@@ -569,8 +574,9 @@ export async function maybeSteerSession(
     }
 
     // The voice heads-up (voiceHeadsUp.service): at the first medium or high
-    // turn, once per session, behind a switch that is off by default.
-    const headsUp = await voiceHeadsUpFor(sessionId, severity, sidebandManager);
+    // turn, once per session, behind a switch that is off by default. Not on
+    // a turn that states an attempt or a plan (see `acute`).
+    const headsUp = acute === null && (await voiceHeadsUpFor(sessionId, severity, sidebandManager));
 
     if (!shouldSteer(sessionId, riskScore, force)) {
       // No risk steer on this turn (the cooldown): the heads-up goes alone.
