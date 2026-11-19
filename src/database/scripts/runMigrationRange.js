@@ -5,6 +5,7 @@
 //   node src/database/scripts/runMigrationRange.js 035 046
 //   DATABASE_URL=postgresql://... node src/database/scripts/runMigrationRange.js 035 046
 import { pool } from '../../server/config/db.js';
+import { withLongQueries } from '../../server/config/dbLongQueries.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -51,4 +52,7 @@ async function main() {
   }
 }
 
-main().catch(() => process.exit(1));
+// Migrations are DDL and backfills a human runs and watches: no statement or
+// idle-in-transaction limit (the app pool's defaults would cut an index build
+// short; ai-therapist-366).
+withLongQueries('migration', main, { timeoutMs: 0 }).catch(() => process.exit(1));

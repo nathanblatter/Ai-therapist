@@ -519,19 +519,21 @@ async function executeHighRiskResponse(
     // session surviving. Deduplicated against the pipeline's own early emit.
     emitCrisisResources(sessionId, { reason: 'high_risk', severity: 'high', riskScore });
 
-    await logInterventionAction(sessionId, 'high_risk_emergency', {
-      riskScore,
-      emergencyProtocol: 'activated',
-    });
-
     // Page a human: the dashboard socket alert only works if someone is
     // looking at the dashboard. Fire-and-forget. Whether this becomes an SMS,
     // or is folded into a page the on-call already has for this participant,
     // is crisisPaging.service's decision (sandbox suppression, wording and
-    // the audit row live there too).
+    // the audit row live there too). Requested before the first database
+    // write below, so a slow database delays the record, not the page
+    // (ai-therapist-366).
     import('./crisisPaging.service.js')
       .then((m) => m.pageHighRisk(sessionId, riskScore, { source }))
       .catch((err) => console.error('Error sending crisis SMS:', err));
+
+    await logInterventionAction(sessionId, 'high_risk_emergency', {
+      riskScore,
+      emergencyProtocol: 'activated',
+    });
 
     // Steer the live model into a structured safety assessment.
     try {

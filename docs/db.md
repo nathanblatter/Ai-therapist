@@ -306,6 +306,37 @@ Rollback order for that pair is the reverse: `091_researcher_care_comms_rollback
 then `091_access_audit_and_redaction_review_rollback`. Do not reuse a number
 again; take the next free one after the head.
 
+## Connection pool bounds (ai-therapist-366)
+
+`src/server/config/db.ts` gives every app connection a pool size, a wait limit
+for a free connection, a `statement_timeout`, an
+`idle_in_transaction_session_timeout` and an `application_name`. All are env
+settings with defaults (`.env.example`, "Pool bounds"); 0 disables a timeout.
+
+- A bound that fires is a rejected promise: pg-pool's `timeout exceeded when
+  trying to connect`, or Postgres error 57014 (statement) / 25P03 (idle in
+  transaction). `src/server/utils/dbErrors.ts` classifies them; participant
+  routes answer 503 `database_unavailable` with a retry message.
+- The crisis path treats any of them as "could not read" and still pages and
+  shows resources (tests: `services/crisisPath.dbTimeout.test.ts`).
+- Long legitimate work runs inside `withLongQueries(label, fn)`
+  (`src/server/config/dbLongQueries.ts`): the dataset export, the researcher
+  export, the content wipe and its stats, risk calibration, messaging
+  retention, the deviation scan, demo cleanup, admin analytics (60 s) and
+  `runMigrationRange.js` (no limit). Its connections are raised with `SET` and
+  put back with `RESET` before they return to the pool. A new bulk job belongs
+  in it.
+- `psql -f` migrations are not affected. The legacy per-number runners
+  (`runMigrationNNN.js`, `rollbackMigration*.js`) were not wrapped: they are
+  historical, and would run under the default limits.
+- `GET /health/deep` reports the pool's size, in-use and waiting counts and the
+  timeouts counted since start.
+- `pg_stat_activity.application_name` is `ai-therapist/<script>@<host>`, so
+  two app containers during a deploy, the harness child and a CLI can be told
+  apart.
+- Live check against a throwaway database (`rt_dbpool_*` only):
+  `DB_POOL_LIVE_DATABASE_URL=... npx vitest run src/server/config/db.pool.live.test.ts`.
+
 ## Security Notes
 
 - All passwords are hashed using bcrypt with 10 salt rounds

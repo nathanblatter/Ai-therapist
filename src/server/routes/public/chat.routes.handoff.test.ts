@@ -463,3 +463,60 @@ describe('POST /api/chat/voice-return', () => {
     expect(handoffMocks.verifyVoiceReturn).not.toHaveBeenCalled();
   });
 });
+
+// ai-therapist-366: the pool now rejects where it used to wait forever. A
+// participant gets a clear retry message (503 database_unavailable), never a
+// blank screen or a hung request, and a turn that could not be stored is still
+// screened for crisis.
+describe('database timeouts at chat start and on a chat turn (ai-therapist-366)', () => {
+  const acquireTimeout = () => new Error('timeout exceeded when trying to connect');
+  const statementTimeout = () =>
+    Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' });
+
+  it('a hand-off whose preparation times out still starts the chat (the browser shows the crisis wording)', async () => {
+    handoffMocks.prepareTextHandoff.mockRejectedValue(acquireTimeout());
+    const res = await request(makeApp()).post('/api/chat/start').send({ continued_from: 'live_A' });
+    expect(res.status).toBe(200);
+    expect(res.body.sessionId).toEqual(expect.any(String));
+    expect(res.body.handoff).toBeNull();
+  });
+
+  it('chat start: a database timeout answers 503 with the retry message', async () => {
+    dbMocks.createSession.mockRejectedValue(acquireTimeout());
+    const res = await request(makeApp()).post('/api/chat/start').send({ language: 'en' });
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBe('database_unavailable');
+    expect(res.body.message).toMatch(/try again/);
+    expect(res.body.message).toMatch(/988/);
+  });
+
+  it('chat turn: the turn cannot be stored, it is still screened (null message id) and the participant is told to retry', async () => {
+    dbMocks.insertMessagesBatch.mockRejectedValue(statementTimeout());
+    const res = await request(makeApp())
+      .post('/api/chat/message')
+      .send({ sessionId: 'chat_1', message: 'I want to kill myself' });
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBe('database_unavailable');
+    await vi.waitFor(() =>
+      expect(pipelineMocks.runCrisisPipeline).toHaveBeenCalledWith(
+        { sessionId: 'chat_1', messageId: null, content: 'I want to kill myself' },
+        'chat',
+      ),
+    );
+    expect(chatMocks.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('chat turn: the ownership read times out, 503, and nothing is scored for an unverified session', async () => {
+    dbMocks.getSessionAccessInfo.mockRejectedValue(acquireTimeout());
+    const res = await request(makeApp()).post('/api/chat/message').send({ sessionId: 'chat_1', message: 'hello' });
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBe('database_unavailable');
+    expect(pipelineMocks.runCrisisPipeline).not.toHaveBeenCalled();
+  });
+
+  it('an ordinary (non-database) failure is still a 500', async () => {
+    dbMocks.insertMessagesBatch.mockRejectedValue(new Error('null value in column "role"'));
+    const res = await request(makeApp()).post('/api/chat/message').send({ sessionId: 'chat_1', message: 'hello' });
+    expect(res.status).toBe(500);
+  });
+});

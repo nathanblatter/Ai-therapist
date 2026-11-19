@@ -6,7 +6,7 @@ import express from 'express';
 import request from 'supertest';
 
 const { pingMock } = vi.hoisted(() => ({ pingMock: vi.fn() }));
-vi.mock('../../db/health.queries.js', () => ({ pingDatabase: pingMock }));
+vi.mock('../../db/health.queries.js', () => ({ pingDatabase: pingMock, getDatabasePoolStats: () => null }));
 
 import healthRoutes from './health.routes.js';
 

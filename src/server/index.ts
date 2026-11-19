@@ -106,8 +106,11 @@ import {
 } from './services/sessionLifecycle.service.js';
 
 import { createLogger } from './utils/logger.js';
+import { installProcessPolicy } from './utils/processPolicy.js';
 
 const log = createLogger('server');
+// Unhandled rejections are logged, not fatal; see utils/processPolicy.ts.
+installProcessPolicy(log);
 const socketLog = createLogger('socketio');
 const cspLog = createLogger('csp');
 

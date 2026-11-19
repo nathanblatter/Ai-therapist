@@ -2,6 +2,7 @@ import { pool } from '../config/db.js';
 import { redactableRowsSql, REDACTABLE_ROWS_SQL } from '../db/redactionScope.js';
 import { wipeAgedThreadMessageBodies } from '../db/messagingRetention.queries.js';
 import { broadcastAdminEvent } from '../utils/adminBroadcast.js';
+import { withLongQueries } from '../config/dbLongQueries.js';
 
 // Scheduler state
 let wipeInterval: ReturnType<typeof setTimeout> | null = null;
@@ -165,7 +166,8 @@ export async function executeContentWipe(
     }
 
     // Execute the wipe
-    const wipeResult = await pool.query(wipeQuery, queryParams);
+    // Unbatched bulk UPDATE: the long statement limit (ai-therapist-366).
+    const wipeResult = await withLongQueries('content_wipe', () => pool.query(wipeQuery, queryParams));
     const messagesWiped = wipeResult.rowCount;
 
     // Thread-message inclusion (caseworker portal spec section 10 item 8:
@@ -178,12 +180,14 @@ export async function executeContentWipe(
     const threadBodiesWiped = await wipeAgedThreadMessageBodies(cutoffTime, settings.require_redaction_complete);
 
     // Count skipped messages (those with content but not wiped)
-    const skippedResult = await pool.query(
-      `SELECT COUNT(*) as count FROM messages
+    const skippedResult = await withLongQueries('content_wipe', () =>
+      pool.query(
+        `SELECT COUNT(*) as count FROM messages
        WHERE content IS NOT NULL
          AND created_at < $1
          AND (content_redacted IS NULL OR metadata->>'redaction_error' IS NOT NULL)`,
-      [cutoffTime],
+        [cutoffTime],
+      ),
     );
     const messagesSkipped = parseInt(skippedResult.rows[0].count);
 
@@ -272,7 +276,7 @@ export async function executeContentWipe(
 /**
  * Get wipe statistics and pending content info
  */
-export async function getWipeStats(): Promise<Record<string, unknown>> {
+async function getWipeStatsUnbounded(): Promise<Record<string, unknown>> {
   const settings = await getRetentionSettings();
 
   // Get pending wipe count (messages that would be wiped now)
@@ -481,3 +485,8 @@ export function getSchedulerStatus(): { running: boolean; nextScheduledWipe: str
     nextScheduledWipe: nextScheduledWipe?.toISOString() || null,
   };
 }
+
+// Bulk work: these run under the long statement limit instead of the pool's
+// default (config/dbLongQueries.ts, ai-therapist-366).
+export const getWipeStats: typeof getWipeStatsUnbounded = (...args) =>
+  withLongQueries('content_wipe_stats', () => getWipeStatsUnbounded(...args));

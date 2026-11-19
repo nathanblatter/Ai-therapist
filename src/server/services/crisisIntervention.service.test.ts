@@ -167,7 +167,7 @@ describe('executeGraduatedResponse — crisis resources go first (ai-therapist-2
     });
   });
 
-  it('the card still goes out when the first intervention log throws', async () => {
+  it('the card and the page still go out when the first intervention log throws', async () => {
     const emit = vi.fn();
     (global as unknown as { io: unknown }).io = { to: vi.fn(() => ({ emit })) };
     logInterventionActionMock.mockRejectedValue(new Error('db down'));
@@ -176,6 +176,9 @@ describe('executeGraduatedResponse — crisis resources go first (ai-therapist-2
 
     await expect(executeGraduatedResponse('sess-card-2', 'high', 92)).resolves.toBeUndefined();
     expect(emit).toHaveBeenCalledWith('session:crisis-emergency', expect.objectContaining({ severity: 'high' }));
+    // The page is requested before that log (ai-therapist-366); it used to be
+    // lost with it.
+    await waitForCall(sendCrisisAlertMock, 1, 'sendCrisisAlert');
   });
 });
 
@@ -250,6 +253,44 @@ describe('executeGraduatedResponse — high-risk paging', () => {
     await executeGraduatedResponse('sess-1', 'medium', 55);
     await settle();
     expect(sendCrisisAlertMock).not.toHaveBeenCalled();
+  });
+});
+
+// ai-therapist-366: the pool now rejects (acquire timeout, statement timeout)
+// where it used to wait forever. A high flag must still show resources and
+// page, and the page must not queue behind the first database write.
+describe('executeGraduatedResponse — database timeouts fail toward paging (ai-therapist-366)', () => {
+  const acquireTimeout = () => new Error('timeout exceeded when trying to connect');
+  const statementTimeout = () =>
+    Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' });
+
+  it('requests the page before the first intervention log, so a stalled write cannot hold it back', async () => {
+    // A write that has not answered (up to the statement timeout in prod).
+    logInterventionActionMock.mockImplementation(() => new Promise(() => undefined));
+    void executeGraduatedResponse('sess-stall', 'high', 90);
+    await waitForCall(sendCrisisAlertMock, 1, 'sendCrisisAlert');
+    expect(sendCrisisAlertMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('every pool query rejects with the acquire timeout: resources shown and the on-call paged', async () => {
+    const emit = vi.fn();
+    (global as unknown as { io: unknown }).io = { to: vi.fn(() => ({ emit })) };
+    poolQueryMock.mockRejectedValue(acquireTimeout());
+    isSandboxAccountSessionMock.mockRejectedValue(acquireTimeout());
+    const { clearCrisisResourceState } = await import('./crisisResources.js');
+    clearCrisisResourceState();
+
+    await expect(executeGraduatedResponse('sess-acq', 'high', 91)).resolves.toBeUndefined();
+    await waitForCall(sendCrisisAlertMock, 1, 'sendCrisisAlert');
+    expect(emit).toHaveBeenCalledWith('session:crisis-emergency', expect.objectContaining({ severity: 'high' }));
+  });
+
+  it('every pool query rejects with a statement timeout: the on-call is still paged', async () => {
+    poolQueryMock.mockRejectedValue(statementTimeout());
+    isSandboxAccountSessionMock.mockRejectedValue(statementTimeout());
+    await expect(executeGraduatedResponse('sess-stmt', 'high', 88)).resolves.toBeUndefined();
+    await waitForCall(sendCrisisAlertMock, 1, 'sendCrisisAlert');
+    expect(String(sendCrisisAlertMock.mock.calls[0][0])).toMatch(/RISK SCORE 88\/100/);
   });
 });
 

@@ -52,6 +52,7 @@ import type { PreparedHandoff } from '../../services/textHandoff.service.js';
 import type { RecoveryCrisisContact } from '../../../shared/recoveryPrompt.js';
 
 import { createLogger } from '../../utils/logger.js';
+import { DATABASE_RETRY_MESSAGE, isDatabaseUnavailableError } from '../../utils/dbErrors.js';
 
 const log = createLogger('chatRoutes');
 
@@ -458,6 +459,9 @@ export default function chatRoutes(): Router {
         });
       } catch (error: unknown) {
         log.error({ err: error }, 'Failed to start chat session');
+        if (isDatabaseUnavailableError(error)) {
+          return res.status(503).json({ error: 'database_unavailable', message: DATABASE_RETRY_MESSAGE });
+        }
         res.status(500).json({
           error: 'Failed to start chat session',
           details: error instanceof Error ? error.message : String(error),
@@ -504,9 +508,21 @@ export default function chatRoutes(): Router {
       // Persist the USER turn FIRST so crisis/eligibility detection has a real
       // message_id and a model failure no longer loses the participant's words
       // (they used to be inserted only after a successful model call).
-      const [userMsg] = await insertMessagesBatch([
-        { session_id: sessionId, role: 'user', message_type: 'text', content: message, content_redacted: null },
-      ]);
+      let userMsg: Awaited<ReturnType<typeof insertMessagesBatch>>[number];
+      try {
+        [userMsg] = await insertMessagesBatch([
+          { session_id: sessionId, role: 'user', message_type: 'text', content: message, content_redacted: null },
+        ]);
+      } catch (insertErr) {
+        // Same rule as the voice path (sidebandManager onUserTurn): a database
+        // that cannot store the turn must not also silence crisis detection
+        // for it (ai-therapist-366). The pipeline takes a null message id and
+        // pages / shows resources on its own; the participant is told to retry.
+        void import('../../services/crisisPipeline.service.js')
+          .then((m) => m.runCrisisPipeline({ sessionId, messageId: null, content: message }, 'chat'))
+          .catch((err) => log.error({ err }, '[ChatCrisis] pipeline for an unsaved turn failed'));
+        throw insertErr;
+      }
 
       // Minor / age-eligibility gate (ai-therapist-106). Runs BEFORE the crisis
       // screen and the model call: on a first-person age-disclosure pattern hit
@@ -778,6 +794,12 @@ export default function chatRoutes(): Router {
           '[Chat] BLOCKED SAFETY IDENTIFIER — participant cannot send messages; study team must re-enroll or contact OpenAI.',
         );
         return res.status(403).json({ error: 'identifier_blocked' });
+      }
+
+      // The database did not answer in time (ai-therapist-366): a retryable
+      // state with its own message, not a generic failure.
+      if (isDatabaseUnavailableError(error)) {
+        return res.status(503).json({ error: 'database_unavailable', message: DATABASE_RETRY_MESSAGE });
       }
 
       res.status(500).json({

@@ -1,6 +1,7 @@
 // Health check — no auth, mounted before session/IP middleware.
 import { Router } from 'express';
-import { pingDatabase } from '../../db/health.queries.js';
+import { getDatabasePoolStats, pingDatabase } from '../../db/health.queries.js';
+import { unhandledRejectionCount } from '../../utils/processPolicy.js';
 
 export default function healthRoutes(): Router {
   const router = Router();
@@ -22,6 +23,9 @@ export default function healthRoutes(): Router {
     res.status(db ? 200 : 503).json({
       status: db ? 'ok' : 'degraded',
       db,
+      // Pool in-use/waiting counts and timeouts since start (ai-therapist-366).
+      pool: getDatabasePoolStats(),
+      unhandledRejections: unhandledRejectionCount(),
       uptime: Math.floor((Date.now() - startTime) / 1000),
     });
   });

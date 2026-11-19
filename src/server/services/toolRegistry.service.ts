@@ -676,16 +676,23 @@ export class ToolRegistry {
 
         // High urgency raises a full crisis flag; lower urgencies alert without flagging.
         if (urgency === 'high') {
-          await flagSessionCrisis(
-            ctx.sessionId,
-            'high',
-            scoreByUrgency.high,
-            'ai_assistant',
-            'ai_tool',
-            null,
-            ['model_escalation'],
-            reason,
-          );
+          // A flag write that fails (a database timeout, ai-therapist-366)
+          // must not cost the escalation its page and resources: those come
+          // from executeGraduatedResponse below and need no row.
+          try {
+            await flagSessionCrisis(
+              ctx.sessionId,
+              'high',
+              scoreByUrgency.high,
+              'ai_assistant',
+              'ai_tool',
+              null,
+              ['model_escalation'],
+              reason,
+            );
+          } catch (err) {
+            console.error('[escalate_to_human] crisis flag write failed; paging anyway:', err);
+          }
           // The flag above satisfies the risk pipeline's shouldFlag transition
           // guard, which would otherwise skip the emergency protocol entirely
           // (paging, 988 resources, safety-assessment steering). A

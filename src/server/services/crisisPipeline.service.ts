@@ -82,9 +82,23 @@ export async function runCrisisPipeline(
     // on-call. Keyed on the owner's role, NOT the session is_demo flag — the
     // eval harness's sessions carry is_demo for analytics exclusion but must
     // still exercise the real pipeline (its runner neuters paging/broadcast).
-    if (await sessionSuppressesSafetyPipeline(turn.sessionId)) return NONE_RESULT;
+    // A failed or timed-out read (ai-therapist-366: the pool now rejects
+    // instead of waiting forever) fails toward running the pipeline: a demo
+    // session may then be scored, a real one is never skipped.
+    let suppressed = false;
+    try {
+      suppressed = await sessionSuppressesSafetyPipeline(turn.sessionId);
+    } catch (err) {
+      logDbMiss('demo check')(err);
+    }
+    if (suppressed) return NONE_RESULT;
 
-    const history = await getRecentSessionMessages(turn.sessionId, 10);
+    let history: Awaited<ReturnType<typeof getRecentSessionMessages>> = [];
+    try {
+      history = await getRecentSessionMessages(turn.sessionId, 10);
+    } catch (err) {
+      logDbMiss('history read')(err);
+    }
 
     // Age-eligibility confirmation starts NOW, alongside risk scoring, and is
     // acted on after the crisis block below (ai-therapist-296). On voice the
@@ -139,8 +153,8 @@ export async function runCrisisPipeline(
       // Flag state BEFORE this turn's own flagging: read once, used by both
       // the steering decision and the flagging decision below.
       // A failed read must not cost this turn its steer (the read used to come
-      // after steering): steer on the default rule, then let the flagging step
-      // fail exactly as it did before.
+      // after steering): steer on the default rule, then flag as if the
+      // session were unflagged (see the flagging step).
       let state: Awaited<ReturnType<typeof getSessionCrisisState>> = null;
       let stateError: unknown = null;
       try {
@@ -229,7 +243,10 @@ export async function runCrisisPipeline(
       }
 
       // ---- Flagging ---- (identical to the original realtime logic)
-      if (stateError) throw stateError;
+      // An unreadable state is treated as unflagged: the turn flags, and a
+      // high one pages (the paging layer folds a duplicate). It used to throw
+      // here, so a database timeout meant no flag and no page.
+      if (stateError) logDbMiss('crisis state read')(stateError);
       const currentScore = state?.crisis_risk_score || 0;
       const currentRank = SEVERITY_RANK[state?.crisis_severity ?? 'none'] ?? 0;
       // A re-flag never LOWERS a session's severity. The score clause exists
@@ -244,16 +261,22 @@ export async function runCrisisPipeline(
           (SEVERITY_RANK[severity] >= currentRank && risk.riskScore > currentScore + 10));
 
       if (shouldFlag) {
-        await flagSessionCrisis(
-          turn.sessionId,
-          severity,
-          risk.riskScore,
-          'system',
-          'auto',
-          turn.messageId ?? null,
-          risk.factors,
-          `Risk score: ${risk.riskScore} - Factors: ${risk.factors.join(', ')}`,
-        );
+        // A flag write that fails must not cost the turn its response: the
+        // page and the resources below do not depend on the row.
+        try {
+          await flagSessionCrisis(
+            turn.sessionId,
+            severity,
+            risk.riskScore,
+            'system',
+            'auto',
+            turn.messageId ?? null,
+            risk.factors,
+            `Risk score: ${risk.riskScore} - Factors: ${risk.factors.join(', ')}`,
+          );
+        } catch (err) {
+          logDbMiss('flag write')(err);
+        }
 
         await logInterventionAction(turn.sessionId, 'auto_flag', {
           riskScore: risk.riskScore,
@@ -332,6 +355,14 @@ export async function runCrisisPipeline(
     console.error('[CrisisPipeline] pipeline failed (non-fatal):', err);
     return NONE_RESULT;
   }
+}
+
+/** Logs a database read or write the pipeline continues without. */
+function logDbMiss(what: string): (err: unknown) => undefined {
+  return (err: unknown) => {
+    console.error(`[CrisisPipeline] ${what} failed; continuing toward paging:`, err);
+    return undefined;
+  };
 }
 
 /**
