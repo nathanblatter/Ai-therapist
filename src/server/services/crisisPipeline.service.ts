@@ -41,7 +41,18 @@ import { sessionSuppressesSafetyPipeline } from './suppression.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { enqueueWorkItem } from './workQueue.service.js';
 import { trackBackground } from '../utils/backgroundWork.js';
+import { withReadDeadline } from '../utils/readDeadline.js';
+import { knownDemoAccountSession } from '../utils/sessionAccounts.js';
 import { emitCrisisResources, hasEmittedHighRiskResources } from './crisisResources.js';
+import {
+  pageHighRisk,
+  pageStage,
+  riskPageLevel,
+  retryCrisisRecord,
+  PAGE_LEVEL,
+  type PageLevel,
+  type PageSubject,
+} from './crisisPaging.service.js';
 import type { MinorVerdict } from './minorSafeguard.service.js';
 
 export interface ParticipantTurn {
@@ -104,10 +115,14 @@ async function withCheckinContext<T extends { role: string; content?: string | n
   sessionId: string,
   history: T[],
   turn: ParticipantTurn,
+  /** The check-in, already being read (started alongside the history). */
+  checkinRead?: Promise<SessionCheckin | null>,
 ): Promise<Array<T | { role: string; content: string }>> {
   if (turn.source === 'checkin' || history.length >= HISTORY_WINDOW) return history;
   try {
-    const text = checkinFreeText(await getSessionCheckin(sessionId));
+    const text = checkinFreeText(
+      await (checkinRead ?? withReadDeadline(getSessionCheckin(sessionId), 'check-in read')),
+    );
     if (!text) return history;
     return [{ role: 'user', content: `[Written in the pre-session check-in form] ${text}` }, ...history];
   } catch (err) {
@@ -158,20 +173,43 @@ export async function runCrisisPipeline(
     // A failed or timed-out read (ai-therapist-366: the pool now rejects
     // instead of waiting forever) fails toward running the pipeline: a demo
     // session may then be scored, a real one is never skipped.
-    let suppressed = false;
-    try {
-      suppressed = await sessionSuppressesSafetyPipeline(turn.sessionId);
-    } catch (err) {
-      logDbMiss('demo check')(err);
-    }
-    if (suppressed) return NONE_RESULT;
-
-    let history: Awaited<ReturnType<typeof getRecentSessionMessages>> = [];
-    try {
-      history = await getRecentSessionMessages(turn.sessionId, HISTORY_WINDOW);
-    } catch (err) {
+    //
+    // ai-therapist-369: the account is usually known without a read, from the
+    // request that started the session (utils/sessionAccounts). Only a session
+    // this process did not see start is read, and that read, the history and
+    // the check-in are read together, each bounded by CRISIS_READ_DEADLINE_MS:
+    // they only shape how the turn is scored, and must not hold the page back
+    // for a pool timeout each, in sequence.
+    const knownDemo = knownDemoAccountSession(turn.sessionId);
+    if (knownDemo === true) return NONE_RESULT;
+    const demoRead: Promise<boolean> =
+      knownDemo !== null
+        ? Promise.resolve(knownDemo)
+        : withReadDeadline(
+            Promise.resolve().then(() => sessionSuppressesSafetyPipeline(turn.sessionId)),
+            'demo check',
+          ).catch((err: unknown) => {
+            logDbMiss('demo check')(err);
+            return false;
+          });
+    const historyRead = withReadDeadline(
+      Promise.resolve().then(() => getRecentSessionMessages(turn.sessionId, HISTORY_WINDOW)),
+      'history read',
+    ).catch((err: unknown) => {
       logDbMiss('history read')(err);
-    }
+      return [] as Awaited<ReturnType<typeof getRecentSessionMessages>>;
+    });
+    // Read alongside, used only while the session's start is in the window.
+    const checkinRead =
+      turn.source === 'checkin'
+        ? undefined
+        : withReadDeadline(
+            Promise.resolve().then(() => getSessionCheckin(turn.sessionId)),
+            'check-in read',
+          );
+    checkinRead?.catch(() => undefined);
+    const [suppressed, history] = await Promise.all([demoRead, historyRead]);
+    if (suppressed) return NONE_RESULT;
 
     // Age-eligibility confirmation starts NOW, alongside risk scoring, and is
     // acted on after the crisis block below (ai-therapist-296). On voice the
@@ -199,6 +237,15 @@ export async function runCrisisPipeline(
     const minorVerdict =
       channel === 'realtime' && turn.source !== 'checkin' ? startRealtimeMinorConfirmation(scoredTurn, history) : null;
 
+    // The moment the verdict is known (inside the scorer, before it writes
+    // the turn's risk row), a high turn shows the crisis card and, unless it
+    // tells the on-call nothing new, pages (ai-therapist-369). See
+    // respondToHighVerdict.
+    let earlyPage: EarlyPageOutcome | null = null;
+    const onScored = (verdict: Awaited<ReturnType<typeof analyzeMessageRisk>>): void => {
+      if (earlyPage) return;
+      earlyPage = respondToHighVerdict(turn, verdict);
+    };
     const risk = await analyzeMessageRisk(
       {
         content: scoredTurn.content,
@@ -212,8 +259,13 @@ export async function runCrisisPipeline(
         ...(stitched.priorMessageIds.length > 0 ? { stitched_message_ids: stitched.priorMessageIds } : {}),
         ...(turn.source ? { source: turn.source } : {}),
       },
-      await withCheckinContext(turn.sessionId, history, turn),
+      await withCheckinContext(turn.sessionId, history, turn, checkinRead),
+      { onScored },
     );
+    // A scorer that returned without calling the hook (an error path) is
+    // answered here, from what it returned.
+    onScored(risk);
+    const pageRequested = (earlyPage as EarlyPageOutcome | null)?.pageRequested === true;
 
     const severity = risk.severity as CrisisSeverity;
     // Not the participant's own suicide or self-harm risk: someone else's
@@ -226,16 +278,6 @@ export async function runCrisisPipeline(
     const fromCheckin = turn.source === 'checkin';
     let steeringGuidance: string | null = null;
     let flagged = false;
-
-    // Crisis resources the moment a turn scores high, before steering, the
-    // flag write and the intervention logs (ai-therapist-293). Once per
-    // session from here: a later escalation re-emits from
-    // executeHighRiskResponse exactly as before, so a participant who closed
-    // the card is not shown it again on every high turn.
-    // Not for thoughts of harming someone else (see executeHighRiskResponse).
-    if (severity === 'high' && subject !== 'harm_to_others' && !hasEmittedHighRiskResources(turn.sessionId)) {
-      emitCrisisResources(turn.sessionId, { reason: 'high_risk', severity: 'high', riskScore: risk.riskScore });
-    }
 
     if (risk.riskScore > 0) {
       // Flag state BEFORE this turn's own flagging: read once, used by both
@@ -424,7 +466,19 @@ export async function runCrisisPipeline(
       if (shouldFlag) {
         // A flag write that fails must not cost the turn its response: the
         // page and the resources below do not depend on the row
-        // (ai-therapist-366).
+        // (ai-therapist-366). A HIGH flag that fails is retried in the
+        // background and, if it never lands, reported to the admin dashboards
+        // (ai-therapist-369): it is the crisis event the IRB counts and the
+        // adverse-event draft hang on.
+        const flagFactors = fromCheckin ? [...risk.factors, CHECKIN_FACTOR] : risk.factors;
+        const flagNotes =
+          `Risk score: ${risk.riskScore} - ` +
+          (label ? `${label} - ` : '') +
+          (subjectChangeNote ? `${subjectChangeNote} - ` : '') +
+          (escalationNote ? `${escalationNote} - ` : '') +
+          (alsoSubject ? `Also in the same message: ${FLAG_SUBJECT_NAME[alsoSubject]} - ` : '') +
+          (fromCheckin ? 'Source: pre-session check-in text - ' : '') +
+          `Factors: ${risk.factors.join(', ')}`;
         try {
           await flagSessionCrisis(
             turn.sessionId,
@@ -433,17 +487,30 @@ export async function runCrisisPipeline(
             'system',
             'auto',
             turn.messageId ?? null,
-            fromCheckin ? [...risk.factors, CHECKIN_FACTOR] : risk.factors,
-            `Risk score: ${risk.riskScore} - ` +
-              (label ? `${label} - ` : '') +
-              (subjectChangeNote ? `${subjectChangeNote} - ` : '') +
-              (escalationNote ? `${escalationNote} - ` : '') +
-              (alsoSubject ? `Also in the same message: ${FLAG_SUBJECT_NAME[alsoSubject]} - ` : '') +
-              (fromCheckin ? 'Source: pre-session check-in text - ' : '') +
-              `Factors: ${risk.factors.join(', ')}`,
+            flagFactors,
+            flagNotes,
           );
         } catch (err) {
           logDbMiss('flag write')(err);
+          if (severity === 'high') {
+            retryCrisisRecord({
+              sessionId: turn.sessionId,
+              what: 'crisis flag',
+              summary: `High risk flag, score ${risk.riskScore}/100${label ? ` (${label})` : ''}.`,
+              write: () =>
+                flagSessionCrisis(
+                  turn.sessionId,
+                  severity,
+                  risk.riskScore,
+                  'system',
+                  'auto',
+                  turn.messageId ?? null,
+                  flagFactors,
+                  flagNotes,
+                  { retry: true },
+                ),
+            });
+          }
         }
 
         await logInterventionAction(turn.sessionId, 'auto_flag', {
@@ -508,10 +575,14 @@ export async function runCrisisPipeline(
 
         // The options only exist when there is something to say; an ordinary
         // high flag makes the call it always made.
+        // `pageAlreadyRequested`: this turn's page went out when it scored
+        // (respondToHighVerdict), with the same level, subject and words; the
+        // response must not request it a second time.
         const responseOptions = {
           ...(subject === 'third_party' ? { thirdParty: true } : subject ? { subject } : {}),
           ...(acute ? { escalation: acute } : {}),
           ...(alsoSubject ? { alsoSubject } : {}),
+          ...(pageRequested && severity === 'high' ? { pageAlreadyRequested: true } : {}),
         };
         if (Object.keys(responseOptions).length > 0) {
           await executeGraduatedResponse(turn.sessionId, severity, risk.riskScore, responseOptions);
@@ -532,16 +603,16 @@ export async function runCrisisPipeline(
         // told about: see handleHighTurnWithoutReflag. Fire-and-forget, like
         // the page in executeHighRiskResponse: the voice reply must not wait
         // on it.
+        const turnRisk = {
+          riskScore: risk.riskScore,
+          factors: risk.factors,
+          ...(subject ? { subject } : {}),
+          ...(acute ? { acute } : {}),
+        };
         trackBackground(
-          handleHighTurnWithoutReflag(
-            turn,
-            {
-              riskScore: risk.riskScore,
-              factors: risk.factors,
-              ...(subject ? { subject } : {}),
-              ...(acute ? { acute } : {}),
-            },
-            channel,
+          (pageRequested
+            ? handleHighTurnWithoutReflag(turn, turnRisk, channel, { pageAlreadyRequested: true })
+            : handleHighTurnWithoutReflag(turn, turnRisk, channel)
           ).catch((err) => console.error('[CrisisPipeline] high turn without re-flag: handling failed:', err)),
         );
       }
@@ -562,6 +633,154 @@ export async function runCrisisPipeline(
   } catch (err) {
     console.error('[CrisisPipeline] pipeline failed (non-fatal):', err);
     return NONE_RESULT;
+  }
+}
+
+// ---- the page when a turn scores high (ai-therapist-369) -------------------
+//
+// The page used to be requested at the END of the turn's database work: the
+// state read, the steer, the ladder, the subject and stage lookups and the flag
+// write, each up to a pool timeout (3 s for a connection, 10 s a statement).
+// Measured with every call failing at the connection limit: 42 s from the turn
+// to the SMS; with every statement taking 10 s: 132 s.
+//
+// Now a high verdict shows the crisis card and requests the page the moment it
+// is known, before the scorer writes the turn's risk row. Nothing the page
+// says needs the pipeline's own reads: its level, subject, "what changed" and
+// "also" lines come from the verdict, and its comparison with earlier pages
+// from the paging layer's own bounded lookups (which, when they fail, make the
+// page say so: HISTORY_UNREAD_LINE). The rest of the turn then runs as before
+// and its graduated response, which used to request the page, is told it has
+// been requested.
+//
+// The page is not requested at once when it would tell the on-call nothing
+// new, so that a session's ordinary high turns do not each produce a page or
+// a folded-page record: when this process has already paged for this session
+// at the same or a higher level and stage, about the same person; or when the
+// session is known to be flagged high already (the scorer's session context)
+// and the turn is at the ordinary high level with no stated time, plan or
+// attempt. Those turns are left to the pipeline's own rules after its reads,
+// exactly as before (a subject change or a recovery-session disclosure still
+// pages from there). When nothing is known (the context read failed), the
+// page goes at once: the paging layer folds it if it repeats a page.
+
+/** What respondToHighVerdict did for a turn. */
+interface EarlyPageOutcome {
+  /** The page for this turn was requested when it scored. */
+  pageRequested: boolean;
+}
+
+/** A page this process requested when a turn scored, as the fold rule sees it. */
+interface EarlyPage {
+  subject: PageSubject;
+  level: PageLevel;
+  stage: 0 | 1 | 2;
+}
+
+const EARLY_PAGES_MAX_SESSIONS = 2000;
+const earlyPages = new Map<string, EarlyPage[]>();
+
+/** Test hook. */
+export function _resetEarlyPageStateForTests(): void {
+  earlyPages.clear();
+}
+
+/** Is this page to be requested now, before the turn's own reads? Pure apart
+ *  from the per-session record; exported for tests. */
+export function pageAtOnce(
+  sessionId: string,
+  wanted: EarlyPage,
+  sessionFlaggedHigh: boolean | null | undefined,
+): boolean {
+  // Not flagged high: the pipeline's level rule flags and pages this turn.
+  if (sessionFlaggedHigh === false) return true;
+  const mine = earlyPages.get(sessionId) ?? [];
+  if (mine.some((p) => p.subject === wanted.subject && p.level >= wanted.level && p.stage >= wanted.stage)) {
+    return false;
+  }
+  if (sessionFlaggedHigh === true && wanted.level === PAGE_LEVEL.high && wanted.stage === 0 && mine.length === 0) {
+    return false;
+  }
+  return true;
+}
+
+function rememberEarlyPage(sessionId: string, page: EarlyPage): () => void {
+  const list = [...(earlyPages.get(sessionId) ?? []), page];
+  earlyPages.delete(sessionId);
+  earlyPages.set(sessionId, list);
+  if (earlyPages.size > EARLY_PAGES_MAX_SESSIONS) {
+    for (const id of earlyPages.keys()) {
+      if (earlyPages.size <= EARLY_PAGES_MAX_SESSIONS / 2) break;
+      earlyPages.delete(id);
+    }
+  }
+  return () => {
+    const rest = (earlyPages.get(sessionId) ?? []).filter((p) => p !== page);
+    if (rest.length > 0) earlyPages.set(sessionId, rest);
+    else earlyPages.delete(sessionId);
+  };
+}
+
+/**
+ * A turn's verdict is known. On a high one: the crisis card (once per
+ * session, as before; not for thoughts of harming someone else), and the page,
+ * unless pageAtOnce says it would tell the on-call nothing new. Synchronous;
+ * the page itself runs in the background. Never throws.
+ */
+function respondToHighVerdict(
+  turn: ParticipantTurn,
+  verdict: Awaited<ReturnType<typeof analyzeMessageRisk>>,
+): EarlyPageOutcome {
+  try {
+    if (verdict.severity !== 'high') return { pageRequested: false };
+    const subject = verdict.subject ?? (verdict.thirdParty === true ? 'third_party' : null);
+
+    // Crisis resources the moment a turn scores high, before steering, the
+    // flag write and the intervention logs (ai-therapist-293). Once per
+    // session from here: a later escalation re-emits from
+    // executeHighRiskResponse exactly as before, so a participant who closed
+    // the card is not shown it again on every high turn.
+    // Not for thoughts of harming someone else (see executeHighRiskResponse).
+    if (subject !== 'harm_to_others' && !hasEmittedHighRiskResources(turn.sessionId)) {
+      emitCrisisResources(turn.sessionId, { reason: 'high_risk', severity: 'high', riskScore: verdict.riskScore });
+    }
+
+    const acute = verdict.acute ?? null;
+    const wanted: EarlyPage = {
+      subject: subject ?? 'own',
+      level: riskPageLevel(verdict.riskScore, acute),
+      stage: pageStage(acute),
+    };
+    if (!pageAtOnce(turn.sessionId, wanted, verdict.sessionFlaggedHigh)) return { pageRequested: false };
+
+    const forget = rememberEarlyPage(turn.sessionId, wanted);
+    // The same facts executeHighRiskResponse sends, so the page reads exactly
+    // as it would have: who it is about, what the turn says is happening, and
+    // anyone else the same message concerned.
+    const facts = {
+      source: 'participant_turn' as const,
+      ...(subject ? { subject } : {}),
+      ...(acute ? { escalation: acute } : {}),
+      ...(verdict.alsoSubject ? { alsoSubject: verdict.alsoSubject } : {}),
+      requested: 'on_score',
+      ...(turn.source === 'checkin' ? { turnSource: 'checkin' } : {}),
+    };
+    trackBackground(
+      pageHighRisk(turn.sessionId, verdict.riskScore, facts)
+        .then((decision) => {
+          // A page no channel accepted has told the on-call nothing: the next
+          // high turn must not be held back by it.
+          if (decision?.outcome === 'not_delivered') forget();
+        })
+        .catch((err: unknown) => {
+          forget();
+          console.error('[CrisisPipeline] page on a high verdict failed:', err);
+        }),
+    );
+    return { pageRequested: true };
+  } catch (err) {
+    console.error('[CrisisPipeline] responding to a high verdict failed; the pipeline pages as before:', err);
+    return { pageRequested: false };
   }
 }
 
@@ -740,6 +959,10 @@ export async function handleHighTurnWithoutReflag(
     acute?: 'plan_or_time' | 'attempt';
   },
   channel: 'realtime' | 'chat',
+  /** `pageAlreadyRequested`: the page for this turn went out when it scored
+   *  (respondToHighVerdict, ai-therapist-369). Nothing is paged from here;
+   *  the record-side work is unchanged. */
+  options: { pageAlreadyRequested?: boolean } = {},
 ): Promise<void> {
   const short = turn.sessionId.substring(0, 12);
   const pageFacts = {
@@ -787,6 +1010,7 @@ export async function handleHighTurnWithoutReflag(
   // it. Nothing is written here; the turn's own flag event, when it is the
   // first at its stage, is written by the pipeline before this is reached.
   if (first !== 'slow' && first !== null && !first.recorded) {
+    if (options.pageAlreadyRequested) return;
     await import('./crisisPaging.service.js')
       .then((m) => {
         if (m.riskPageLevel(risk.riskScore, risk.acute ?? null) === m.PAGE_LEVEL.critical) {
@@ -810,11 +1034,13 @@ export async function handleHighTurnWithoutReflag(
   if (first === 'slow') {
     console.error(`[CrisisPipeline] recording the recovery-session disclosure for ${short}... is slow; paging first`);
   }
-  const paging = import('./crisisPaging.service.js')
-    .then((m) =>
-      m.pageHighRisk(turn.sessionId, risk.riskScore, { ...pageFacts, trigger: 'high_turn_in_recovery_session' }),
-    )
-    .catch((err) => console.error('[CrisisPipeline] page for a recovery-session disclosure failed:', err));
+  const paging = options.pageAlreadyRequested
+    ? Promise.resolve()
+    : import('./crisisPaging.service.js')
+        .then((m) =>
+          m.pageHighRisk(turn.sessionId, risk.riskScore, { ...pageFacts, trigger: 'high_turn_in_recovery_session' }),
+        )
+        .catch((err) => console.error('[CrisisPipeline] page for a recovery-session disclosure failed:', err));
   const started: Array<Promise<unknown>> = [paging];
 
   const recorded = first === 'slow' ? await recording : first;

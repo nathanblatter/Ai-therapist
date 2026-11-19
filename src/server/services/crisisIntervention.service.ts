@@ -645,6 +645,10 @@ export interface GraduatedResponseOptions {
   subject?: CrisisSubject | null;
   escalation?: 'plan_or_time' | 'attempt' | null;
   alsoSubject?: CrisisSubject | null;
+  /** The on-call page for this flag has already been requested, with the
+   *  same facts (the crisis pipeline pages the moment a turn scores high,
+   *  ai-therapist-369). Everything else in the response runs as before. */
+  pageAlreadyRequested?: boolean;
 }
 
 /**
@@ -683,7 +687,11 @@ export async function executeGraduatedResponse(
         riskScore,
         options.source ?? 'participant_turn',
         options.subject ?? (options.thirdParty === true ? 'third_party' : null),
-        { escalation: options.escalation ?? null, alsoSubject: options.alsoSubject ?? null },
+        {
+          escalation: options.escalation ?? null,
+          alsoSubject: options.alsoSubject ?? null,
+          pageAlreadyRequested: options.pageAlreadyRequested === true,
+        },
       );
     }
   } catch (error) {
@@ -737,7 +745,11 @@ async function executeHighRiskResponse(
   riskScore: number,
   source: RiskFlagRaisedBy = 'participant_turn',
   subject: CrisisSubject | null = null,
-  extra: { escalation?: 'plan_or_time' | 'attempt' | null; alsoSubject?: CrisisSubject | null } = {},
+  extra: {
+    escalation?: 'plan_or_time' | 'attempt' | null;
+    alsoSubject?: CrisisSubject | null;
+    pageAlreadyRequested?: boolean;
+  } = {},
 ): Promise<void> {
   const subjectDetail = subject ? { subject } : {};
   const pageFacts = {
@@ -768,11 +780,15 @@ async function executeHighRiskResponse(
     // the participant (or the reverse). Requested before the first database
     // write below, so a slow database delays the record, not the page
     // (ai-therapist-366).
-    trackBackground(
-      import('./crisisPaging.service.js')
-        .then((m) => m.pageHighRisk(sessionId, riskScore, pageFacts))
-        .catch((err) => console.error('Error sending crisis SMS:', err)),
-    );
+    // Not when the caller has already requested it (the pipeline pages the
+    // moment a turn scores high, ai-therapist-369).
+    if (!extra.pageAlreadyRequested) {
+      trackBackground(
+        import('./crisisPaging.service.js')
+          .then((m) => m.pageHighRisk(sessionId, riskScore, pageFacts))
+          .catch((err) => console.error('Error sending crisis SMS:', err)),
+      );
+    }
 
     await logInterventionAction(sessionId, 'high_risk_emergency', {
       riskScore,

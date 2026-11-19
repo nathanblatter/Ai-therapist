@@ -705,6 +705,67 @@ Responses are tiered by severity/score:
     together, and the admin-config read inside the send has its own 2 s timeout, so a database
     that has stopped answering delays a first page by about 2 s (a vendor-cut page, which also
     reads the participant's risk first, by about 4 s).
+  - **A high turn is paged the moment it scores** (2026-11-19, ai-therapist-369). The page
+    used to be requested at the end of the turn's database work (the demo check, history,
+    check-in, the scorer's reads and its risk row, the state read, steer, ladder, subject and
+    stage lookups, the flag write): measured with every pool call failing at the 3 s
+    connection limit, 42 s from the turn to the SMS; with every statement taking 10 s, 132 s.
+    Now:
+    - The scorer calls the pipeline back (`analyzeMessageRisk` `onScored`) as soon as the
+      verdict is known, before it writes the turn's `risk_score_history` row. On a high
+      verdict the pipeline shows the crisis card and requests the page there
+      (`crisisPipeline.service` `respondToHighVerdict`); the rest of the turn runs as before,
+      and its graduated response (`executeGraduatedResponse`, `pageAlreadyRequested`) or the
+      recovery-session path (`handleHighTurnWithoutReflag`) does not request it again.
+    - Nothing the page says needs the pipeline's reads. Its level, who it is about, its
+      `WHAT CHANGED` / `WHAT IT SAYS` and `ALSO` lines come from the verdict; its comparison
+      with earlier pages (`Follow-up ...`, `(ESCALATED)`, `up from n`, `PARTICIPANT'S OWN
+      RISK (earlier page: someone else)`) comes from the paging layer's own 2 s lookups, as
+      before. When those lookups fail the page cannot make the comparison and says so in a
+      detail line: `Earlier pages for this participant could not be checked (database slow or
+      down): this may repeat one you already have.` Tests check, for each subject and each
+      level, that the early page is word for word the page the graduated response sends.
+    - It is not requested at once when it would tell the on-call nothing new, so a session's
+      ordinary high turns do not each produce a page or a folded-page record: when this
+      server has already paged for the session at the same or a higher level and stage about
+      the same person, or when the scorer read the session as already flagged high and the
+      turn is at the ordinary high level with no stated time, plan or attempt. Those turns
+      follow the pipeline's own rules after its reads, exactly as before (a subject change or
+      a recovery-session disclosure still pages from there). When nothing is known (the read
+      failed), the page goes at once and the fold rule absorbs a repeat. A page that no
+      channel accepted does not hold back the next high turn.
+    - The reads that only shape the score (the demo check when the session's account is not
+      already known, history and check-in, read together; the trajectory and session risk
+      context; the assessor's model setting and safety identifier, read alongside them on a
+      keyword turn) are each bounded at 2 s and, past it, treated like a failed read with
+      that read's own failure default. A turn's trajectory bonus is therefore lost when the
+      database takes more than 2 s to answer. The assessor's "degraded" row no longer holds
+      the verdict either.
+    - The fold also looks at pages in flight for the same **session** under another key: the
+      paging layer keys a participant by user id, and an early page whose user-id lookup
+      timed out is filed under the session.
+    - Worst case from the turn to the SMS, under the same two regimes (fake clock,
+      `crisisPath.pageLatency.test.ts`): 6 s with every call failing at the connection limit,
+      6 s with every statement taking 10 s (two 2 s read deadlines, then the paging layer's
+      2 s lookups), plus the assessor's own model call. `escalate_to_human`: 8 s and 22 s
+      before, 4 s and 4 s now.
+  - **`escalate_to_human` at high urgency** starts the graduated response first (its first,
+    synchronous steps show the card and request the page) and writes the flag alongside it;
+    it used to write the flag first. Both are awaited, so a repeat call while one runs is
+    still answered by the one running (single flight, `toolTimeouts`). The tool kill-switch
+    read in front of every tool is bounded at 2 s.
+  - **A page or a high flag whose record could not be written** (the `crisis_sms_alert` row,
+    or the flag's crisis event) is retried in the background after 5 s, 30 s and 2 min
+    (`crisisPaging` `retryCrisisRecord`); a high flag retried there never lowers a score a
+    later turn has written meanwhile. If every attempt fails, the server logs `UNRECORDED` at
+    error level and Live Monitoring shows a `session:page-decision` notice
+    (`outcome: 'unrecorded'`): "NOT RECORDED: the page record for this session could not be
+    saved ...". Medium flags are not retried (a late medium write could lower a newer high).
+  - **Demo accounts** are known from the request that starts the session (chat start, the
+    voice token routes, the lazy session creation in `/logs/batch`;
+    `utils/sessionAccounts.ts`). A known demo session skips the pipeline without a database
+    read, so a failed read no longer pages for it. A session this server did not see start
+    is read as before, and a failed read there still runs the pipeline (fail toward paging).
   - Every page text has a `Why:` line: `RISK SCORE n/100`, `VENDOR CUT`, or
     `VENDOR SESSION LIMIT`. A risk page says "from what the participant said" only when the
     risk pipeline scored a turn; when the flag was raised by the model's `escalate_to_human`
@@ -828,7 +889,26 @@ The fourth is a clock. Our own `session_limits.max_duration_minutes` is lifted
 to the vendor ceiling on a high flag (`crisis_timer_extended`), the model is
 told the time at fixed points so it can prepare the participant, and the
 vendor's own 60-minute expiry on a flagged session runs the same recovery as
-the filter. See `docs/gpt-live.md` section 11 (ai-therapist-281).
+the filter. See `docs/gpt-live.md` section 11 (ai-therapist-281). When the
+session's crisis state cannot be read at that moment (ai-therapist-369), the
+server uses what it already knows: if it showed the session the high-risk
+crisis card or lifted its timer for a crisis, the recovery runs and the usual
+`VENDOR SESSION LIMIT` page goes out with one more line ("The session's stored
+crisis state could not be read ...; this server had handled a high-risk turn
+in it."). If it knows nothing, the recovery still runs (fail toward the
+hand-off) and the on-call is paged at the lowest level: "voice session hit the
+vendor session ceiling, and its crisis state could NOT be read ... treat it as
+possibly serious".
+
+Turns that were accepted are screened whatever fails after (ai-therapist-369):
+a typed turn that was saved goes through the crisis pipeline even when a later
+step of the request fails (the minor-age gate's account read used to sit
+outside any `try`), and a pre-session check-in is screened even when the chat
+start fails before its screen (in the background, after the 503). A voice batch
+that `/logs/batch` could not store (a 5xx) is kept by the browser and sent
+again on the next flush (`client/main/lib/logBatch.ts`); its turns were
+screened on the server when the store failed, and are scored again when the
+re-sent batch is stored (a second risk row; a repeat page folds).
 
 ---
 

@@ -67,6 +67,14 @@ vi.mock('../db/index.js', () => ({
   getTherapistIdsForClient: vi.fn(async () => []),
   getCaseworkerIdsForClient: vi.fn(async () => []),
 }));
+// The page itself is a mock: since ai-therapist-369 a high turn requests it
+// from the pipeline the moment it scores, and nothing in a test may reach the
+// real paging layer (or the database behind it).
+vi.mock('./crisisPaging.service.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./crisisPaging.service.js')>()),
+  pageHighRisk: vi.fn(async () => ({ outcome: 'paged' })),
+  retryCrisisRecord: vi.fn(),
+}));
 vi.mock('./workQueue.service.js', () => ({ enqueueWorkItem: vi.fn(async () => null) }));
 vi.mock('./minorSafeguard.service.js', () => ({
   detectMinorDisclosurePatterns: detectMinorMock,
@@ -79,9 +87,13 @@ vi.mock('./sidebandManager.service.js', () => ({
   sidebandManager: { injectMessage: injectMessageMock, getActiveConnections: getActiveConnectionsMock },
 }));
 
-const { runCrisisPipeline, stitchSplitTurn, SPLIT_TURN_WINDOW_MS, _resetMinorGoodbyeStateForTests } = await import(
-  './crisisPipeline.service.js'
-);
+const {
+  runCrisisPipeline,
+  stitchSplitTurn,
+  SPLIT_TURN_WINDOW_MS,
+  _resetMinorGoodbyeStateForTests,
+  _resetEarlyPageStateForTests,
+} = await import('./crisisPipeline.service.js');
 const { clearCrisisResourceState } = await import('./crisisResources.js');
 
 const participantEmit = vi.fn((event: string) => {
@@ -91,6 +103,7 @@ const adminEmit = vi.fn();
 
 beforeEach(() => {
   vi.clearAllMocks();
+  _resetEarlyPageStateForTests();
   order.length = 0;
   clearCrisisResourceState();
   _resetMinorGoodbyeStateForTests();
@@ -332,6 +345,7 @@ describe('a sentence split across two voice turns is scored whole', () => {
         stitched_message_ids: [1],
       }),
       expect.anything(),
+      expect.anything(),
     );
 
     getRecentSessionMessagesMock.mockResolvedValue([row(9, 'assistant', 'Okay.', -500), SECOND]);
@@ -367,6 +381,7 @@ describe('a sentence split across two voice turns is scored whole', () => {
         stitched_message_ids: [1],
       },
       [FIRST, SECOND],
+      expect.anything(),
     );
     expect(participantEmit).toHaveBeenCalledWith(
       'session:crisis-emergency',
@@ -390,9 +405,10 @@ describe('a sentence split across two voice turns is scored whole', () => {
     getRecentSessionMessagesMock.mockResolvedValue([FIRST, SECOND]);
     risk(0, 'none');
     await runCrisisPipeline(turn, 'chat');
-    expect(analyzeMessageRiskMock).toHaveBeenCalledWith(expect.objectContaining({ content: ' myself' }), [
-      FIRST,
-      SECOND,
-    ]);
+    expect(analyzeMessageRiskMock).toHaveBeenCalledWith(
+      expect.objectContaining({ content: ' myself' }),
+      [FIRST, SECOND],
+      expect.anything(),
+    );
   });
 });

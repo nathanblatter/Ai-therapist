@@ -314,6 +314,10 @@ interface MessageContext {
   /** A vendor cut inside the window that nobody was paged about. */
   unpagedCut: { sessionId: string; at: number } | null;
   now: number;
+  /** The stored paging history could not be read (or not in time): an
+   *  earlier page for this participant may exist that this one does not
+   *  know about, so it cannot say "follow-up" or "what changed" against it. */
+  historyUnread?: boolean;
 }
 
 // ---- in-process ledger -----------------------------------------------------
@@ -329,6 +333,29 @@ function ledgerEntries(key: string, now: number): LedgerEntry[] {
   if (live.length > 0) ledger.set(key, live);
   else ledger.delete(key);
   return live;
+}
+
+/**
+ * The ledger entries that can cover an event for this participant: those under
+ * its key, and any for the same SESSION under another key. The key depends on
+ * a lookup (the participant's user id) that a slow database can fail: a page
+ * requested early, while that lookup timed out, is filed under the session;
+ * the request that follows once the database answers is filed under the user.
+ * Without this the second would find no page in flight and text the on-call
+ * again (ai-therapist-369).
+ */
+function ledgerEntriesFor(key: string, sessionId: string, now: number): LedgerEntry[] {
+  const entries = ledgerEntries(key, now);
+  const sessionKey = participantKey(sessionId, null);
+  const seen = new Set(entries);
+  const others: LedgerEntry[] = [];
+  for (const [otherKey] of [...ledger]) {
+    if (otherKey === key) continue;
+    for (const entry of ledgerEntries(otherKey, now)) {
+      if (!seen.has(entry) && (otherKey === sessionKey || entry.sessionId === sessionId)) others.push(entry);
+    }
+  }
+  return others.length > 0 ? [...entries, ...others] : entries;
 }
 
 function dropLedgerEntry(key: string, entry: LedgerEntry): void {
@@ -347,6 +374,13 @@ export function _resetPagingStateForTests(): void {
   ledger.clear();
   for (const timer of silenceTimers.values()) clearTimeout(timer);
   silenceTimers.clear();
+  for (const timer of recordRetryTimers) clearTimeout(timer);
+  recordRetryTimers.clear();
+}
+
+/** Test hook: how many record retries are waiting. */
+export function _pendingRecordRetriesForTests(): number {
+  return recordRetryTimers.size;
 }
 
 // ---- pure rules (exported for tests) --------------------------------------
@@ -538,7 +572,7 @@ export type RiskFlagSource = 'participant_turn' | 'model_escalation';
 export function composeRiskPage(
   sessionId: string,
   riskScore: number,
-  ctx: Pick<MessageContext, 'previousPage' | 'unpagedCut' | 'now'>,
+  ctx: Pick<MessageContext, 'previousPage' | 'unpagedCut' | 'now'> & Pick<Partial<MessageContext>, 'historyUnread'>,
   source: RiskFlagSource = 'participant_turn',
   subject: PageSubject = 'own',
   extra: { escalation?: PageEscalation | null; alsoSubject?: PageSubject | null } = {},
@@ -613,9 +647,18 @@ export function composeRiskPage(
         )
       : null,
     followUpLine(ctx),
+    // Said plainly rather than worded as a first page that may not be one
+    // (ai-therapist-369): the comparison with earlier pages needs the stored
+    // history, and a page requested before a slow database answered goes
+    // out without it.
+    ctx.historyUnread ? field('detail', HISTORY_UNREAD_LINE) : null,
     linkField(sessionId),
   );
 }
+
+/** The detail line of a risk page sent without the stored paging history. */
+export const HISTORY_UNREAD_LINE =
+  'Earlier pages for this participant could not be checked (database slow or down): this may repeat one you already have.';
 
 /** The bridge text of composeRiskPage. */
 export function buildRiskPageMessage(...args: Parameters<typeof composeRiskPage>): string {
@@ -795,11 +838,44 @@ export function buildVendorCutSilenceMessage(...args: Parameters<typeof composeV
   return renderPage(composeVendorCutSilencePage(...args));
 }
 
-/** The vendor's session ceiling ended a session during a high flag. */
+/**
+ * Where the caller's knowledge of the session's crisis state came from when
+ * the vendor ended it (ai-therapist-369):
+ *   database    the session row was read (the usual case);
+ *   in_process  the row could not be read, but this server scored a high turn
+ *               in the session or lifted its timer for a crisis;
+ *   unknown     neither: the row could not be read and this server knows
+ *               nothing of the session's risk.
+ */
+export type CrisisStateSource = 'database' | 'in_process' | 'unknown';
+
+/** The vendor's session ceiling ended a session during a high flag (or, with
+ *  `stateSource` 'unknown', one whose crisis state could not be read). */
 export function composeVendorCeilingPage(
   sessionId: string,
   ctx: Pick<MessageContext, 'previousPage' | 'now'>,
+  stateSource: CrisisStateSource = 'database',
 ): PageMessage {
+  if (stateSource === 'unknown') {
+    return page(
+      field(
+        'headline',
+        'AI-Therapist: voice session hit the vendor session ceiling, and its crisis state could NOT be read',
+        'AI-Therapist: voice session hit the vendor ceiling; crisis state could NOT be read',
+      ),
+      field(
+        'why',
+        'Why: VENDOR SESSION LIMIT, not a new risk score. Whether the session was flagged could NOT be read ' +
+          '(database unavailable), so treat it as possibly serious. The app moves them to typed chat (a new voice ' +
+          'call if chat is off) under a new session id.',
+        'Why: VENDOR SESSION LIMIT. Crisis state could NOT be read: treat as possibly serious.',
+      ),
+      field('detail', `Session ${shortId(sessionId)}`),
+      followUpLine(ctx),
+      field('action', 'Review the transcript and consider reaching out.'),
+      linkField(sessionId),
+    );
+  }
   return page(
     field('headline', 'URGENT: AI-Therapist voice session hit the vendor session ceiling during a HIGH crisis flag'),
     field(
@@ -809,6 +885,13 @@ export function composeVendorCeilingPage(
       'Why: VENDOR SESSION LIMIT, not a new risk score.',
     ),
     field('detail', `Session ${shortId(sessionId)}`),
+    stateSource === 'in_process'
+      ? field(
+          'detail',
+          "The session's stored crisis state could not be read (database unavailable); this server had handled " +
+            'a high-risk turn in it.',
+        )
+      : null,
     followUpLine(ctx),
     field('action', 'Review the transcript and consider reaching out.'),
     linkField(sessionId),
@@ -845,13 +928,15 @@ async function isSandboxSession(sessionId: string): Promise<boolean> {
 
 /** The participant and their recent paging decisions. Never rejects: with no
  *  history nothing can absorb the page, so it is sent. */
-async function readPagingHistory(sessionId: string): Promise<{ userId: number | null; rows: PagingRecordRow[] }> {
+async function readPagingHistory(
+  sessionId: string,
+): Promise<{ userId: number | null; rows: PagingRecordRow[]; failed: boolean }> {
   try {
     return await withTimeout(
       (async () => {
         const userId = await getPagingParticipantUserId(sessionId);
         const rows = await getRecentPagingRecords(sessionId, userId, new Date(Date.now() - PAGE_FOLD_WINDOW_MS));
-        return { userId, rows: rows ?? [] };
+        return { userId, rows: rows ?? [], failed: false };
       })(),
       'paging history lookup',
     );
@@ -860,7 +945,7 @@ async function readPagingHistory(sessionId: string): Promise<{ userId: number | 
       { err },
       `[paging] could not read paging history for ${sessionId.substring(0, 12)}...; paging without it`,
     );
-    return { userId: null, rows: [] };
+    return { userId: null, rows: [], failed: true };
   }
 }
 
@@ -875,6 +960,92 @@ async function record(
   } catch (err) {
     log.error({ err }, `[paging] failed to record a paging decision for ${sessionId.substring(0, 12)}...`);
     return null;
+  }
+}
+
+// ---- records that could not be written (ai-therapist-369) ------------------
+//
+// A page whose 'crisis_sms_alert' row, or a high flag whose crisis event, could
+// not be written used to leave only a log line: the IRB counts, the adverse-
+// event draft and every other process's fold rule never saw it. The write is
+// now retried in the background (nothing waits on it), and if it still fails
+// the admin dashboards are told, through the same 'session:page-decision'
+// notice the paging layer uses for a page that was not delivered.
+
+/** Delays before each retry of a crisis record write. Three attempts over
+ *  about 2.5 minutes: a pool that is saturated for a moment recovers well
+ *  inside that; a database that is down is reported. */
+export const RECORD_RETRY_DELAYS_MS: readonly number[] = [5_000, 30_000, 120_000];
+
+const recordRetryTimers = new Set<ReturnType<typeof setTimeout>>();
+
+/**
+ * Retry a crisis record write in the background: after each delay in
+ * RECORD_RETRY_DELAYS_MS, until one attempt succeeds. When every attempt has
+ * failed, reportUnrecordedCrisisRecord. Never throws; never delays the caller.
+ * The timers do not keep the process alive (a restart loses the retry, and
+ * the log line and the admin notice of the first failure are what remain).
+ */
+export function retryCrisisRecord(opts: {
+  sessionId: string;
+  /** What is being written, for the log and the notice ('page record',
+   *  'crisis flag'). */
+  what: string;
+  /** One line for the notice: what the record was about. No PHI. */
+  summary: string;
+  write: () => Promise<unknown>;
+  onRecorded?: (value: unknown) => void;
+}): void {
+  const short = opts.sessionId.substring(0, 12);
+  const attempt = (index: number): void => {
+    if (index >= RECORD_RETRY_DELAYS_MS.length) {
+      reportUnrecordedCrisisRecord(opts.sessionId, opts.what, opts.summary, RECORD_RETRY_DELAYS_MS.length + 1);
+      return;
+    }
+    const timer = setTimeout(() => {
+      recordRetryTimers.delete(timer);
+      opts
+        .write()
+        .then((value) => {
+          log.warn(`[paging] ${opts.what} for ${short}... written on retry ${index + 1}`);
+          try {
+            opts.onRecorded?.(value);
+          } catch (err) {
+            log.error({ err }, `[paging] after writing the ${opts.what} for ${short}...`);
+          }
+        })
+        .catch((err: unknown) => {
+          log.error({ err }, `[paging] retry ${index + 1} of the ${opts.what} for ${short}... failed`);
+          attempt(index + 1);
+        });
+    }, RECORD_RETRY_DELAYS_MS[index]);
+    timer.unref?.();
+    recordRetryTimers.add(timer);
+  };
+  attempt(0);
+}
+
+/**
+ * A crisis record that could not be written, after its retries. Logged at
+ * error level and shown on the admin dashboards ('session:page-decision',
+ * outcome 'unrecorded'), so a member of staff can enter it by hand. Never
+ * throws.
+ */
+export function reportUnrecordedCrisisRecord(sessionId: string, what: string, summary: string, attempts: number): void {
+  const message =
+    `NOT RECORDED: the ${what} for this session could not be saved after ${attempts} attempts (database ` +
+    `unavailable). ${summary} It is missing from the study record and the IRB counts: enter it by hand.`;
+  log.error(`[paging] UNRECORDED ${what} for ${sessionId.substring(0, 12)}... after ${attempts} attempts: ${summary}`);
+  try {
+    if (!global.io) return;
+    void broadcastAdminEventForSession(
+      global.io,
+      'session:page-decision',
+      { sessionId, outcome: 'unrecorded', kind: null, level: null, riskScore: null, message, at: new Date() },
+      sessionId,
+    ).catch((err: unknown) => log.error({ err }, '[paging] admin broadcast failed'));
+  } catch (err) {
+    log.error({ err }, '[paging] admin broadcast failed');
   }
 }
 
@@ -941,7 +1112,7 @@ async function dispatchPage(request: PageRequest): Promise<PageDecision> {
   // "nobody has been paged".
   for (;;) {
     const now = Date.now();
-    const inFlightOrSent = ledgerEntries(key, now);
+    const inFlightOrSent = ledgerEntriesFor(key, sessionId, now);
     const delivered: PriorPage[] = [...stored, ...inFlightOrSent.filter((e) => e.settled && e.delivered)];
     const cover = delivered.filter((p) => pageCovers(p, request, now)).sort((a, b) => b.at - a.at)[0];
     if (cover) return await fold(request, cover, now);
@@ -955,7 +1126,7 @@ async function dispatchPage(request: PageRequest): Promise<PageDecision> {
       continue;
     }
 
-    return await send(request, key, delivered, rows, now);
+    return await send(request, key, delivered, rows, now, history.failed);
   }
 }
 
@@ -1016,6 +1187,7 @@ async function send(
   delivered: PriorPage[],
   rows: PagingRecordRow[],
   now: number,
+  historyUnread = false,
 ): Promise<PageDecision> {
   const { sessionId, kind, level } = request;
   const previousPage = [...delivered].sort((a, b) => b.at - a.at)[0] ?? null;
@@ -1037,7 +1209,7 @@ async function send(
 
   let message: PageMessage;
   try {
-    message = request.buildMessage({ previousPage, unpagedCut, now });
+    message = request.buildMessage({ previousPage, unpagedCut, now, historyUnread });
   } catch (err) {
     log.error({ err }, '[paging] building the page text failed; sending a minimal page');
     message = composeMinimalPage(sessionId, kind);
@@ -1104,31 +1276,46 @@ async function send(
 
   // The row is written whether or not the SMS was delivered (as before this
   // policy: the harness and CI run with no pager); `delivered` says which.
-  const actionId = await record(
-    sessionId,
-    'crisis_sms_alert',
-    {
+  // A write that fails is retried in the background (ai-therapist-369): this
+  // row is what the IRB counts and every other process's fold rule see.
+  const pageRecord = {
+    riskScore: request.riskScore,
+    paging: {
+      decision: ok ? 'paged' : 'not_delivered',
+      kind,
+      level,
+      kinds,
+      delivered: ok,
       riskScore: request.riskScore,
-      paging: {
-        decision: ok ? 'paged' : 'not_delivered',
-        kind,
-        level,
-        kinds,
-        delivered: ok,
-        riskScore: request.riskScore,
-        ...subjectAndStage(request),
-        followsActionId: previousPage?.actionId ?? null,
-        ...request.facts,
-        // Per channel: attempted, accepted or not, provider message ids. No
-        // phone number and no message text. Empty when nothing was attempted
-        // (`channelsSkipped` says why: paging disabled, or not configured).
-        channels,
-        channelsSkipped: skipped,
-        summary: `${ok ? 'Paged on-call' : 'Page attempted, not delivered'}: ${request.summary}${channelNote}`,
-      },
+      ...subjectAndStage(request),
+      followsActionId: previousPage?.actionId ?? null,
+      ...request.facts,
+      // Per channel: attempted, accepted or not, provider message ids. No
+      // phone number and no message text. Empty when nothing was attempted
+      // (`channelsSkipped` says why: paging disabled, or not configured).
+      channels,
+      channelsSkipped: skipped,
+      summary: `${ok ? 'Paged on-call' : 'Page attempted, not delivered'}: ${request.summary}${channelNote}`,
     },
-    request.riskScore,
-  );
+  };
+  let actionId: number | null = null;
+  try {
+    actionId = await insertPagingRecord(sessionId, 'crisis_sms_alert', pageRecord, request.riskScore);
+  } catch (err) {
+    log.error(
+      { err },
+      `[paging] could not record the page for ${sessionId.substring(0, 12)}...; retrying in the background`,
+    );
+    retryCrisisRecord({
+      sessionId,
+      what: 'page record',
+      summary: `${ok ? 'On-call paged' : 'Page attempted, NOT delivered'}: ${request.summary}`,
+      write: () => insertPagingRecord(sessionId, 'crisis_sms_alert', pageRecord, request.riskScore),
+      onRecorded: (id) => {
+        if (typeof id === 'number') entry.actionId = id;
+      },
+    });
+  }
   entry.actionId = actionId;
   resolveRecorded(actionId);
 
@@ -1660,18 +1847,30 @@ export async function pageVendorTermination(input: {
   cause: 'content_filter' | 'expired';
   flagged: boolean;
   severity: string | null;
+  /** Where `flagged` / `severity` came from (default 'database'). For the
+   *  vendor ceiling, 'unknown' pages at the lowest level with a text that
+   *  says the state could not be read (ai-therapist-369). */
+  stateSource?: CrisisStateSource;
 }): Promise<PageDecision> {
   const { sessionId, cause } = input;
+  const stateSource = input.stateSource ?? 'database';
   try {
     if (cause === 'expired') {
+      const unknown = stateSource === 'unknown';
       return await dispatchPage({
         sessionId,
         kind: 'vendor_ceiling',
-        level: PAGE_LEVEL.high,
+        level: unknown ? PAGE_LEVEL.mediumVendorCut : PAGE_LEVEL.high,
         riskScore: null,
-        facts: { cause, peakSeverity: 'high' },
-        summary: 'the voice session hit the vendor session ceiling during a high crisis flag.',
-        buildMessage: (ctx) => composeVendorCeilingPage(sessionId, ctx),
+        facts: {
+          cause,
+          peakSeverity: unknown ? 'unknown' : 'high',
+          ...(stateSource !== 'database' ? { crisisStateSource: stateSource } : {}),
+        },
+        summary: unknown
+          ? 'the voice session hit the vendor session ceiling and its crisis state could not be read.'
+          : 'the voice session hit the vendor session ceiling during a high crisis flag.',
+        buildMessage: (ctx) => composeVendorCeilingPage(sessionId, ctx, stateSource),
       });
     }
 
@@ -1744,7 +1943,7 @@ export async function pageVendorTermination(input: {
       cause === 'expired' ? 'vendor_ceiling' : 'vendor_cut',
       PAGE_LEVEL.mediumVendorCut,
       cause === 'expired'
-        ? composeVendorCeilingPage(sessionId, bareContext())
+        ? composeVendorCeilingPage(sessionId, bareContext(), stateSource)
         : composeVendorCutPage(sessionId, { severity: 'unknown', riskScore: null }, bareContext()),
     );
   }

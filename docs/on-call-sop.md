@@ -55,7 +55,21 @@ high-severity event becomes an SMS"; code: `crisisPaging.service`):
     HIGH risk" it is URGENT.
 - **`Why: VENDOR SESSION LIMIT`**: a voice session reached the vendor's
   maximum length during a high flag; the app moves the participant to typed chat
-  under a new session id.
+  under a new session id. If the page adds "The session's stored crisis state
+  could not be read ... this server had handled a high-risk turn in it", the
+  database was not answering but the system knew the session was at high risk:
+  treat it as the URGENT page it is. A page that reads "hit the vendor session
+  ceiling, and its crisis state could NOT be read" (not marked URGENT) means
+  the system could not tell whether the session was flagged: treat it as
+  possibly serious and review the transcript.
+
+A risk page that ends with "Earlier pages for this participant could not be
+checked (database slow or down): this may repeat one you already have." was
+sent the moment the participant's words scored high, while the database was
+not answering. Its level, who is at risk and what it says are as accurate as
+any page; only the comparison with an earlier page ("Follow-up ...",
+"ESCALATED") could not be made. Check the dashboard for earlier pages about the
+same participant.
 
 One participant, one incident, few texts. After a page is **delivered**, later
 events for the **same participant** in the next **15 minutes** (the
@@ -82,6 +96,13 @@ A participant's first high-risk statement in a **recovery session** (the
 session the app opens after a vendor cut) pages like any other and is on the
 record as a crisis flag of its own, with its score; if the incident had no
 adverse-event draft yet, one is drafted then.
+
+A Live Monitoring notice that begins "NOT RECORDED: the page record ..." or
+"NOT RECORDED: the crisis flag ..." means you were paged (or a flag was
+raised) but the database would not store the record of it after several
+tries. The page itself was not affected. Tell the study coordinator the same
+day: the event is missing from the study record and the IRB counts until it is
+entered by hand.
 
 A text counts as delivered when at least one channel accepts it (see below).
 "Accepted" means the bridge or AWS took the message; neither can confirm it

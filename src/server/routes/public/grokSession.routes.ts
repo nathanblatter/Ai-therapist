@@ -42,6 +42,7 @@ import {
   getLanguageName,
 } from '../../utils/sessionHelpers.js';
 import { recordSessionOwnership } from '../../utils/sessionOwnership.js';
+import { rememberSessionAccount } from '../../utils/sessionAccounts.js';
 import {
   sanitizeCheckin,
   buildCheckinBlock,
@@ -216,6 +217,9 @@ export default function grokSessionRoutes(): Router {
         const sessionId = `grok_${randomUUID()}`;
         const username = req.session?.username || null;
         recordSessionOwnership(req, sessionId);
+        // The crisis pipeline's demo check, known from now on without a read
+        // (ai-therapist-369).
+        rememberSessionAccount(sessionId, userRole);
 
         try {
           await createActiveRealtimeSession(sessionId, userId, isDemoSession);

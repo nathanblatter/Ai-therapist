@@ -4,11 +4,12 @@
 // rules themselves are tested in crisisPaging.service.test.ts.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { queryMock, pageVendorTerminationMock, sendCrisisAlertMock, broadcastMock } = vi.hoisted(() => ({
+const { queryMock, pageVendorTerminationMock, sendCrisisAlertMock, broadcastMock, timeStatusMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
   pageVendorTerminationMock: vi.fn(),
   sendCrisisAlertMock: vi.fn(),
   broadcastMock: vi.fn(async () => undefined),
+  timeStatusMock: vi.fn(),
 }));
 
 vi.mock('ws', () => ({ default: vi.fn() }));
@@ -23,8 +24,13 @@ vi.mock('../utils/sessionHelpers.js', () => ({ getSystemConfig: vi.fn(async () =
 vi.mock('./crisisDetection.service.js', () => ({ logInterventionAction: vi.fn(async () => undefined) }));
 vi.mock('./crisisAlert.service.js', () => ({ sendCrisisAlert: sendCrisisAlertMock }));
 vi.mock('./crisisPaging.service.js', () => ({ pageVendorTermination: pageVendorTerminationMock }));
+vi.mock('../utils/sessionAutoTerminate.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../utils/sessionAutoTerminate.js')>()),
+  getSessionTimeStatus: timeStatusMock,
+}));
 
 import { sidebandManager } from './sidebandManager.service.js';
+import { clearCrisisResourceState, emitCrisisResources } from './crisisResources.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const sb = sidebandManager as any;
@@ -39,6 +45,8 @@ const sessionRow = (row: { crisis_flagged: boolean | null; crisis_severity: stri
 
 beforeEach(() => {
   vi.clearAllMocks();
+  clearCrisisResourceState();
+  timeStatusMock.mockReturnValue(null);
   pageVendorTerminationMock.mockResolvedValue({ outcome: 'paged' });
   delete (global as { io?: unknown }).io;
 });
@@ -77,6 +85,7 @@ describe('handleModerationTermination hands paging to crisisPaging.service', () 
       cause: 'content_filter',
       flagged: false,
       severity: null,
+      stateSource: 'unknown',
     });
   });
 
@@ -96,6 +105,56 @@ describe('handleModerationTermination hands paging to crisisPaging.service', () 
     sessionRow({ crisis_flagged: false, crisis_severity: null });
     await sb.handleModerationTermination('s-exp-calm', 'expired');
     expect(pageVendorTerminationMock).not.toHaveBeenCalled();
+  });
+
+  // ai-therapist-369 item 3: an unreadable crisis state used to mean no
+  // announcement and no page at the vendor's 60-minute ceiling.
+  describe('vendor ceiling when the crisis state cannot be read', () => {
+    const participantEmit = vi.fn();
+    beforeEach(() => {
+      queryMock.mockRejectedValue(new Error('timeout exceeded when trying to connect'));
+      (global as { io?: unknown }).io = { to: vi.fn(() => ({ emit: participantEmit })) };
+      participantEmit.mockClear();
+    });
+    const announced = (sessionId: string) =>
+      participantEmit.mock.calls.some(
+        ([event, payload]) =>
+          event === 'session:moderation-terminated' && (payload as { sessionId?: string }).sessionId === sessionId,
+      );
+
+    it('this server showed the session the high-risk card: hand-off and a high page', async () => {
+      emitCrisisResources('s-exp-known', { reason: 'high_risk', severity: 'high', riskScore: 90 });
+      await sb.handleModerationTermination('s-exp-known', 'expired');
+      expect(announced('s-exp-known')).toBe(true);
+      expect(pageVendorTerminationMock).toHaveBeenCalledWith({
+        sessionId: 's-exp-known',
+        cause: 'expired',
+        flagged: true,
+        severity: 'high',
+        stateSource: 'in_process',
+      });
+    });
+
+    it('this server lifted the session timer for a crisis: the same', async () => {
+      timeStatusMock.mockReturnValue({ liftedForCrisis: true });
+      await sb.handleModerationTermination('s-exp-lifted', 'expired');
+      expect(announced('s-exp-lifted')).toBe(true);
+      expect(pageVendorTerminationMock).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 's-exp-lifted', stateSource: 'in_process', severity: 'high' }),
+      );
+    });
+
+    it('nothing known: fails toward the hand-off, and pages saying the state could not be read', async () => {
+      await sb.handleModerationTermination('s-exp-unknown', 'expired');
+      expect(announced('s-exp-unknown')).toBe(true);
+      expect(pageVendorTerminationMock).toHaveBeenCalledWith({
+        sessionId: 's-exp-unknown',
+        cause: 'expired',
+        flagged: false,
+        severity: null,
+        stateSource: 'unknown',
+      });
+    });
   });
 
   it('a paging failure does not stop the termination from being recorded and broadcast', async () => {

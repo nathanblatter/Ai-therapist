@@ -7,6 +7,7 @@ import { pool } from '../config/db.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { PRACTICE_KINDS } from '../../shared/practice.js';
 import { runWithToolTimeout } from './toolTimeouts.js';
+import { CRISIS_READ_DEADLINE_MS, withReadDeadline } from '../utils/readDeadline.js';
 import { FORGET_SAFETY_EXCEPTION } from '../utils/memoryScreen.js';
 
 export interface ToolDefinition {
@@ -285,8 +286,11 @@ export class ToolRegistry {
     }
 
     // Admin kill switch (features.disabled_tools) also guards execution, in
-    // case a session was minted before the tool was disabled.
-    if ((await this.getDisabledTools()).includes(name)) {
+    // case a session was minted before the tool was disabled. Bounded
+    // (ai-therapist-369): on a cache miss it is a database read, and it stands
+    // in front of escalate_to_human's page. A read that is slow is treated
+    // like one that failed: the tool runs.
+    if ((await this.getDisabledTools(CRISIS_READ_DEADLINE_MS)).includes(name)) {
       console.warn(`[ToolRegistry] Blocked disabled tool: ${name}`);
       return { error: `The ${name} tool is currently unavailable. Continue the conversation without it.` };
     }
@@ -305,10 +309,12 @@ export class ToolRegistry {
   }
 
   /** Admin-disabled tool names from features.disabled_tools (ai-therapist-32). */
-  private async getDisabledTools(): Promise<string[]> {
+  private async getDisabledTools(deadlineMs?: number): Promise<string[]> {
     try {
       const { getSystemConfig } = await import('../utils/sessionHelpers.js');
-      const config = await getSystemConfig();
+      const config = await (deadlineMs === undefined
+        ? getSystemConfig()
+        : withReadDeadline(getSystemConfig(), 'disabled-tools config', deadlineMs));
       const features = (config.features ?? {}) as { disabled_tools?: unknown };
       return Array.isArray(features.disabled_tools)
         ? features.disabled_tools.filter((t): t is string => typeof t === 'string')
@@ -676,12 +682,31 @@ export class ToolRegistry {
 
         // High urgency raises a full crisis flag; lower urgencies alert without flagging.
         if (urgency === 'high') {
-          // A flag write that fails (a database timeout, ai-therapist-366)
-          // must not cost the escalation its page and resources: those come
-          // from executeGraduatedResponse below and need no row.
-          try {
-            await flagSessionCrisis(
-              ctx.sessionId,
+          // The graduated response is STARTED FIRST (ai-therapist-369): its
+          // first, synchronous steps show the crisis card and request the
+          // on-call page, before anything here touches the database. The flag
+          // write runs alongside it. It used to run first, so the page and the
+          // card waited behind it: up to 3 s for a connection and 10 s per
+          // statement, past this tool's own 10 s limit.
+          // A model-initiated escalation must trigger the same response the
+          // auto pipeline would have (paging, 988 resources, safety-assessment
+          // steering); the flag also satisfies the risk pipeline's re-flag
+          // guard for later turns. Both are awaited, so a second escalate call
+          // while this one runs is still answered by this one (single flight,
+          // toolTimeouts runWithToolTimeout).
+          const escalatedSession = ctx.sessionId;
+          const { executeGraduatedResponse } = await import('./crisisIntervention.service.js');
+          // 'model_escalation': the page must not say the score came "from
+          // what the participant said" (it is the fixed score above).
+          const responding = executeGraduatedResponse(
+            escalatedSession,
+            'high',
+            scoreByUrgency.high,
+            'model_escalation',
+          );
+          const writeFlag = (retry: boolean) =>
+            flagSessionCrisis(
+              escalatedSession,
               'high',
               scoreByUrgency.high,
               'ai_assistant',
@@ -689,19 +714,25 @@ export class ToolRegistry {
               null,
               ['model_escalation'],
               reason,
+              ...(retry ? [{ retry: true }] : []),
             );
-          } catch (err) {
-            console.error('[escalate_to_human] crisis flag write failed; paging anyway:', err);
-          }
-          // The flag above satisfies the risk pipeline's shouldFlag transition
-          // guard, which would otherwise skip the emergency protocol entirely
-          // (paging, 988 resources, safety-assessment steering). A
-          // model-initiated escalation must trigger the same response the
-          // auto pipeline would have.
-          const { executeGraduatedResponse } = await import('./crisisIntervention.service.js');
-          // 'model_escalation': the page must not say the score came "from
-          // what the participant said" (it is the fixed score above).
-          await executeGraduatedResponse(ctx.sessionId, 'high', scoreByUrgency.high, 'model_escalation');
+          // A flag write that fails (a database timeout, ai-therapist-366)
+          // must not cost the escalation its page and resources; it is
+          // retried in the background and reported if it never lands
+          // (ai-therapist-369).
+          const flagging = Promise.resolve()
+            .then(() => writeFlag(false))
+            .catch(async (err: unknown) => {
+              console.error('[escalate_to_human] crisis flag write failed; paging anyway:', err);
+              const { retryCrisisRecord } = await import('./crisisPaging.service.js');
+              retryCrisisRecord({
+                sessionId: escalatedSession,
+                what: 'crisis flag',
+                summary: "High risk flag raised by the assistant's escalate tool.",
+                write: () => writeFlag(true),
+              });
+            });
+          await Promise.all([responding, flagging]);
         }
         await logInterventionAction(ctx.sessionId, 'ai_escalation', { urgency, reason });
 

@@ -81,16 +81,24 @@ vi.mock('../db/index.js', () => ({
   getTherapistIdsForClient: vi.fn(async () => []),
   getCaseworkerIdsForClient: vi.fn(async () => []),
 }));
+// The page itself is a mock: since ai-therapist-369 a high turn requests it
+// from the pipeline the moment it scores, and nothing in a test may reach the
+// real paging layer (or the database behind it).
+vi.mock('./crisisPaging.service.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./crisisPaging.service.js')>()),
+  pageHighRisk: vi.fn(async () => ({ outcome: 'paged' })),
+  retryCrisisRecord: vi.fn(),
+}));
 vi.mock('./workQueue.service.js', () => ({ enqueueWorkItem: enqueueWorkItemMock }));
 
-const { runCrisisPipeline, runCheckinCrisisScreen, checkinFreeText, CHECKIN_FACTOR } = await import(
-  './crisisPipeline.service.js'
-);
+const { runCrisisPipeline, runCheckinCrisisScreen, checkinFreeText, CHECKIN_FACTOR, _resetEarlyPageStateForTests } =
+  await import('./crisisPipeline.service.js');
 
 const emitMock = vi.fn();
 
 beforeEach(() => {
   vi.clearAllMocks();
+  _resetEarlyPageStateForTests();
   (global as unknown as { io: unknown }).io = { to: vi.fn(() => ({ emit: emitMock })) };
   getRecentSessionMessagesMock.mockResolvedValue([]);
   getSessionCheckinMock.mockResolvedValue(null);
@@ -129,7 +137,10 @@ describe('third party at risk: same flag and page, labelled', () => {
 
     expect(r.flagged).toBe(true);
     expect(r.severity).toBe('high');
-    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 90, { thirdParty: true });
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 90, {
+      thirdParty: true,
+      pageAlreadyRequested: true,
+    });
   });
 
   it('the crisis event says who is at risk: first factor and the notes', async () => {
@@ -194,7 +205,7 @@ describe('third party at risk: same flag and page, labelled', () => {
     const r = await runCrisisPipeline(TURN, 'chat');
 
     expect(r.steeringGuidance).toBe('CHAT_HIGH_GUIDANCE\n\nLADDER_REQUIRED');
-    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 90);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 90, { pageAlreadyRequested: true });
     const [, , , , , , factors, notes] = flagSessionCrisisMock.mock.calls[0];
     expect(factors).toEqual(['stated intent']);
     expect(notes).toBe('Risk score: 90 - Factors: stated intent');
@@ -249,7 +260,7 @@ describe('the pre-session check-in goes through the pipeline', () => {
     risk(90, 'high');
     const r = await runCheckinCrisisScreen('chat_1', { topic: 'I am going to kill myself tonight' }, 'realtime');
     expect(r.severity).toBe('high');
-    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 90);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 90, { pageAlreadyRequested: true });
     expect(maybeSteerSessionMock).toHaveBeenCalledWith('chat_1', 90, 'high', true);
   });
 
@@ -293,8 +304,9 @@ describe('the pre-session check-in goes through the pipeline', () => {
 
     await runCrisisPipeline({ sessionId: 'chat_1', messageId: 9, content: 't9' }, 'chat');
 
+    // Read alongside the history (ai-therapist-369), and not used.
     expect(analyzeMessageRiskMock.mock.calls[0][1]).toHaveLength(10);
-    expect(getSessionCheckinMock).not.toHaveBeenCalled();
+    expect(JSON.stringify(analyzeMessageRiskMock.mock.calls[0][1])).not.toContain('pre-session check-in');
   });
 
   it('a failed check-in read never costs the turn its scoring', async () => {
@@ -320,7 +332,10 @@ describe('risk to others: flagged and paged like a high self-risk, labelled, de-
     harmHigh();
     const r = await runCrisisPipeline(HARM_TURN, 'chat');
     expect(r.flagged).toBe(true);
-    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 80, { subject: 'harm_to_others' });
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 80, {
+      subject: 'harm_to_others',
+      pageAlreadyRequested: true,
+    });
   });
 
   it('every record a person reads says risk to others', async () => {
@@ -409,7 +424,7 @@ describe('who is at risk changes inside a session that is already flagged high',
     expect(r.flagged).toBe(true);
     // The participant's own risk: no subject, so the unlabelled page and the
     // standard protocol.
-    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 75);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 75, { pageAlreadyRequested: true });
     const [, severity, score, , , , , notes] = flagSessionCrisisMock.mock.calls[0];
     expect([severity, score]).toEqual(['high', 75]);
     expect(notes).toMatch(
@@ -428,7 +443,7 @@ describe('who is at risk changes inside a session that is already flagged high',
     const r = await runCrisisPipeline(OWN_TURN, 'realtime');
 
     expect(r.flagged).toBe(true);
-    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 70);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 70, { pageAlreadyRequested: true });
   });
 
   it('own risk first, then credible intent to harm someone: staff are told about the risk to others', async () => {
@@ -442,7 +457,10 @@ describe('who is at risk changes inside a session that is already flagged high',
     );
 
     expect(r.flagged).toBe(true);
-    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 80, { subject: 'harm_to_others' });
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 80, {
+      subject: 'harm_to_others',
+      pageAlreadyRequested: true,
+    });
     expect(flagSessionCrisisMock.mock.calls[0][7]).toMatch(
       /risk to others now; the earlier high flag in this session was about the participant's OWN risk/,
     );

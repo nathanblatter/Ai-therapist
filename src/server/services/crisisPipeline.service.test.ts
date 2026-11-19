@@ -18,11 +18,13 @@ const {
   getSessionAccessInfoMock,
   enqueueWorkItemMock,
   pageHighRiskMock,
+  retryCrisisRecordMock,
   recordRecoveryDisclosureMock,
   incidentHasCrisisAdverseEventMock,
   draftAdverseEventFromCrisisMock,
 } = vi.hoisted(() => ({
   pageHighRiskMock: vi.fn(async () => ({ outcome: 'paged' })),
+  retryCrisisRecordMock: vi.fn(),
   recordRecoveryDisclosureMock: vi.fn(),
   incidentHasCrisisAdverseEventMock: vi.fn(),
   draftAdverseEventFromCrisisMock: vi.fn(async () => 1),
@@ -77,12 +79,16 @@ vi.mock('./workQueue.service.js', () => ({ enqueueWorkItem: enqueueWorkItemMock 
 vi.mock('./crisisPaging.service.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./crisisPaging.service.js')>()),
   pageHighRisk: pageHighRiskMock,
+  retryCrisisRecord: retryCrisisRecordMock,
 }));
 vi.mock('./adverseEvent.service.js', () => ({ draftAdverseEventFromCrisis: draftAdverseEventFromCrisisMock }));
 
-const { runCrisisPipeline, handleHighTurnWithoutReflag, RECOVERY_DISCLOSURE_RECORD_TIMEOUT_MS } = await import(
-  './crisisPipeline.service.js'
-);
+const {
+  runCrisisPipeline,
+  handleHighTurnWithoutReflag,
+  RECOVERY_DISCLOSURE_RECORD_TIMEOUT_MS,
+  _resetEarlyPageStateForTests,
+} = await import('./crisisPipeline.service.js');
 const { _settleBackgroundForTests } = await import('../utils/backgroundWork.js');
 
 const emitMock = vi.fn();
@@ -90,6 +96,7 @@ const toMock = vi.fn(() => ({ emit: emitMock }));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  _resetEarlyPageStateForTests();
   (global as unknown as { io: unknown }).io = { to: toMock };
   isDemoAccountSessionMock.mockResolvedValue(false);
   getRecentSessionMessagesMock.mockResolvedValue([]);
@@ -164,7 +171,7 @@ describe('runCrisisPipeline — flag matrix', () => {
     risk(90, 'high');
     const r = await runCrisisPipeline(TURN, 'realtime');
     expect(r.flagged).toBe(true);
-    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 90);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 90, { pageAlreadyRequested: true });
   });
 
   it('does NOT re-flag when already flagged at same severity without +10 escalation', async () => {
@@ -204,13 +211,22 @@ describe('runCrisisPipeline — flag matrix', () => {
   // A recovery session is stamped high at the inherited score, or at 100, so
   // the re-flag rule never fires in it. Every high turn the rule lets pass is
   // handed to handleHighTurnWithoutReflag (below), without holding the turn.
+  // The scorer read the session as already flagged high and the turn is at the
+  // ordinary high level, so it was not paged when it scored (ai-therapist-369):
+  // the pipeline's own rules decide, exactly as before.
   it('a high turn in an already-high session that is not re-flagged is handed on, and the turn does not wait', async () => {
     getSessionCrisisStateMock.mockResolvedValue({
       crisis_flagged: true,
       crisis_severity: 'high',
       crisis_risk_score: 100,
     });
-    risk(90, 'high', ['explicit_intent']);
+    analyzeMessageRiskMock.mockResolvedValue({
+      riskScore: 85,
+      severity: 'high',
+      factors: ['explicit_intent'],
+      breakdown: {},
+      sessionFlaggedHigh: true,
+    });
     // The record has not answered when the turn returns. Fake timers: the
     // 2-second cap on it must not fire on the wall clock, in whatever test is
     // running two seconds from now.
@@ -223,16 +239,17 @@ describe('runCrisisPipeline — flag matrix', () => {
       expect(flagSessionCrisisMock).not.toHaveBeenCalled();
       expect(recordRecoveryDisclosureMock).toHaveBeenCalledWith({
         sessionId: 'chat_1',
-        riskScore: 90,
+        riskScore: 85,
         messageId: 42,
         factors: ['explicit_intent'],
       });
+      expect(pageHighRiskMock).not.toHaveBeenCalled();
       // Past the cap the page goes without the record; then the record lands.
       await vi.advanceTimersByTimeAsync(RECOVERY_DISCLOSURE_RECORD_TIMEOUT_MS);
       land({ recorded: false, eventId: null, stampedScore: null });
       await _settleBackgroundForTests();
       expect(pageHighRiskMock).toHaveBeenCalledTimes(1);
-      expect(pageHighRiskMock).toHaveBeenCalledWith('chat_1', 90, { trigger: 'high_turn_in_recovery_session' });
+      expect(pageHighRiskMock).toHaveBeenCalledWith('chat_1', 85, { trigger: 'high_turn_in_recovery_session' });
     } finally {
       vi.useRealTimers();
     }
@@ -244,14 +261,16 @@ describe('runCrisisPipeline — flag matrix', () => {
       crisis_severity: 'high',
       crisis_risk_score: 75,
     });
-    risk(95, 'high'); // +20: re-flag, executeGraduatedResponse pages
+    risk(95, 'high'); // +20: re-flag; paged when it scored (ai-therapist-369)
     await runCrisisPipeline(TURN, 'realtime');
-    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 95);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 95, { pageAlreadyRequested: true });
     risk(60, 'medium');
     await runCrisisPipeline(TURN, 'realtime');
     await _settleBackgroundForTests();
     expect(recordRecoveryDisclosureMock).not.toHaveBeenCalled();
-    expect(pageHighRiskMock).not.toHaveBeenCalled();
+    // The one page is the 95 turn's own, requested as it scored.
+    expect(pageHighRiskMock).toHaveBeenCalledTimes(1);
+    expect(pageHighRiskMock).toHaveBeenCalledWith('chat_1', 95, expect.objectContaining({ requested: 'on_score' }));
   });
 });
 
@@ -321,6 +340,23 @@ describe('a high turn the re-flag rule let pass (handleHighTurnWithoutReflag)', 
     expect(pageHighRiskMock).toHaveBeenCalledWith('chat_1', 95, { trigger: 'critical_turn_without_reflag' });
     expect(logInterventionActionMock).not.toHaveBeenCalled();
     expect(draftAdverseEventFromCrisisMock).not.toHaveBeenCalled();
+  });
+
+  // PR #86 review: the pipeline already paged this turn when it scored
+  // (respondToHighVerdict); the hand-on must not request it a second time.
+  it('page already requested when it scored: a critical turn in a real high flag is not paged again', async () => {
+    await handleHighTurnWithoutReflag(TURN, { riskScore: 95, factors: ['attempt'] }, 'realtime', {
+      pageAlreadyRequested: true,
+    });
+    expect(pageHighRiskMock).not.toHaveBeenCalled();
+  });
+
+  it('page already requested when it scored: a recovery disclosure is recorded but not paged again', async () => {
+    recordRecoveryDisclosureMock.mockResolvedValue(recordedAs);
+    await handleHighTurnWithoutReflag(TURN, HIGH, 'realtime', { pageAlreadyRequested: true });
+    expect(pageHighRiskMock).not.toHaveBeenCalled();
+    expect(logInterventionActionMock).toHaveBeenCalledWith('chat_1', 'auto_flag', expect.any(Object));
+    expect(draftAdverseEventFromCrisisMock).toHaveBeenCalledTimes(1);
   });
 
   it('a real high flag and an attempt in progress scored below 90: still requested, with what it says', async () => {
@@ -442,6 +478,33 @@ describe('a high turn the re-flag rule let pass (handleHighTurnWithoutReflag)', 
     }
   });
 
+  // PR #83 review (ai-therapist-369 item 7): the slow path pages first, then
+  // waits for the record. When the record finally answers recorded: false (a
+  // real high flag exists; nothing was claimed), nothing may be written.
+  it('a slow record that finally answers "not recorded" writes nothing (the page stands)', async () => {
+    vi.useFakeTimers();
+    try {
+      let land: (value: unknown) => void = () => undefined;
+      recordRecoveryDisclosureMock.mockReturnValue(new Promise((resolve) => (land = resolve)));
+      const handling = handleHighTurnWithoutReflag(TURN, HIGH, 'realtime');
+      await vi.advanceTimersByTimeAsync(RECOVERY_DISCLOSURE_RECORD_TIMEOUT_MS + 50);
+      await vi.waitFor(() => expect(pageHighRiskMock).toHaveBeenCalledTimes(1));
+
+      land({ recorded: false, eventId: null, stampedScore: null });
+      await handling;
+      await _settleBackgroundForTests();
+      expect(pageHighRiskMock).toHaveBeenCalledTimes(1);
+      expect(logInterventionActionMock).not.toHaveBeenCalled();
+      expect(incidentHasCrisisAdverseEventMock).not.toHaveBeenCalled();
+      expect(draftAdverseEventFromCrisisMock).not.toHaveBeenCalled();
+      expect(enqueueWorkItemMock).not.toHaveBeenCalled();
+      expect(getSessionAccessInfoMock).not.toHaveBeenCalled();
+      expect(emitMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('an anonymous session gets the record and the page, and no care-team item', async () => {
     recordRecoveryDisclosureMock.mockResolvedValue(recordedAs);
     getSessionAccessInfoMock.mockResolvedValue({ status: 'active', user_id: null, session_type: 'voice' });
@@ -468,7 +531,7 @@ describe('a high turn the re-flag rule let pass (handleHighTurnWithoutReflag)', 
     risk(80, 'high');
     const high = await runCrisisPipeline(TURN, 'chat');
     expect(high.flagged).toBe(true);
-    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 80);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 80, { pageAlreadyRequested: true });
   });
 });
 
@@ -682,7 +745,7 @@ describe('runCrisisPipeline — context-wake turns (ai-therapist-299)', () => {
     );
     // executeGraduatedResponse is what logs high_risk_emergency, pages the
     // on-call and emits session:crisis-emergency.
-    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 92);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 92, { pageAlreadyRequested: true });
     // An escalation forces the steer past the cooldown, as a keyword turn does.
     expect(maybeSteerSessionMock).toHaveBeenCalledWith('chat_1', 92, 'high', true);
   });
@@ -695,7 +758,7 @@ describe('runCrisisPipeline — context-wake turns (ai-therapist-299)', () => {
 
     expect(shouldSteerMock).toHaveBeenCalledWith('chat_1', 92, true);
     expect(r.steeringGuidance).toBe('CHAT_HIGH_GUIDANCE');
-    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 92);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 92, { pageAlreadyRequested: true });
   });
 
   it('already flagged high: a later context-wake high turn does not page again or force the protocol again', async () => {
@@ -764,7 +827,7 @@ describe('runCrisisPipeline — reading the flag state must not cost the turn it
     expect(maybeSteerSessionMock).toHaveBeenCalledWith('chat_1', 90, 'high', true);
     // It used to throw here: no flag, no page, NONE returned.
     expect(flagSessionCrisisMock).toHaveBeenCalled();
-    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 90);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 90, { pageAlreadyRequested: true });
     expect(r).toMatchObject({ riskScore: 90, flagged: true });
   });
 });
@@ -784,7 +847,7 @@ describe('runCrisisPipeline — a database timeout fails toward paging (ai-thera
     const r = await runCrisisPipeline(TURN, 'realtime');
 
     expect(analyzeMessageRiskMock).toHaveBeenCalled();
-    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 90);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 90, { pageAlreadyRequested: true });
     expect(r).toMatchObject({ severity: 'high', flagged: true });
   });
 
@@ -794,8 +857,12 @@ describe('runCrisisPipeline — a database timeout fails toward paging (ai-thera
 
     const r = await runCrisisPipeline(TURN, 'chat');
 
-    expect(analyzeMessageRiskMock).toHaveBeenCalledWith(expect.objectContaining({ content: 'hi' }), []);
-    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 90);
+    expect(analyzeMessageRiskMock).toHaveBeenCalledWith(
+      expect.objectContaining({ content: 'hi' }),
+      [],
+      expect.anything(),
+    );
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 90, { pageAlreadyRequested: true });
     expect(r.steeringGuidance).toBe('CHAT_HIGH_GUIDANCE');
   });
 
@@ -815,7 +882,7 @@ describe('runCrisisPipeline — a database timeout fails toward paging (ai-thera
       [],
       expect.any(String),
     );
-    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 85);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 85, { pageAlreadyRequested: true });
     expect(r.flagged).toBe(true);
   });
 
@@ -825,8 +892,30 @@ describe('runCrisisPipeline — a database timeout fails toward paging (ai-thera
 
     const r = await runCrisisPipeline(TURN, 'realtime');
 
-    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 90);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 90, { pageAlreadyRequested: true });
     expect(r).toMatchObject({ severity: 'high', flagged: true });
+  });
+
+  it('a HIGH flag write that fails is retried in the background, with the same flag (ai-therapist-369)', async () => {
+    flagSessionCrisisMock.mockRejectedValueOnce(acquireTimeout()).mockResolvedValue(undefined);
+    risk(90, 'high', ['explicit_intent']);
+
+    await runCrisisPipeline(TURN, 'realtime');
+
+    expect(retryCrisisRecordMock).toHaveBeenCalledTimes(1);
+    const retry = retryCrisisRecordMock.mock.calls[0][0] as { what: string; sessionId: string; write: () => unknown };
+    expect(retry).toMatchObject({ what: 'crisis flag', sessionId: 'chat_1' });
+    await retry.write();
+    const [first, again] = flagSessionCrisisMock.mock.calls;
+    expect(again.slice(0, 8)).toEqual(first.slice(0, 8));
+    expect(again[8]).toEqual({ retry: true });
+  });
+
+  it('a medium flag write that fails is not retried (a late medium write could lower a newer high)', async () => {
+    flagSessionCrisisMock.mockRejectedValue(acquireTimeout());
+    risk(55, 'medium');
+    await runCrisisPipeline(TURN, 'realtime');
+    expect(retryCrisisRecordMock).not.toHaveBeenCalled();
   });
 
   it('flag write times out (statement): the graduated response still runs', async () => {
@@ -835,7 +924,7 @@ describe('runCrisisPipeline — a database timeout fails toward paging (ai-thera
 
     await runCrisisPipeline(TURN, 'chat');
 
-    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 80);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 80, { pageAlreadyRequested: true });
   });
 
   it('every read and write times out at once: a high turn still reaches the graduated response', async () => {
@@ -848,7 +937,7 @@ describe('runCrisisPipeline — a database timeout fails toward paging (ai-thera
 
     const r = await runCrisisPipeline(TURN, 'realtime');
 
-    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 95);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 95, { pageAlreadyRequested: true });
     expect(r).toMatchObject({ riskScore: 95, severity: 'high', flagged: true });
   });
 });

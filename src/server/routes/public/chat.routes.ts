@@ -42,6 +42,7 @@ import {
 } from '../../utils/promptContext.js';
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
 import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
+import { rememberSessionAccount } from '../../utils/sessionAccounts.js';
 import { requireConsent } from '../../middleware/consent.js';
 import { requireOutsideQuietHours } from '../../middleware/quietHours.js';
 import { requireActiveStudyStatus } from '../../middleware/studyStatus.js';
@@ -186,6 +187,11 @@ export default function chatRoutes(): Router {
     async (req, res) => {
       const userId: number | string = req.session?.userId ?? req.sessionID;
       const numericUserId: number | null = typeof userId === 'number' ? userId : null;
+      // ai-therapist-369: the check-in is the participant's own words. If the
+      // start fails before they are screened (a database timeout anywhere
+      // above the screen), they are screened anyway, from the catch below.
+      let sessionId: string | null = null;
+      let checkinScreenStarted = false;
 
       try {
         // Enforce session limits (mirrors the /token endpoint). MUST use the
@@ -235,8 +241,11 @@ export default function chatRoutes(): Router {
           );
         }
 
-        const sessionId = `chat_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+        sessionId = `chat_${Date.now()}_${Math.random().toString(36).substring(7)}`;
         recordSessionOwnership(req, sessionId);
+        // The crisis pipeline's demo check, known from now on without a read
+        // (ai-therapist-369).
+        rememberSessionAccount(sessionId, req.session?.userRole);
 
         // Base prompt + returning-participant memory (opt-in) + today's check-in.
         // The proactive-offering A/B condition (ai-therapist-74) is resolved ONCE
@@ -332,10 +341,12 @@ export default function chatRoutes(): Router {
             const { injectGuidance } = await import('../../services/chatTherapy.service.js');
             let timer: NodeJS.Timeout | undefined;
             let injected = false;
-            const pending = runCheckinCrisisScreen(sessionId, checkin, 'chat').then((r) => {
+            const screenedSession = sessionId;
+            checkinScreenStarted = true;
+            const pending = runCheckinCrisisScreen(screenedSession, checkin, 'chat').then((r) => {
               if (r.steeringGuidance && !injected) {
                 injected = true;
-                injectGuidance(sessionId, r.steeringGuidance);
+                injectGuidance(screenedSession, r.steeringGuidance);
               }
               return r;
             });
@@ -492,6 +503,26 @@ export default function chatRoutes(): Router {
         });
       } catch (error: unknown) {
         log.error({ err: error }, 'Failed to start chat session');
+        // The start failed before the check-in was screened (ai-therapist-369):
+        // screen it now, in the background, so a check-in that discloses risk
+        // still flags and pages. The session row may not exist; the page does
+        // not need it, and the paging layer reports a record it cannot write.
+        // A demo account's check-in is known from the request and skipped.
+        const failedCheckin = sanitizeCheckin(req.body?.checkin);
+        const checkinText = [failedCheckin?.topic, failedCheckin?.goal].some(
+          (part) => typeof part === 'string' && part.trim().length > 0,
+        );
+        if (checkinText && !checkinScreenStarted && req.session?.userRole !== 'demo') {
+          const screenedSession = sessionId ?? `chat_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+          rememberSessionAccount(screenedSession, req.session?.userRole);
+          log.warn(
+            `[ChatStart] start failed before the check-in screen; screening it for ${screenedSession.substring(0, 12)}... ` +
+              `(user ${numericUserId ?? 'anonymous'})`,
+          );
+          void import('../../services/crisisPipeline.service.js')
+            .then((m) => m.runCheckinCrisisScreen(screenedSession, failedCheckin, 'chat'))
+            .catch((err) => log.error({ err }, '[ChatStart] check-in screen after a failed start failed'));
+        }
         if (isDatabaseUnavailableError(error)) {
           return res.status(503).json({ error: 'database_unavailable', message: DATABASE_RETRY_MESSAGE });
         }
@@ -510,6 +541,18 @@ export default function chatRoutes(): Router {
     if (!sessionId || !message) {
       return res.status(400).json({ error: 'sessionId and message are required' });
     }
+
+    // ai-therapist-369: once the participant's turn is saved it is screened,
+    // whatever fails after that. `savedTurnId` is set when it is saved;
+    // `screened` when the crisis pipeline has been started (or scheduled) for
+    // it. The catch below screens a saved turn that was not.
+    let savedTurnId: number | null = null;
+    let screened = false;
+    const screen = async (messageId: number | null) => {
+      screened = true;
+      const { runCrisisPipeline } = await import('../../services/crisisPipeline.service.js');
+      return runCrisisPipeline({ sessionId, messageId, content: message }, 'chat');
+    };
 
     try {
       const session = await getSessionAccessInfo(sessionId);
@@ -546,14 +589,13 @@ export default function chatRoutes(): Router {
         [userMsg] = await insertMessagesBatch([
           { session_id: sessionId, role: 'user', message_type: 'text', content: message, content_redacted: null },
         ]);
+        savedTurnId = userMsg.message_id;
       } catch (insertErr) {
         // Same rule as the voice path (sidebandManager onUserTurn): a database
         // that cannot store the turn must not also silence crisis detection
         // for it (ai-therapist-366). The pipeline takes a null message id and
         // pages / shows resources on its own; the participant is told to retry.
-        void import('../../services/crisisPipeline.service.js')
-          .then((m) => m.runCrisisPipeline({ sessionId, messageId: null, content: message }, 'chat'))
-          .catch((err) => log.error({ err }, '[ChatCrisis] pipeline for an unsaved turn failed'));
+        void screen(null).catch((err) => log.error({ err }, '[ChatCrisis] pipeline for an unsaved turn failed'));
         throw insertErr;
       }
 
@@ -564,7 +606,16 @@ export default function chatRoutes(): Router {
       // on a confirmed turn, so the copy can't be paraphrased away. Fail-open:
       // any confirmation error degrades to normal handling.
       const { detectMinorDisclosurePatterns } = await import('../../services/minorSafeguard.service.js');
-      if (detectMinorDisclosurePatterns(message).matched && !(await isSyntheticAccountSession(sessionId))) {
+      // The account check is a database read. It used to sit outside any
+      // try, so when it failed the saved turn was never screened
+      // (ai-therapist-369). A failed read falls back to what the request
+      // says about the signed-in account.
+      const synthetic = async (): Promise<boolean> =>
+        isSyntheticAccountSession(sessionId).catch((err: unknown) => {
+          log.error({ err }, '[MinorSafeguard] account check failed; using the request session');
+          return req.session?.userRole === 'demo' || req.session?.isSandbox === true;
+        });
+      if (detectMinorDisclosurePatterns(message).matched && !(await synthetic())) {
         try {
           const { confirmMinorDisclosure, handleConfirmedMinor, MINOR_ELIGIBILITY_MESSAGE } = await import(
             '../../services/minorSafeguard.service.js'
@@ -588,8 +639,7 @@ export default function chatRoutes(): Router {
             // the minor gate, so the two channels disagreed on the single
             // highest-stakes case.
             try {
-              const { runCrisisPipeline } = await import('../../services/crisisPipeline.service.js');
-              await runCrisisPipeline({ sessionId, messageId: userMsg.message_id, content: message }, 'chat');
+              await screen(userMsg.message_id);
             } catch (crisisErr) {
               log.error({ err: crisisErr }, '[MinorSafeguard] crisis screen on the minor path failed');
             }
@@ -685,12 +735,14 @@ export default function chatRoutes(): Router {
       let steering: string | null = null;
       try {
         if (narrowFirstTurn) {
+          screened = true;
           narrowPipeline = runCrisisPipeline({ sessionId, messageId: userMsg.message_id, content: message }, 'chat')
             .then((r) => {
               if (r.steeringGuidance) injectGuidance(sessionId, r.steeringGuidance);
             })
             .catch((err) => log.error({ err }, '[ChatCrisis] hand-off first-turn pipeline failed'));
         } else if (detectCrisisKeywords(message).keywordScore > 0) {
+          screened = true;
           const risk = await runCrisisPipeline({ sessionId, messageId: userMsg.message_id, content: message }, 'chat');
           steering = risk.steeringGuidance;
         } else if (
@@ -703,6 +755,7 @@ export default function chatRoutes(): Router {
         ) {
           let settled = false;
           let timer: NodeJS.Timeout | undefined;
+          screened = true;
           const pending = runCrisisPipeline({ sessionId, messageId: userMsg.message_id, content: message }, 'chat');
           const inTime = await Promise.race([
             pending.then((r) => {
@@ -729,7 +782,10 @@ export default function chatRoutes(): Router {
           }
         } else {
           // Clean turn: run the pipeline after the response ships (covers the
-          // periodic sweep); any steering lands on the NEXT turn.
+          // periodic sweep); any steering lands on the NEXT turn. The finish
+          // event also fires for an error response, so this turn is screened
+          // whatever happens below.
+          screened = true;
           res.on(
             'finish',
             () =>
@@ -808,6 +864,14 @@ export default function chatRoutes(): Router {
       });
     } catch (error: unknown) {
       log.error({ err: error }, 'Failed to process chat message');
+
+      // A saved turn that never reached the crisis pipeline (something
+      // between the save and the screen failed): screen it now, in the
+      // background. The participant is told to retry below; their words are
+      // stored and must not go unscreened (ai-therapist-369).
+      if (savedTurnId !== null && !screened) {
+        void screen(savedTurnId).catch((err) => log.error({ err }, '[ChatCrisis] pipeline for a saved turn failed'));
+      }
 
       // Blocked safety identifier (ai-therapist-186): permanent on the
       // provider's side, so answer with the dedicated code that drives the
