@@ -49,6 +49,7 @@ import { pool } from '../config/db.js';
 import { insertMessagesBatch } from '../db/index.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { emitCrisisResources } from './crisisResources.js';
+import { isToolTimeoutError, toolTimeoutMs } from './toolTimeouts.js';
 import { buildRecoverySpeakFirstNudge, type RecoveryCrisisContact } from '../../shared/recoveryPrompt.js';
 
 /**
@@ -136,21 +137,81 @@ const STEER_PARTICIPANT_TALKING_MS = 1_500;
  *  - both texts tell the model to answer a participant who was talking about
  *    their safety directly, and to use the "cannot answer" line only for a
  *    factual question;
- *  - on an ordinary session it is not sent at all if a clinical steer (risk
- *    steering, the safety protocol, any `[Clinical guidance` append) went out
- *    since the delegation started: that steer has just told the model what to
- *    say, and it outranks this;
+ *  - on an ordinary session it is not sent at all if a risk or safety steer
+ *    (clinicalSteerKind 'risk': risk steering, the risk-check requirement,
+ *    the safety protocol, the crisis wind-down, the crisis timer lift) was
+ *    delivered since the delegation started: that steer has just told the
+ *    model what to say, and it outranks this. Any other clinical steer (a
+ *    time-limit notice, the minor safeguard) only delays it, by one quiet
+ *    period per steer (ai-therapist-364);
  *  - it is never sent while the participant is speaking: it waits until they
- *    have been quiet for STEER_PARTICIPANT_TALKING_MS.
+ *    have been quiet for STEER_PARTICIPANT_TALKING_MS, but not for longer
+ *    than DELEGATION_QUIET_CEILING_MS, after which a short form is sent
+ *    anyway (a participant who has talked that long is not waiting on the
+ *    answer, but the delegation must still be settled).
  */
 export const DELEGATION_STALL_MS = 12_000;
 export const DELEGATION_STALL_UNKNOWN_MS = 20_000;
 /** How often a fallback held back by a speaking participant looks again. */
 const DELEGATION_DEFER_MS = 500;
+/** The longest a fallback waits for the participant (or, after a reconnect, the assistant) to stop speaking. */
+export const DELEGATION_QUIET_CEILING_MS = 8_000;
 /** After a sideband rejoins a recovery session, before the gap answer is sent. */
 export const RECONNECT_GAP_SETTLE_MS = 2_000;
+/**
+ * "The sideband first replays events from the preceding 3 seconds ... Older
+ * events are not replayed" (sideband WebSocket reference, Attach). A sideband
+ * that was away for less than this saw every delegation event of the gap in
+ * the replay. Half a second under the documented 3 s for clock skew and the
+ * handshake.
+ */
+export const SIDEBAND_REPLAY_COVERED_MS = 2_500;
+/**
+ * A tool of ours pauses the delegation watch while it runs, but not for longer
+ * than its own timeout (toolTimeouts.ts) plus this: a backstop in case
+ * something around the handler (the call's log write, an import) hangs.
+ */
+export const TOOL_PAUSE_GRACE_MS = 5_000;
 /** Why a delegation got the fallback instead of an answer. */
 export type DelegationFallbackReason = 'no_backend' | 'no_response' | 'backend_stalled' | 'reconnect_gap';
+/** The key of the one watch with no delegation id: an ordinary session's reconnect gap. */
+const GAP_WATCH_KEY = '\u0000reconnect_gap';
+
+/**
+ * What a `[Clinical guidance` steer is for (ai-therapist-364). Steers carry
+ * only the marker, and their texts live in modules this one does not import
+ * (crisisIntervention, sessionAutoTerminate, minorSafeguard), so the kind is
+ * read from the text: the few steers that are NOT about risk or safety are
+ * listed here by a phrase each contains, and everything else with the marker
+ * is 'risk', so an unknown or reworded steer fails toward safety.
+ * sidebandManager.steerKind.test.ts checks these phrases against the real
+ * texts.
+ */
+export type ClinicalSteerKind = 'risk' | 'time_limit' | 'minor_safeguard';
+const NON_RISK_STEER_PHRASES: ReadonlyArray<{ kind: Exclude<ClinicalSteerKind, 'risk'>; phrase: string }> = [
+  // sessionAutoTerminate: crisisTimeNotice, CRISIS_CEILING_LIVE, CRISIS_CEILING_WRAP_UP
+  { kind: 'time_limit', phrase: "The platform's maximum connection time is about" },
+  { kind: 'time_limit', phrase: "The voice call will reach the voice service's time limit" },
+  { kind: 'time_limit', phrase: "The platform's maximum connection time has been reached" },
+  // minorSafeguard: REALTIME_MINOR_GUIDANCE
+  { kind: 'minor_safeguard', phrase: 'The participant has disclosed they are under 18.' },
+];
+export function clinicalSteerKind(text: string): ClinicalSteerKind | null {
+  if (!text.startsWith(CLINICAL_STEER_MARKER)) return null;
+  return NON_RISK_STEER_PHRASES.find((entry) => text.includes(entry.phrase))?.kind ?? 'risk';
+}
+
+/**
+ * A client event id that is unique within this process. `${prefix}_${Date.now()}`
+ * collides when two appends go out in the same millisecond (a steer and its
+ * resume check, a fallback and a steer), and replayed or acknowledged events
+ * are matched on it.
+ */
+let clientEventSeq = 0;
+function clientEventId(prefix: string): string {
+  clientEventSeq = (clientEventSeq + 1) % Number.MAX_SAFE_INTEGER;
+  return `${prefix}_${Date.now()}_${clientEventSeq.toString(36)}`;
+}
 
 const SAFETY_FIRST =
   'If they were talking about how they feel, their safety, or thoughts of suicide or self-harm, do not say you ' +
@@ -194,11 +255,36 @@ export function delegationStalledCommentary(study: boolean): string {
     `${stalledWhoCanAnswer(study)}`
   );
 }
+/**
+ * Sent instead of the full text when the participant has been speaking for
+ * DELEGATION_QUIET_CEILING_MS: they are not waiting on the answer, so it is
+ * one line, and it names nobody (it is the same for every session).
+ */
+export const LIVE_DELEGATION_STALLED_SHORT_COMMENTARY =
+  "The lookup for the participant's earlier question did not come back. When it fits, tell them briefly that you " +
+  'could not get that answer just now. If they are talking about how they feel or their safety, respond to that ' +
+  'instead.';
+/**
+ * Sent once after the sideband rejoins an ordinary session it was away from
+ * for longer than the API replays (SIDEBAND_REPLAY_COVERED_MS), in case a
+ * delegation was created while nobody was watching and its backend never
+ * came back. Nothing says one was, so it is conditional throughout.
+ */
+export function delegationGapCommentary(study: boolean): string {
+  return (
+    'If you told the participant you were checking or looking something up and have not yet given them the ' +
+    'answer, that lookup did not come back: stop saying you are checking or looking into it. ' +
+    `${SAFETY_FIRST.replace('cannot answer', 'could not get an answer')} ${stalledWhoCanAnswer(study)} ` +
+    'If you were not waiting on a lookup, ignore this and carry on with the conversation.'
+  );
+}
 /** The study-session wording, as printed in the IRB prompts attachment. */
 export const LIVE_RECOVERY_NO_LOOKUP_COMMENTARY = recoveryNoLookupCommentary(true);
 export const LIVE_DELEGATION_STALLED_COMMENTARY = delegationStalledCommentary(true);
+export const LIVE_DELEGATION_GAP_COMMENTARY = delegationGapCommentary(true);
 export const LIVE_RECOVERY_NO_LOOKUP_COMMENTARY_NEUTRAL = recoveryNoLookupCommentary(false);
 export const LIVE_DELEGATION_STALLED_COMMENTARY_NEUTRAL = delegationStalledCommentary(false);
+export const LIVE_DELEGATION_GAP_COMMENTARY_NEUTRAL = delegationGapCommentary(false);
 
 /** One delegation the sideband is watching for an answer. */
 interface DelegationWatch {
@@ -210,6 +296,23 @@ interface DelegationWatch {
   sawBackend: boolean;
   /** The backend called a tool and its continuation response has not started. */
   awaitingContinuation: boolean;
+  /** The newest non-risk clinical steer this watch was already delayed for (0 = none). */
+  steerDeferredFor: number;
+  /** When the fallback first waited for the participant to stop speaking (0 = not waiting). */
+  quietWaitSince: number;
+}
+
+function newDelegationWatch(fields: Partial<DelegationWatch> = {}): DelegationWatch {
+  return {
+    startedAt: Date.now(),
+    timer: null,
+    settled: false,
+    sawBackend: false,
+    awaitingContinuation: false,
+    steerDeferredFor: 0,
+    quietWaitSince: 0,
+    ...fields,
+  };
 }
 
 /** A clinical steer as delivered to a live voice model: the text, then the keep-speaking line, inside the append cap. */
@@ -345,7 +448,7 @@ interface LiveSessionState {
    * does NOT mean there are no pending calls. The only reliable source is the
    * per-item done events, so they are accumulated here.
    */
-  pendingCalls: Map<string, { name: string; args: string; delegationId: string | null }>;
+  pendingCalls: Map<string, { name: string; args: string; delegationId: string | null; startedAt: number }>;
   /** Backend response ids already metered, so a replayed event can't double-bill. */
   meteredResponses: Set<string>;
   /**
@@ -362,8 +465,10 @@ interface LiveSessionState {
   delegationStallMs: number;
   /** A study session with a research team and consent form to point to. False until known. */
   studyContact: boolean;
-  /** When the newest clinical steer (`[Clinical guidance` append) was sent (0 = none). */
-  lastClinicalSteerAt: number;
+  /** When the newest risk or safety steer (clinicalSteerKind 'risk') was delivered (0 = none). */
+  lastRiskSteerAt: number;
+  /** When the newest other clinical steer (time limit, minor safeguard) was delivered (0 = none). */
+  lastOtherSteerAt: number;
   /** Pending "a delegation may have been created while we were away" answer (recovery reconnect). */
   reconnectGapTimer: NodeJS.Timeout | null;
   /** Latest cumulative voice seconds from session.usage.updated. */
@@ -486,6 +591,12 @@ export class SidebandManager {
   private endedSessions = new Set<string>();
   /** Monotonic attach counter per session, so reconnects mint distinct row ids. */
   private attachSeqs = new Map<string, number>();
+  /**
+   * When a session's sideband last closed without the session ending, so the
+   * next attach knows how long it was away (see SIDEBAND_REPLAY_COVERED_MS).
+   * Absent after a process restart: the gap is then unknown.
+   */
+  private sidebandClosedAt = new Map<string, number>();
 
   private readonly maxReconnectAttempts = 3;
   private readonly reconnectDelayMs = 2000;
@@ -604,7 +715,8 @@ export class SidebandManager {
       delegationWatches: new Map(),
       delegationStallMs: DELEGATION_STALL_UNKNOWN_MS,
       studyContact: false,
-      lastClinicalSteerAt: 0,
+      lastRiskSteerAt: 0,
+      lastOtherSteerAt: 0,
       reconnectGapTimer: null,
       lastUsageSeconds: 0,
       peakContextRatio: 0,
@@ -1091,20 +1203,21 @@ export class SidebandManager {
     const state = this.sessions.get(sessionId);
     // A replayed event must neither answer twice nor re-arm a finished watch.
     if (!state || state.finalized || state.delegationWatches.has(delegationId)) return;
-    const watch: DelegationWatch = {
-      startedAt: Date.now(),
-      timer: null,
-      settled: false,
-      sawBackend: false,
-      awaitingContinuation: false,
-    };
-    state.delegationWatches.set(delegationId, watch);
+    state.delegationWatches.set(delegationId, newDelegationWatch());
     if (state.delegationMode === 'client') {
       // No backend exists to wait for: the request is addressed to us.
       void this.delegationFallback(sessionId, delegationId, 'no_backend');
       return;
     }
+    // The voice model is delegating again, and this one is watched: the
+    // reconnect-gap watch has nothing left to add (see armReconnectGapWatch).
+    this.settleGapWatch(state);
     this.armDelegationWatch(sessionId, delegationId);
+  }
+
+  private settleGapWatch(state: LiveSessionState): void {
+    const gap = state.delegationWatches.get(GAP_WATCH_KEY);
+    if (gap && !gap.settled) this.settleDelegationWatch(gap);
   }
 
   private armDelegationWatch(sessionId: string, delegationId: string): void {
@@ -1154,15 +1267,53 @@ export class SidebandManager {
    * session's unfinished delegation is still watched: its quiet period
    * starts again from the reconnect, since any events during the gap were
    * missed. (A recovery session's are all answered already; anything created
-   * during the gap is coverRecoveryReconnectGap's.)
+   * during the gap is coverRecoveryReconnectGap's on a recovery session and
+   * armReconnectGapWatch's on an ordinary one.) The old state's gap watch is
+   * not carried: each attach decides its own.
    */
   private carryDelegationWatches(sessionId: string, from: LiveSessionState, to: LiveSessionState): void {
-    to.lastClinicalSteerAt = Math.max(to.lastClinicalSteerAt, from.lastClinicalSteerAt);
+    to.lastRiskSteerAt = Math.max(to.lastRiskSteerAt, from.lastRiskSteerAt);
+    to.lastOtherSteerAt = Math.max(to.lastOtherSteerAt, from.lastOtherSteerAt);
     for (const [delegationId, watch] of from.delegationWatches) {
-      if (to.delegationWatches.has(delegationId)) continue;
-      to.delegationWatches.set(delegationId, { ...watch, timer: null });
+      if (delegationId === GAP_WATCH_KEY || to.delegationWatches.has(delegationId)) continue;
+      to.delegationWatches.set(delegationId, { ...watch, timer: null, quietWaitSince: 0 });
       this.armDelegationWatch(sessionId, delegationId);
     }
+  }
+
+  /**
+   * An ordinary session's sideband rejoined after a gap (ai-therapist-364).
+   *
+   * A delegation created while nobody was attached is unknown here: the API
+   * has no way to list pending delegations (the Live REST surface is create,
+   * accept, reject, refer, hangup, fork and the recording download; checked
+   * 2026-11-19), and the sideband replays only "events from the preceding 3
+   * seconds" on attach. So:
+   *  - a gap shorter than SIDEBAND_REPLAY_COVERED_MS is fully replayed, and
+   *    nothing is armed;
+   *  - a backend event for a delegation id this attach never saw created is
+   *    a gap delegation whose backend is alive: it is adopted and watched
+   *    like any other (noteDelegationProgress);
+   *  - otherwise ONE watch with no delegation id is armed for one quiet
+   *    period from the open. It stands down when the voice model delegates
+   *    again, when a backend event adopts a gap delegation, or when any
+   *    fallback goes out; if it runs out it sends LIVE_DELEGATION_GAP_COMMENTARY,
+   *    which is conditional ("If you told the participant you were checking
+   *    ..."), through the same rules as every fallback (risk steers suppress
+   *    it, it waits for quiet, and so on).
+   * Not covered: a gap delegation whose backend did answer while nobody was
+   * attached (nothing is owed), and one whose backend died after this window.
+   */
+  private armReconnectGapWatch(sessionId: string): void {
+    const state = this.sessions.get(sessionId);
+    if (!state || state.openingAttach || state.delegationMode !== 'responses' || state.finalized) return;
+    if (state.delegationWatches.has(GAP_WATCH_KEY)) return;
+    const closedAt = this.sidebandClosedAt.get(sessionId);
+    this.sidebandClosedAt.delete(sessionId);
+    const awayMs = closedAt === undefined ? null : Date.now() - closedAt;
+    if (awayMs !== null && awayMs < SIDEBAND_REPLAY_COVERED_MS) return;
+    state.delegationWatches.set(GAP_WATCH_KEY, newDelegationWatch());
+    this.armDelegationWatch(sessionId, GAP_WATCH_KEY);
   }
 
   /**
@@ -1175,19 +1326,29 @@ export class SidebandManager {
    * commentary (the same channel as the per-delegation answer). Its wording is
    * safe when nothing was pending: it tells the model to respond to the
    * participant and stay with them, which is this session's whole job. It
-   * waits RECONNECT_GAP_SETTLE_MS for transcript events to resume and then,
-   * like every fallback, for the participant to stop speaking.
+   * waits RECONNECT_GAP_SETTLE_MS for transcript events to resume and then
+   * until neither the participant nor the assistant is speaking (an answer
+   * appended over the assistant's own reply would cut into it), for at most
+   * DELEGATION_QUIET_CEILING_MS.
    */
   private coverRecoveryReconnectGap(sessionId: string): void {
     const state = this.sessions.get(sessionId);
     if (!state || state.openingAttach || state.delegationMode !== 'client' || state.reconnectGapTimer) return;
+    let waitingSince = 0;
     const attempt = (): void => {
       const current = this.sessions.get(sessionId);
       if (!current || current !== state || current.finalized || !this.isConnected(sessionId)) return;
-      if (Date.now() - current.lastUserDeltaAt < STEER_PARTICIPANT_TALKING_MS) {
-        current.reconnectGapTimer = setTimeout(attempt, DELEGATION_DEFER_MS);
-        current.reconnectGapTimer.unref?.();
-        return;
+      const now = Date.now();
+      const someoneSpeaking =
+        now - current.lastUserDeltaAt < STEER_PARTICIPANT_TALKING_MS ||
+        now - current.lastAssistantDeltaAt < STEER_PARTICIPANT_TALKING_MS;
+      if (someoneSpeaking) {
+        if (waitingSince === 0) waitingSince = now;
+        if (now - waitingSince < DELEGATION_QUIET_CEILING_MS) {
+          current.reconnectGapTimer = setTimeout(attempt, DELEGATION_DEFER_MS);
+          current.reconnectGapTimer.unref?.();
+          return;
+        }
       }
       current.reconnectGapTimer = null;
       const short = sessionId.substring(0, 12);
@@ -1236,7 +1397,17 @@ export class SidebandManager {
     delegationId: string,
     inner: { type?: string; [key: string]: unknown },
   ): void {
-    const watch = this.sessions.get(sessionId)?.delegationWatches.get(delegationId);
+    const state = this.sessions.get(sessionId);
+    if (!state) return;
+    let watch = state.delegationWatches.get(delegationId);
+    if (!watch && !state.openingAttach && state.delegationMode === 'responses' && !state.finalized) {
+      // A delegation this attach never saw created: one made during a
+      // sideband gap, whose backend is still working. Watch it from here
+      // (armReconnectGapWatch), and the gap watch has found what it was for.
+      watch = newDelegationWatch();
+      state.delegationWatches.set(delegationId, watch);
+      this.settleGapWatch(state);
+    }
     if (!watch || watch.settled) return;
     watch.sawBackend = true;
     if (inner.type === 'response.created') {
@@ -1259,15 +1430,24 @@ export class SidebandManager {
     if (!state || !watch || watch.settled) return;
     watch.timer = null;
     // The backend is waiting on a tool that is still running in THIS process:
-    // that is our latency, not a lost answer, however long the tool takes.
-    // The watch is paused: this only looks again a period from now, and
-    // executePendingCall restarts the period when the result goes back.
-    const toolRunning = [...state.pendingCalls.values()].some((call) => call.delegationId === delegationId);
+    // that is our latency, not a lost answer. The watch is paused: this only
+    // looks again a period from now, and executePendingCall restarts the
+    // period when the result goes back. Every tool is bounded by its own
+    // timeout (toolTimeouts.ts), which sends an error result back; a call
+    // still pending TOOL_PAUSE_GRACE_MS after that is stuck somewhere around
+    // the handler, and stops pausing the watch (ai-therapist-364).
+    const now = Date.now();
+    const toolRunning = [...state.pendingCalls.values()].some(
+      (call) =>
+        call.delegationId === delegationId && now - call.startedAt < toolTimeoutMs(call.name) + TOOL_PAUSE_GRACE_MS,
+    );
     if (toolRunning) {
       this.armDelegationWatch(sessionId, delegationId);
       return;
     }
-    await this.delegationFallback(sessionId, delegationId, watch.sawBackend ? 'backend_stalled' : 'no_response');
+    const reason: DelegationFallbackReason =
+      delegationId === GAP_WATCH_KEY ? 'reconnect_gap' : watch.sawBackend ? 'backend_stalled' : 'no_response';
+    await this.delegationFallback(sessionId, delegationId, reason);
   }
 
   /**
@@ -1295,51 +1475,77 @@ export class SidebandManager {
     const state = this.sessions.get(sessionId);
     const watch = state?.delegationWatches.get(delegationId);
     if (!state || !watch || watch.settled) return;
+    const client = state.delegationMode === 'client';
+    const gap = delegationId === GAP_WATCH_KEY;
+    // A time-limit notice or the minor safeguard since this delegation
+    // started has just given the model something else to say: let it, and
+    // look again one quiet period later (once per such steer), rather than
+    // drop the fallback for good as before ai-therapist-364. A backend answer
+    // in the meantime still settles the watch.
+    if (!client && state.lastOtherSteerAt >= watch.startedAt && state.lastOtherSteerAt > watch.steerDeferredFor) {
+      watch.steerDeferredFor = state.lastOtherSteerAt;
+      watch.quietWaitSince = 0;
+      this.armDelegationWatch(sessionId, delegationId);
+      return;
+    }
     // Never talk over the participant. A delegation is often created while
     // their sentence is still arriving ("the notification may arrive before
     // the full sentence is transcribed"), and a stalled one can time out
     // while they are speaking again. Look again shortly; the watch stays
-    // open, so a backend answer in the meantime still settles it.
-    if (Date.now() - state.lastUserDeltaAt < STEER_PARTICIPANT_TALKING_MS) {
-      if (watch.timer) clearTimeout(watch.timer);
-      watch.timer = setTimeout(() => {
-        void this.delegationFallback(sessionId, delegationId, reason);
-      }, DELEGATION_DEFER_MS);
-      watch.timer.unref?.();
-      return;
+    // open, so a backend answer in the meantime still settles it. But not
+    // for ever: after DELEGATION_QUIET_CEILING_MS of talking they are not
+    // waiting on this answer, and it goes out as one short line.
+    const now = Date.now();
+    let cutShort = false;
+    if (now - state.lastUserDeltaAt < STEER_PARTICIPANT_TALKING_MS) {
+      if (watch.quietWaitSince === 0) watch.quietWaitSince = now;
+      if (now - watch.quietWaitSince < DELEGATION_QUIET_CEILING_MS) {
+        if (watch.timer) clearTimeout(watch.timer);
+        watch.timer = setTimeout(() => {
+          void this.delegationFallback(sessionId, delegationId, reason);
+        }, DELEGATION_DEFER_MS);
+        watch.timer.unref?.();
+        return;
+      }
+      cutShort = true;
     }
     this.settleDelegationWatch(watch);
     // Never steer a session that has closed or lost its socket.
     if (state.finalized || !this.isConnected(sessionId)) return;
 
     const short = sessionId.substring(0, 12);
-    const client = state.delegationMode === 'client';
-    // A clinical steer since this delegation started has just told the model
-    // what to say about the participant's safety. "I could not get that
+    // A risk or safety steer since this delegation started has just told the
+    // model what to say about the participant's safety. "I could not get that
     // answer" must not follow it. (A recovery session answers at once, before
     // any steer could have been sent, and its text puts safety first itself.)
-    const suppressed = !client && state.lastClinicalSteerAt >= watch.startedAt ? 'clinical_steer' : null;
+    const suppressed = !client && state.lastRiskSteerAt >= watch.startedAt ? 'clinical_steer' : null;
     const details = {
-      delegationId,
+      delegationId: gap ? null : delegationId,
       reason,
-      afterMs: Date.now() - watch.startedAt,
+      afterMs: now - watch.startedAt,
       delegationMode: state.delegationMode,
       studyContact: state.studyContact,
       delivered: false,
       ...(suppressed ? { suppressed } : {}),
+      ...(watch.steerDeferredFor ? { deferredForSteer: true } : {}),
+      ...(cutShort ? { participantTalkingMs: now - watch.quietWaitSince } : {}),
     };
     if (!suppressed) {
+      let text: string;
+      if (client) text = recoveryNoLookupCommentary(state.studyContact);
+      else if (cutShort) text = LIVE_DELEGATION_STALLED_SHORT_COMMENTARY;
+      else if (gap) text = delegationGapCommentary(state.studyContact);
+      else text = delegationStalledCommentary(state.studyContact);
       try {
-        await this.appendCommentary(
-          sessionId,
-          client ? recoveryNoLookupCommentary(state.studyContact) : delegationStalledCommentary(state.studyContact),
-          client ? delegationId : null,
-        );
+        await this.appendCommentary(sessionId, text, client ? delegationId : null);
         details.delivered = true;
       } catch (err) {
         console.error(`[Live] Could not deliver the delegation fallback for ${short}...:`, err);
       }
     }
+    // The model has now been told (or a steer told it): the reconnect-gap
+    // watch, if one is open, would only say it again.
+    if (!gap) this.settleGapWatch(state);
     console.warn('[Live] delegation fallback', JSON.stringify({ session: short, ...details }));
     if (global.io) {
       void broadcastAdminEventForSession(
@@ -1351,8 +1557,14 @@ export class SidebandManager {
     }
     try {
       const { logInterventionAction } = await import('./crisisDetection.service.js');
+      // `external_api_called` is shared with vendor terminations and pager
+      // rows, and the IRB packet counts that type as one number. `origin`
+      // marks this row as our own watchdog's action, not something the vendor
+      // did, so a report can separate it (ai-therapist-364); the packet's
+      // existing counts are deliberately unchanged.
       await logInterventionAction(sessionId, 'external_api_called', {
         event: 'delegation_fallback',
+        origin: 'sideband_watchdog',
         vendor: 'openai',
         ...details,
       });
@@ -1413,6 +1625,7 @@ export class SidebandManager {
       this.startKeepalive(sessionId);
       await this.loadDelegationContext(sessionId);
       this.coverRecoveryReconnectGap(sessionId);
+      this.armReconnectGapWatch(sessionId);
       await this.schedulePhaseNudges(sessionId);
       await this.scheduleRegrounding(sessionId);
       console.log(`[Live] Sideband established for ${sessionId.substring(0, 12)}...`);
@@ -1694,6 +1907,7 @@ export class SidebandManager {
           name: item.name,
           args: item.arguments ?? '{}',
           delegationId,
+          startedAt: Date.now(),
         });
         await this.executePendingCall(sessionId, item.call_id);
         break;
@@ -1977,12 +2191,17 @@ export class SidebandManager {
 
     let result: unknown;
     let failure: string | null = parseError;
+    // The registry bounds every handler (toolTimeouts.ts): a hung one comes
+    // back here as a ToolTimeoutError, exactly once, whose message tells the
+    // model it could not do that. Its late outcome never reaches this call.
+    let timedOut = false;
     if (!failure) {
       try {
         const { toolRegistry } = await import('./toolRegistry.service.js');
         result = await toolRegistry.executeTool(call.name, args, { sessionId, channel: 'realtime' });
       } catch (err) {
         failure = err instanceof Error ? err.message : String(err);
+        timedOut = isToolTimeoutError(err);
       }
     }
 
@@ -2021,7 +2240,9 @@ export class SidebandManager {
           tool_name: call.name,
           call_id: callId,
           channel: 'live',
-          ...(failure ? { error: failure, status: 'failed' } : { response: result, status: 'completed' }),
+          ...(failure
+            ? { error: failure, status: 'failed', ...(timedOut ? { timed_out: true } : {}) }
+            : { response: result, status: 'completed' }),
         },
       },
     ]).catch((err) => console.error('[Live] Failed to log tool response:', err));
@@ -2035,7 +2256,9 @@ export class SidebandManager {
           callId,
           toolName: call.name,
           args,
-          ...(failure ? { error: failure, status: 'failed' } : { result, status: 'completed' }),
+          ...(failure
+            ? { error: failure, status: 'failed', ...(timedOut ? { timedOut: true } : {}) }
+            : { result, status: 'completed' }),
           timestamp: new Date(),
         },
         sessionId,
@@ -2071,23 +2294,28 @@ export class SidebandManager {
    * because it ran three words long is not an acceptable failure mode.
    */
   async appendInstructions(sessionId: string, content: string, delegationId: string | null = null): Promise<void> {
-    // Every clinical steer passes through here (tryInject and injectMessage);
-    // the delegation watchdog stands down for one (see delegationFallback).
-    const steered = this.sessions.get(sessionId);
-    if (steered && content.startsWith(CLINICAL_STEER_MARKER)) steered.lastClinicalSteerAt = Date.now();
     this.sendEvent(sessionId, {
       type: 'session.instructions.append',
-      event_id: `instr_${Date.now()}`,
+      event_id: clientEventId('instr'),
       delegation_id: delegationId,
       content: truncateForAppend(content),
     });
+    // Every clinical steer passes through here (tryInject and injectMessage);
+    // the delegation watchdog stands down for a risk steer and waits one
+    // period for any other (see delegationFallback). Only once it was sent:
+    // sendEvent throws on a closed socket, and a steer that never left must
+    // not hold back a fallback.
+    const steered = this.sessions.get(sessionId);
+    const kind = clinicalSteerKind(content);
+    if (steered && kind === 'risk') steered.lastRiskSteerAt = Date.now();
+    else if (steered && kind) steered.lastOtherSteerAt = Date.now();
   }
 
   /** Append quiet factual context the model can use but should not announce. */
   async appendThinking(sessionId: string, content: string, delegationId: string | null = null): Promise<void> {
     this.sendEvent(sessionId, {
       type: 'session.thinking.append',
-      event_id: `think_${Date.now()}`,
+      event_id: clientEventId('think'),
       delegation_id: delegationId,
       content: truncateForAppend(content),
     });
@@ -2097,7 +2325,7 @@ export class SidebandManager {
   async appendCommentary(sessionId: string, content: string, delegationId: string | null = null): Promise<void> {
     this.sendEvent(sessionId, {
       type: 'session.commentary.append',
-      event_id: `comm_${Date.now()}`,
+      event_id: clientEventId('comm'),
       delegation_id: delegationId,
       content: truncateForAppend(content),
     });
@@ -2118,13 +2346,13 @@ export class SidebandManager {
   sendParticipantText(sessionId: string, text: string): boolean {
     const state = this.sessions.get(sessionId);
     if (!state || state.delegationMode === 'client' || state.ws.readyState !== WebSocket.OPEN) return false;
-    const stamp = Date.now();
+    const stamp = clientEventId('typed');
     this.sendEvent(sessionId, {
       type: 'response.item.create',
-      event_id: `typed_${stamp}`,
+      event_id: stamp,
       item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
     });
-    this.sendEvent(sessionId, { type: 'response.create', event_id: `typed_continue_${stamp}` });
+    this.sendEvent(sessionId, { type: 'response.create', event_id: `${stamp}_continue` });
     return true;
   }
 
@@ -2259,7 +2487,7 @@ export class SidebandManager {
     // (seen on stage, ai-therapist-282, and by the voice red-team probes).
     this.sendEvent(sessionId, {
       type: 'session.update',
-      event_id: `update_${Date.now()}`,
+      event_id: clientEventId('update'),
       session: { delegation: { type: 'responses', responses } },
     });
   }
@@ -2339,7 +2567,7 @@ export class SidebandManager {
           'Use updateDelegation() to change backend configuration.',
       );
     }
-    this.sendEvent(sessionId, { type: 'response.create', event_id: `create_${Date.now()}` });
+    this.sendEvent(sessionId, { type: 'response.create', event_id: clientEventId('create') });
   }
 
   /**
@@ -2455,11 +2683,11 @@ export class SidebandManager {
 
   /** Mute the participant's microphone server-side. Does not stop model output. */
   async muteInput(sessionId: string): Promise<void> {
-    this.sendEvent(sessionId, { type: 'session.input_audio.mute', event_id: `mute_${Date.now()}` });
+    this.sendEvent(sessionId, { type: 'session.input_audio.mute', event_id: clientEventId('mute') });
   }
 
   async unmuteInput(sessionId: string): Promise<void> {
-    this.sendEvent(sessionId, { type: 'session.input_audio.unmute', event_id: `unmute_${Date.now()}` });
+    this.sendEvent(sessionId, { type: 'session.input_audio.unmute', event_id: clientEventId('unmute') });
   }
 
   /**
@@ -2675,6 +2903,10 @@ export class SidebandManager {
     // crisis page; after a content-filter termination it actively races the
     // crisis recovery the client is trying to start.
     if (this.endedSessions.has(sessionId) || code === 1000 || !state || state.finalized) return;
+    // How long the next attach was away decides whether it must cover a gap
+    // the replay does not (armReconnectGapWatch). Taken before the status
+    // read below, which is part of the gap.
+    const closedAt = Date.now();
 
     const status = await pool
       .query<{ status: string }>('SELECT status FROM therapy_sessions WHERE session_id = $1', [sessionId])
@@ -2690,6 +2922,7 @@ export class SidebandManager {
       );
       return;
     }
+    this.sidebandClosedAt.set(sessionId, closedAt);
     const timer = setTimeout(
       () => {
         this.connect(sessionId, state.liveSessionId, state.apiKey, {
@@ -2721,6 +2954,7 @@ export class SidebandManager {
     const delegate = this.delegateFor(sessionId);
     if (delegate) return delegate.disconnect(sessionId, opts);
     this.endedSessions.add(sessionId);
+    this.sidebandClosedAt.delete(sessionId);
     if (this.endedSessions.size > 1000) {
       for (const id of this.endedSessions) {
         if (this.endedSessions.size <= 500) break;
@@ -2735,7 +2969,7 @@ export class SidebandManager {
     const graceMs = opts.graceMs ?? 5000;
     if (state.ws.readyState === WebSocket.OPEN && !state.finalized) {
       try {
-        state.ws.send(JSON.stringify({ type: 'session.close', event_id: `close_${Date.now()}` }));
+        state.ws.send(JSON.stringify({ type: 'session.close', event_id: clientEventId('close') }));
         await new Promise<void>((resolve) => {
           const timer = setTimeout(() => {
             console.warn(

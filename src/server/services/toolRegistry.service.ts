@@ -6,6 +6,7 @@
 import { pool } from '../config/db.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { PRACTICE_KINDS } from '../../shared/practice.js';
+import { runWithToolTimeout } from './toolTimeouts.js';
 
 export interface ToolDefinition {
   type: string;
@@ -244,7 +245,9 @@ export class ToolRegistry {
 
     try {
       console.log(`[ToolRegistry] Executing tool: ${name}`);
-      const result = await tool.handler(args, ctx);
+      // Bounded (toolTimeouts.ts): a hung handler is answered with a
+      // ToolTimeoutError, once; its late outcome is discarded.
+      const result = await runWithToolTimeout(name, () => tool.handler(args, ctx));
       return result;
     } catch (error) {
       console.error(`[ToolRegistry] Tool execution error for ${name}:`, error);

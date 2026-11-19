@@ -39,7 +39,7 @@ export const UPSERTABLE_CONFIG_KEYS: Readonly<Record<string, string>> = {
   ai_model: 'Voice/session model id (grok-voice-* selects the Grok proxy, gpt-live-* GPT-Live)',
   live_backend_model: 'Delegated reasoning model behind GPT-Live',
   live_backend_reasoning_effort:
-    'GPT-Live backend reasoning.effort (none|low|medium|high|xhigh|max); unset = model default',
+    'GPT-Live backend reasoning.effort (none|low|medium|high; xhigh|max run as high in voice); unset = model default',
   chat_model: 'Typed-chat therapy model (Responses API); code default gpt-5.2',
   transcription_model: 'Transcription model (unused since migration 099: GPT-Live and Grok transcribe internally)',
   transcription_context: 'Transcription prompt/keyword overrides (unused since migration 099)',

@@ -714,10 +714,30 @@ One run each: enough to show the mechanism, not a rate.
   time, not total time: every nested event restarts it. A delegation is
   finished when a backend response ends without having called a tool; after a
   tool call the continuation is still owed and still watched. While one of
-  our own tools is running the watch is paused, however long the tool takes,
-  and the period starts again when its result goes back. Nothing is sent
-  after `session.closed`, after a disconnect, or twice for the same
-  delegation.
+  our own tools is running the watch is paused, and the period starts again
+  when its result goes back. Nothing is sent after `session.closed`, after a
+  disconnect, or twice for the same delegation.
+- Every tool is bounded (`src/server/services/toolTimeouts.ts`, since
+  2026-11-19, ai-therapist-364): `ToolRegistry.executeTool` answers a handler
+  that has not settled in time with a `ToolTimeoutError`, exactly once, and
+  discards its late result or error (the handler itself cannot be cancelled
+  and keeps running, so a write may still land). The sideband returns it to
+  the backend as an ordinary error result (`{"success":false,"error":"The
+  <tool> tool did not finish in time ... Do not say it worked ..."}`), logs
+  the call as `failed` with `timed_out: true`, and the watch resumes from
+  there. The chat path runs the same `executeTool`, so it has the same bound.
+  Limits, one default and one table of overrides:
+
+  | Tool | Limit | Why |
+  |---|---|---|
+  | default (all others) | 5 s | local database reads and writes |
+  | `retrieve_psychoeducation`, `find_worksheet`, `suggest_modality_technique` | 10 s | embedding (with its own retries), vector search, LLM rerank (hard 2.5 s) |
+  | `recall_relevant_history`, `remember_this` | 10 s | embedding plus a query or insert |
+  | `escalate_to_human` | 20 s | at high urgency runs the graduated crisis response, which pages; on a timeout the page may still go out |
+
+  As a backstop the watch stops pausing for a call still pending 5 s
+  (`TOOL_PAUSE_GRACE_MS`) after its tool's limit, in case something around
+  the handler (the call's log write) hangs.
 - Either way: a `[Live] delegation fallback` log line (JSON: session,
   delegationId, reason `no_backend` / `no_response` / `backend_stalled` /
   `reconnect_gap`, afterMs, delegationMode, studyContact, delivered,
@@ -737,14 +757,35 @@ delegated. So:
   answer: respond to them directly and warmly now, as your instructions say.
   Only if they asked a factual question you cannot answer..." The recovery
   prompt carries the same rule.
-- On an ordinary session the fallback is not sent at all when a clinical
-  steer (any `[Clinical guidance` append: risk steering, the safety protocol,
-  the risk-check requirement, the wind-down) went out since the delegation
-  started. The stall is still logged and recorded, with
-  `suppressed: clinical_steer`.
+- On an ordinary session the fallback is not sent at all when a risk or
+  safety steer was delivered since the delegation started
+  (`clinicalSteerKind` = `risk`: risk steering, the risk-check requirement,
+  the safety protocol, the wind-down, the crisis notice that cancels a
+  wrap-up, and any `[Clinical guidance` text it does not recognise). The
+  stall is still logged and recorded, with `suppressed: clinical_steer`.
+  Since 2026-11-19 (ai-therapist-364) other clinical steers (the crisis time
+  notices, the crisis connection-reset and closing notices, the minor
+  safeguard) only delay it by one quiet period each, recorded as
+  `deferredForSteer: true`, instead of dropping it; and a steer counts only
+  once it was actually sent (a failed send used to suppress too). Steers
+  carry only the marker, so the kind is read from a phrase in each non-risk
+  text; `sidebandManager.steerKind.test.ts` checks the phrases against the
+  real texts.
 - It is never sent while the participant is speaking. It waits until no
   participant transcript fragment has arrived for 1.5 s, looking again every
-  0.5 s; a backend answer in the meantime cancels it.
+  0.5 s; a backend answer in the meantime cancels it. The wait has a ceiling
+  (`DELEGATION_QUIET_CEILING_MS`, 8 s): someone who has talked that long is
+  not waiting on the answer, but the delegation must still be settled, so
+  `LIVE_DELEGATION_STALLED_SHORT_COMMENTARY` (one line, names nobody) goes
+  out then, with `participantTalkingMs` in the record.
+- The `intervention_actions` row carries `origin: 'sideband_watchdog'`
+  (besides `event: 'delegation_fallback'`), because its type
+  `external_api_called` is shared with vendor terminations and pager rows.
+  The IRB packet's counts are unchanged and still include these rows in
+  `external_api_called`; an additive packet line would be
+  `COUNT(*) FILTER (WHERE action_type = 'external_api_called' AND action_details->>'event' = 'delegation_fallback')`
+  reported as "of which voice delegation fallbacks (the platform's own
+  watchdog, not a vendor action): N".
 
 Live check with the final text (recovery session, a study participant, both
 turns delegated, each answered 1.5 s after the delegation, which is the wait
@@ -773,33 +814,65 @@ a burst. Measured with the probe on `gpt-6.1-terra`:
 | `none`, `low` | 1.0 s (one delegation, with a tool call) | 12 s |
 | `medium`, unset | not measured | 20 s |
 | `high` | 4.2 s and 2.1 s (two delegations, one with a tool call) | 30 s |
-| `xhigh`, `max` | not measured | 60 s |
+| `xhigh`, `max` | not measured | 60 s; never used: clamped to `high` |
 
 Stage runs `low`. The effort is read from `system_config` when the sideband
 opens; before that, and if the read fails, 20 s applies. An effort changed
 from the admin console in the middle of a session is not picked up until the
 sideband next opens. Re-measure before running a backend above `low`.
 
+**Voice clamps the effort to `high`** (`LIVE_MAX_REASONING_EFFORT`, since
+2026-11-19, ai-therapist-364). Sixty seconds of allowed backend silence at
+`xhigh`/`max` is the original failure again, so
+`resolveBackendReasoningEffort` (which only GPT-Live sessions use; typed chat
+has its own model settings) returns `high` for either, both for the session
+config sent to OpenAI and for the watchdog's quiet period, and logs a
+warning naming the configured and applied values. The stored config is not
+rewritten; the admin config key's description says "xhigh|max run as high in
+voice".
+
 **Tool calls keep the delegation id.** Checked live at `low` and `high`: after
 `start_breathing_exercise`, the continuation response's events carried the
 same `delegation_id` as the first response (63 and 77 nested events, none
 with another id or none), which is what the watch is keyed on.
 
-**Sideband reconnects.** A reconnect builds fresh state, and the API neither
-replays missed events nor lists pending delegations.
+**Sideband reconnects.** A reconnect builds fresh state. The API does not
+list pending delegations (the Live REST surface is create, accept, reject,
+refer, hangup, fork and the recording download; checked 2026-11-19), and an
+attach replays only recent events: "The sideband first replays events from
+the preceding 3 seconds ... Older events are not replayed" (sideband
+WebSocket reference). Replayed events keep their `event_id`.
 
 - Delegations the old state knew are carried over
-  (`carryDelegationWatches`): none is answered twice, and an ordinary
-  session's unfinished one is watched again from the reconnect.
+  (`carryDelegationWatches`, called from the reconnect `handleClose`
+  schedules; the test drives it through the socket's close): none is
+  answered twice, and an ordinary session's unfinished one is watched again
+  from the reconnect.
 - A recovery session whose sideband rejoins (a reconnect, or the reattach
   after a deploy) is sent the recovery answer once with no delegation id,
-  2 s after the socket opens and once the participant is not speaking, in
-  case a delegation was created while nobody was attached. If none was, the
-  model may say a short "I'm still here", which is that session's job anyway.
-- Not covered: an ordinary session's delegation created during the gap is
-  not watched (OpenAI's backend still answers it; only a stall in exactly
-  that window goes unnoticed), and after a process restart an ordinary
-  session's earlier delegations are unknown.
+  2 s after the socket opens and once neither the participant nor (since
+  2026-11-19) the assistant is speaking, for at most 8 s, in case a
+  delegation was created while nobody was attached. If none was, the model
+  may say a short "I'm still here", which is that session's job anyway.
+- An ordinary session whose sideband rejoins (ai-therapist-364): if it was
+  away for less than 2.5 s (`SIDEBAND_REPLAY_COVERED_MS`, under the 3 s
+  replay) the replay covered the gap and nothing more is done. Otherwise, or
+  after a reattach where the gap is unknown, a backend event for a
+  delegation id this attach never saw created is adopted and watched like
+  any other, and one watch with no delegation id is armed for one quiet
+  period. It stands down when the voice model delegates again, when a gap
+  delegation is adopted, or when any fallback goes out; if it runs out it
+  sends `LIVE_DELEGATION_GAP_COMMENTARY` ("If you told the participant you
+  were checking or looking something up and have not yet given them the
+  answer, that lookup did not come back ... If you were not waiting on a
+  lookup, ignore this and carry on"), under the same rules as every
+  fallback (`reason: reconnect_gap`, `delegationId: null`).
+- Not covered: a gap delegation whose backend dies after that one window
+  (the null watch fires once); a gap delegation whose backend answered while
+  nobody was attached (nothing is owed); after a process restart an ordinary
+  session's earlier delegations are unknown (only the one null watch covers
+  them); and on a rejoin with nothing pending the gap line is still sent
+  once, conditional, which may cost one odd sentence.
 
 The fallback cannot cancel backend work. If a stalled backend answers after
 all, the API still passes the answer to the voice model and the participant
