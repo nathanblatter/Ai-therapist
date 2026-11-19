@@ -1126,7 +1126,9 @@ export async function needsContextAssessment(sessionId: string, content: string)
   const fragment = !ctx.lookupFailed && !contextIsMediumOrAbove(ctx) && isLowContentFragment(content);
   if (ctx.elevated && !fragment) return true;
   // The reply to an assistant safety question (see repliesToSafetyQuestion).
-  // A failed read means "assess": the question may be there.
+  // A failed read means "assess": the question may be there. Only a reply
+  // that looks like an answer is woken this way (see analyzeMessageRisk).
+  if (!looksLikeAnAnswer(content)) return false;
   try {
     return repliesToSafetyQuestion(await getRecentSessionMessages(sessionId, 4));
   } catch (err) {
@@ -1182,7 +1184,7 @@ Context judgment matters more than keywords:
 - "negated": "I'm not suicidal", "I'd never hurt myself" → score 0-15, severity none (unless other signals contradict).
 - "bystander": talking about someone ELSE's loss, past struggles or ordinary worry about them → score 0-24, severity none (the participant's own grief may warrant low, 25-35). Someone else's CURRENT suicidal crisis is different and is scored by the "Third party at risk" rule below.
 - "genuine" acute distress WITHOUT ideation → 15-30 (none to low). Distress alone is hopelessness, worthlessness, exhaustion, "can't take it" — e.g. "I just feel hopeless and worthless lately" is 15-30. It is NOT passive ideation: reserve that label for an expressed wish to die, disappear, not exist, not wake up, not be here, or not have to go on. Never score distress alone as medium.
-- "genuine" passive ideation → 50-64, medium, ALWAYS at least 50 and, with nothing more than a passive wish, below 65. C-SSRS counts a passive wish to be dead as ideation, not as distress, so it must reach medium — never score it low. This includes INDIRECT and euphemistic phrasing, which is how participants usually say it first: "it would be easier if I didn't have to do this anymore", "I wouldn't mind not waking up", "I'm tired of being here", "I just want it all to be over", "everyone would be fine without me", "I don't want to be here anymore", "no point going on". Hedges and softeners ("I think", "sometimes", "just", "kind of", "maybe") do NOT downgrade it — tentative wording is the normal way passive ideation is disclosed. Absence of a plan, method, or intent does NOT downgrade it either; that is the difference between passive ideation and active ideation, which scores higher still.
+- "genuine" passive ideation → 50-64, medium, ALWAYS at least 50 and, with nothing more than a passive wish, below 65. C-SSRS counts a passive wish to be dead as ideation, not as distress, so it must reach medium — never score it low. This includes INDIRECT and euphemistic phrasing, which is how participants usually say it first: "it would be easier if I didn't have to do this anymore", "I wouldn't mind not waking up", "I'm tired of being here", "I just want it all to be over", "everyone would be fine without me", "I don't want to be here anymore", "no point going on". A wish not to be alive, to be dead or to be gone is passive however plainly it is said ("I don't really want to be alive", "I wish I were dead"): it becomes active ideation only when the participant speaks of suicide, of killing themselves or of ending their life. Hedges and softeners ("I think", "sometimes", "just", "kind of", "maybe") do NOT downgrade it — tentative wording is the normal way passive ideation is disclosed. Absence of a plan, method, or intent does NOT downgrade it either; that is the difference between passive ideation and active ideation, which scores higher still.
 - "genuine" active ideation without plan → 65-79, high, ALWAYS at least 65. Active ideation is thinking about suicide, about killing themselves or about ending their life, as opposed to a passive wish to be dead or gone: "I've been thinking about ending my life a lot lately", "I keep thinking about suicide and it's getting louder", "I'm thinking about killing myself". No plan, method or intent is needed for this band, and saying "I don't have a plan" does not take it below 65.
 - "genuine" ideation with plan, means, or timeframe → 80-100, high.
 Resolve references against the conversation before scoring. The latest message is often short and carries no crisis word because its subject was said earlier:
@@ -2009,8 +2011,17 @@ export async function analyzeMessageRisk(
     // question, so it is assessed with the transcript however calm the session
     // (see repliesToSafetyQuestion). Not for the check-in, which precedes any
     // assistant turn.
+    // Only a reply that looks like an answer (short, or opening with a word
+    // people answer with). A long change of subject is treated as it was
+    // before this wake existed, on its own words: assessed because it
+    // followed a question, a song lyric after a bereavement check-in came
+    // back 50 ("passive ideation") on two runs of three and flagged the
+    // session, whichever way the assessor was told to read it.
     const answersSafetyQuestion =
-      keywordFree && message.source !== 'checkin' && repliesToSafetyQuestion(conversationHistory);
+      keywordFree &&
+      message.source !== 'checkin' &&
+      looksLikeAnAnswer(message.content) &&
+      repliesToSafetyQuestion(conversationHistory);
     // A filler-only fragment ("would stop", "ok", "wait") in a session that has
     // never reached medium is not worth an assessment and has been over-read
     // into one (ai-therapist-349): the session's earlier low-band turn alone
@@ -2043,12 +2054,8 @@ export async function analyzeMessageRisk(
           // tells the assessor that no keyword matched.
           keywordFree: isContextWake,
           // Whatever woke the assessor, tell it when the turn answers a safety
-          // question (a sweep or a moderation wake can land on one too). Only
-          // when the reply looks like an answer: told that a long change of
-          // subject was "the answer", the assessor made one of it (a song
-          // lyric after a bereavement check-in came back 50, "passive
-          // ideation"). Such a reply is still assessed, with the plain framing.
-          answersSafetyQuestion: answersSafetyQuestion && looksLikeAnAnswer(message.content),
+          // question (a sweep or a moderation wake can land on one too).
+          answersSafetyQuestion,
           fromCheckin: message.source === 'checkin',
         });
         noteAssessorSuccess();

@@ -1064,7 +1064,7 @@ describe('harm to others stays harm to others unless the participant names thems
   });
 });
 
-describe('a long change of subject after a safety question is assessed without the "answer" framing', () => {
+describe('a long change of subject after a safety question is not assessed for following the question', () => {
   const QUESTION = {
     role: 'assistant',
     content:
@@ -1073,12 +1073,20 @@ describe('a long change of subject after a safety question is assessed without t
   const LYRIC =
     'I have had that old song stuck in my head all day, the line that goes "killing me softly with his song."';
 
-  it('the lyric is still sent to the assessor, told only that no keyword matched', async () => {
-    createMock.mockResolvedValue(assess(0, 'reference'));
-    await analyzeMessageRisk(turn(LYRIC), [QUESTION, { role: 'user', content: LYRIC }]);
+  it('REPRODUCTION: the lyric in a calm session is scored on its own words, with no assessor call', async () => {
+    createMock.mockResolvedValue(assess(50, 'genuine'));
+    const result = await analyzeMessageRisk(turn(LYRIC), [QUESTION, { role: 'user', content: LYRIC }]);
+    expect(createMock).not.toHaveBeenCalled();
+    expect(result.riskScore).toBe(0);
+  });
+
+  it('a long reply carrying a crisis keyword is assessed as always', async () => {
+    const reply =
+      'I have had that old song stuck in my head all day and I keep thinking that I want to die, it does not stop.';
+    createMock.mockResolvedValue(assess(70, 'genuine'));
+    const result = await analyzeMessageRisk(turn(reply), [QUESTION, { role: 'user', content: reply }]);
     expect(createMock).toHaveBeenCalledTimes(1);
-    expect(assessorSaw()).toContain('assess it against the transcript and any session risk context above');
-    expect(assessorSaw()).not.toContain('asked a safety question');
+    expect(result.riskScore).toBeGreaterThanOrEqual(65);
   });
 
   it.each([

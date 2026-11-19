@@ -99,6 +99,16 @@ What follows from the number:
   A message that announces contacting a named support (`announcesHelpStep`), with no crisis
   keyword and no goodbye in it, is held at 64 in a session that was below high
   (`help_step_cap`).
+- **A conditional exaggeration with a joke marker cannot cross the page line by itself
+  (2026-11-19).** "I'm literally going to kill myself if I fail this quiz lol" scores 60 to
+  80 from run to run and paged on every run at the 65 cutoff. A rubric sentence about
+  self-directed figures of speech fixed it and was withdrawn: with it, "I have what I need."
+  after passive ideation dropped from high (80, 80, 65) to 50 on three runs of three. The
+  rubric is left alone; a first-person crisis keyword together with BOTH a conditional about
+  something else ("if I fail ...") and a laugh marker ("lol"), in a session with no
+  medium-or-higher risk, is held at 64 (`conditional_joke_cap`): flagged for the dashboard,
+  not paged. "I want to kill myself lol" has no conditional and is not touched; the same
+  sentence after a disclosure is not touched either.
 - **Assessor down.** The moderation fallback is capped at 85 and uncapped below: a
   keyword-free turn with a moderation self-harm score of 65-74 now pages while the assessor
   is unreachable (it flagged without paging before).
@@ -235,7 +245,13 @@ And a third reason for a context wake:
    nights." carries no word of its own, and in a calm session it scored 0 with no assessor
    call (3 of 5 runs, session never flagged). The assessor is told the message is the answer
    to that question (`answers_safety_question` on the risk row). A reply to an ordinary
-   question is not assessed. On chat this is one extra small SELECT per turn
+   question is not assessed. Only a reply that looks like an answer wakes the assessor
+   this way (twelve words or fewer, or opening with a word people answer with,
+   `looksLikeAnAnswer`): assessed because it followed a question, a long change of subject
+   (a song lyric after a bereavement check-in) came back 50 on two runs of three and flagged
+   the session. Such a reply is handled as before this wake existed: on its own keywords and
+   signals, or with the transcript when the session is already elevated. The cost is a long,
+   keyword-free answer that opens with none of the listed words in a calm session. On chat this is one extra small SELECT per turn
    (`needsContextAssessment` reads the last few messages) so the assessment runs before the
    reply. Cost: one assessor call per reply to a safety question.
 
@@ -505,12 +521,14 @@ that she's going to kill herself tonight" scored 0 with no assessor call.
   participant's own was flagged") instead of "their risk before the cut was HIGH", and such
   a page does not absorb a later page about the participant. `resolveIncidentPeak` returns
   the `subject` of the incident's peak and the participant's own level.
-- **Own risk in the same message wins.** A turn the assessor labels as about someone else
-  is handled as the participant's own risk when the assessor reports the participant's own
-  intent, when a first-person crisis keyword is in the message, or (risk to others) when the
-  message also says goodbye ("I know where he parks. And after that I don't plan on being
-  around."). The page then adds `ALSO: the same message describes thoughts of harming
-  another person.`
+- **Own risk in the same message wins.** A third-party report is handled as the
+  participant's own risk when the assessor reports the participant's own intent
+  (`states_intent`). For risk to others that observation is NOT used (the assessor sets it
+  for intent to harm someone else, which sent the suicide protocol to "I know where he
+  parks"); the participant's own risk is read from their words: a first-person crisis
+  keyword, a goodbye ("I know where he parks. And after that I don't plan on being
+  around."), or "... and then myself". The page then adds `ALSO: the same message describes
+  thoughts of harming another person.`
 
 ## Risk to others (2026-11-18, ai-therapist-330)
 
