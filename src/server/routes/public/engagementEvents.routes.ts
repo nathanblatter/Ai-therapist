@@ -13,6 +13,7 @@ import rateLimit from 'express-rate-limit';
 import { insertEngagementEvents } from '../../db/index.js';
 import { getSystemConfig } from '../../utils/sessionHelpers.js';
 import { cleanSessionId, capDetail } from './clientEvents.routes.js';
+import { dropIfWithdrawn } from '../../middleware/studyStatus.js';
 
 import { createLogger } from '../../utils/logger.js';
 
@@ -50,8 +51,9 @@ export default function engagementEventsRoutes(): Router {
   // POST /api/engagement-events - accept a batch of events. Body parsing is
   // route-local with a 16kb cap (index.ts skips the global json parser for
   // this path). Always 204: beacons cannot retry, and a disabled stream must
-  // look identical to an accepted one from the client's perspective.
-  router.post('/api/engagement-events', beaconLimiter, json({ limit: '16kb' }), async (req, res) => {
+  // look identical to an accepted one from the client's perspective. The same
+  // holds for a withdrawn participant: dropped, 204 (ai-therapist-322).
+  router.post('/api/engagement-events', beaconLimiter, json({ limit: '16kb' }), dropIfWithdrawn, async (req, res) => {
     const events = Array.isArray(req.body?.events) ? req.body.events : [];
 
     let features: Record<string, unknown>;

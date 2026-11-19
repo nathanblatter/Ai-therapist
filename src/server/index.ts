@@ -466,8 +466,8 @@ io.on('connection', (socket: AuthSocket) => {
   // Handle session room subscriptions. Session rooms receive live unredacted
   // transcripts (`messages:new`), so joins must be authorized: admins may join
   // anything; participants only sessions they own — via the ownedSessions list
-  // in their handshake cookie (set by /token, /api/chat/start, or
-  // /api/sessions/create before the socket connects) or, for logged-in users,
+  // in their handshake cookie (set by /api/chat/start, /api/live/session
+  // or /api/grok/session before the socket connects) or, for logged-in users,
   // the session row's user_id.
   socket.on('session:join', async ({ sessionId }: { sessionId?: string }) => {
     if (typeof sessionId !== 'string' || !sessionId) return;

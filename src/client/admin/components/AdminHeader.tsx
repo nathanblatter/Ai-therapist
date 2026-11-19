@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { postJson } from '../../shared/http';
-import { HelpCircle, Menu, Moon, Shield, Sun } from 'react-feather';
+import { HelpCircle, LogOut, Menu, Moon, Shield, Sun } from 'react-feather';
 import { getStoredTheme, setTheme, ADMIN_THEME_STORAGE_KEY } from '../../shared/theme';
 import NotificationBell from './NotificationBell';
 import useAuth from '../hooks/useAuth';
@@ -44,31 +44,31 @@ export default function AdminHeader({ onMenuClick, onMfaClick, onNotificationNav
   };
 
   return (
-    <header className="bg-navy text-white p-4 md:p-6">
-      <div className="flex justify-between items-center gap-3">
-        <div className="flex items-center gap-3 min-w-0">
+    <header className="bg-navy text-white px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] sm:p-4 md:p-6">
+      <div className="flex justify-between items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-1 sm:gap-3 min-w-0">
           {onMenuClick && (
             <button
               onClick={onMenuClick}
-              className="md:hidden p-2 -ml-2 shrink-0 text-white hover:bg-white/10 rounded-lg"
+              className="md:hidden p-2 -ml-2 shrink-0 text-white hover:bg-white/10 rounded-lg min-h-[44px] min-w-[44px] flex items-center justify-center"
               aria-label="Open navigation menu"
             >
               <Menu size={24} />
             </button>
           )}
           <div className="min-w-0">
-            <h1 className="text-lg sm:text-2xl md:text-4xl font-bold leading-tight">
+            <h1 className="text-base sm:text-2xl md:text-4xl font-bold leading-tight truncate sm:whitespace-normal">
               AI Therapist Research & Therapist Audit Portal
             </h1>
             {username && (
-              <p className="text-lightBlue mt-1 md:mt-2 text-sm md:text-lg truncate">
+              <p className="hidden sm:block text-lightBlue mt-1 md:mt-2 text-sm md:text-lg truncate">
                 Welcome, {capitalizeFirst(username)}{' '}
                 {userRole && <span className="text-xs md:text-sm">({userRole})</span>}
               </p>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center sm:gap-2 shrink-0">
           {/* In-app notification bell (caseworker portal). Hidden for demo
               accounts — their /admin/api/* is fixture-intercepted and has no
               notifications surface. */}
@@ -76,7 +76,7 @@ export default function AdminHeader({ onMenuClick, onMfaClick, onNotificationNav
           {onMfaClick && (
             <button
               onClick={onMfaClick}
-              className="flex items-center gap-1.5 p-2 text-white hover:bg-white/10 rounded-full text-sm font-semibold"
+              className="flex items-center justify-center gap-1.5 p-2 min-h-[44px] min-w-[44px] text-white hover:bg-white/10 rounded-full text-sm font-semibold"
               title="MFA Security"
               aria-label="MFA Security"
             >
@@ -91,7 +91,7 @@ export default function AdminHeader({ onMenuClick, onMfaClick, onNotificationNav
             href={`/tutorial/staff/${userRole === 'therapist' ? 'therapist' : userRole === 'caseworker' ? 'caseworker' : 'researcher'}/`}
             target="_blank"
             rel="noopener noreferrer"
-            className="p-2 text-white hover:bg-white/10 rounded-full"
+            className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center text-white hover:bg-white/10 rounded-full"
             title="Portal tutorial"
             aria-label="Portal tutorial"
           >
@@ -99,7 +99,7 @@ export default function AdminHeader({ onMenuClick, onMfaClick, onNotificationNav
           </a>
           <button
             onClick={toggleDarkMode}
-            className="p-2 text-white hover:bg-white/10 rounded-full"
+            className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center text-white hover:bg-white/10 rounded-full"
             title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
             aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
           >
@@ -107,10 +107,12 @@ export default function AdminHeader({ onMenuClick, onMfaClick, onNotificationNav
           </button>
           <button
             onClick={handleLogout}
-            className="bg-gray-700 hover:bg-gray-600 px-3 md:px-4 py-2 rounded-full text-sm font-semibold text-center"
+            className="bg-gray-700 hover:bg-gray-600 p-2 sm:px-3 md:px-4 sm:py-2 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 ml-1 sm:ml-0 rounded-full text-sm font-semibold text-center flex items-center justify-center"
             title="Logout"
+            aria-label="Logout"
           >
-            Logout
+            <LogOut size={18} className="sm:hidden" aria-hidden="true" />
+            <span className="hidden sm:inline">Logout</span>
           </button>
         </div>
       </div>

@@ -15,6 +15,8 @@ const dbMocks = vi.hoisted(() => ({
   getMessageHistoryForClient: vi.fn(),
 }));
 vi.mock('../../db/index.js', () => dbMocks);
+const getStudyStatusMock = vi.hoisted(() => vi.fn());
+vi.mock('../../db/studyStatus.queries.js', () => ({ getStudyStatus: getStudyStatusMock }));
 
 // The route imports getMessageHistoryForClient through the barrel now; keep a
 // single mock object aliased so existing assertions keep working.
@@ -60,6 +62,7 @@ const ASSIGNMENT = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  getStudyStatusMock.mockResolvedValue('active');
   dbMocks.listUserAssignments.mockResolvedValue([ASSIGNMENT]);
   dbMocks.completeAssignment.mockResolvedValue({
     ...ASSIGNMENT,
@@ -119,6 +122,14 @@ describe('auth is required on every /api/me/* endpoint', () => {
       expect(messagingMocks.getMessageHistoryForClient).not.toHaveBeenCalled();
     },
   );
+
+  it('POST /api/me/assignments/:id/complete from a withdrawn participant is refused 403 (ai-therapist-322)', async () => {
+    getStudyStatusMock.mockResolvedValueOnce('withdrawn');
+    const res = await request(appAs(7)).post('/api/me/assignments/5/complete').send({});
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({ error: 'study_status', studyStatus: 'withdrawn' });
+    expect(dbMocks.completeAssignment).not.toHaveBeenCalled();
+  });
 
   it('POST /api/me/assignments/:id/complete without a session returns 401', async () => {
     const res = await request(appAs(null)).post('/api/me/assignments/5/complete').send({});

@@ -8,6 +8,8 @@ import PreSessionCheckIn, { type CheckinData } from './PreSessionCheckIn';
 import ConsentScreen from './ConsentScreen';
 import QuietHoursScreen from './QuietHoursScreen';
 import StudyStatusScreen from './StudyStatusScreen';
+import SessionLimitScreen from './SessionLimitScreen';
+import { sessionLimitNotice, type SessionLimitNotice } from '../lib/sessionLimitNotice';
 import ExerciseOverlay, { type ActiveExercise } from './ExerciseOverlay';
 import ToolOverlays, { type ToolUI, type SafetyPlanData } from './ToolOverlays';
 import PostSessionScreen, {
@@ -398,6 +400,19 @@ export default function App() {
   // session start; see middleware/studyStatus.ts). Rendered as a blocking
   // screen with crisis resources — never a generic error toast.
   const [studyStatusBlock, setStudyStatusBlock] = useState<'paused' | 'withdrawn' | 'access_blocked' | null>(null);
+  // Session limit / cooldown refusal (429 on session start, ai-therapist-324):
+  // a dismissible screen with the time remaining and crisis resources.
+  const [sessionLimitBlock, setSessionLimitBlock] = useState<SessionLimitNotice | null>(null);
+  // Shows the refusal screen; only a DAILY limit also disables Start for the
+  // rest of the day (a cooldown lifts in minutes).
+  const showSessionLimit = (body: unknown) => {
+    const notice = sessionLimitNotice(body);
+    setSessionLimitBlock(notice);
+    if (notice.reason === 'daily_limit') {
+      const resetsAt = (body as { limit_resets_at?: string } | null)?.limit_resets_at ?? null;
+      setRateLimitInfo({ limited: true, resetsAt });
+    }
+  };
 
   // Async secure messaging (caseworker portal): between-sessions view switch
   // + persistent user socket for logged-in participants. The socket is
@@ -816,10 +831,10 @@ export default function App() {
 
       // Check for rate limiting errors
       if (response.status === 429) {
-        const errorData = await response.json();
-        toast.error(errorData.message || 'You have reached your session limit. Please try again later.');
+        const errorData = await response.json().catch(() => null);
         console.warn('Rate limit exceeded:', errorData);
-        setRateLimitInfo({ limited: true, resetsAt: errorData.limit_resets_at ?? null });
+        showSessionLimit(errorData);
+        setIsConnecting(false);
         return;
       }
 
@@ -1654,11 +1669,7 @@ export default function App() {
             // anyway (recovery is server-side exempt) — so neither the toast
             // nor the home-screen rate-limit banner state is touched here.
             if (!moderationTakeoverRef.current) {
-              toast.error(
-                (errorData?.message as string | undefined) ||
-                  'You have reached your session limit. Please try again later.',
-              );
-              setRateLimitInfo({ limited: true, resetsAt: (errorData?.limit_resets_at as string | undefined) ?? null });
+              showSessionLimit(errorData);
             }
             break;
           // Quiet hours (server-enforced): swap to the overnight screen.
@@ -1785,6 +1796,37 @@ export default function App() {
     pc.ontrack = (e) => {
       audioEl.srcObject = e.streams[0];
       setRemoteStream(e.streams[0]);
+      // Start playback explicitly instead of relying on `autoplay` alone
+      // (ai-therapist-348). A recovery session starts with no click, on a new
+      // audio element, and on 2026-11-18 a participant on an iPhone said "I
+      // cannot hear you" for the first 25 seconds of one while the transcript
+      // shows the assistant speaking. A browser that refuses to start sound
+      // without a gesture refuses silently with `autoplay`; play() rejects, so
+      // a refusal is reported and retried on the participant's next touch.
+      void audioEl.play().catch((err: unknown) => {
+        const name = err instanceof Error ? err.name : String(err);
+        // AbortError is a play() overtaken by a newer source, not a refusal.
+        if (name === 'AbortError') return;
+        reportClientEvent('audio_play_refused', { name, recovery }, newSessionId);
+        // Retried on the events that actually unlock sound. On a touch screen
+        // that is the END of a touch (pointerup, touchend, click), not
+        // pointerdown, which grants no activation there: a single
+        // pointerdown-only retry would be refused again on exactly the phone
+        // this is for. The listeners stay until one play() succeeds, the call
+        // has ended or this element is no longer the session's, then all of
+        // them are removed.
+        const gestures = ['pointerup', 'touchend', 'click', 'keydown'] as const;
+        const remoteTrack = e.track;
+        const stopRetrying = () => gestures.forEach((g) => window.removeEventListener(g, retry, true));
+        function retry() {
+          if (audioElement.current !== audioEl || remoteTrack.readyState === 'ended') {
+            stopRetrying();
+            return;
+          }
+          void audioEl.play().then(stopRetrying, () => {});
+        }
+        gestures.forEach((g) => window.addEventListener(g, retry, true));
+      });
       // Capture the whole conversation: mix mic + assistant audio into one PCM
       // stream and upload it over HTTP for the entire session, so the server can
       // record it and relay it live to any admin who is listening. Independent
@@ -2008,9 +2050,8 @@ export default function App() {
     });
 
     if (response.status === 429) {
-      const errorData = await response.json();
-      toast.error(errorData.message || 'You have reached your session limit. Please try again later.');
-      setRateLimitInfo({ limited: true, resetsAt: errorData.limit_resets_at ?? null });
+      const errorData = await response.json().catch(() => null);
+      showSessionLimit(errorData);
       abortStart();
       return;
     }
@@ -3189,7 +3230,7 @@ export default function App() {
         {isSessionActive && sessionType === 'realtime' && (
           <VoiceOrb localStream={localStream} remoteStream={remoteStream} />
         )}
-        <div className="w-full flex-1 overflow-y-auto p-2 sm:p-4">
+        <div className="w-full flex-1 overflow-y-auto px-4 py-2 sm:p-4">
           {isSessionActive ? (
             <ChatLog
               messages={messages}
@@ -3210,7 +3251,7 @@ export default function App() {
             <Home onOpenMessages={() => setActiveView('messages')} messagesUnread={messagesUnread} />
           )}
         </div>
-        <div className="w-full max-w-4xl p-2 sm:p-4">
+        <div className="w-full max-w-4xl px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-4">
           {/* Persistent wrap-up notice (ai-therapist-101/112): the transient
               toast was easy to miss; this stays visible until teardown. */}
           {isSessionActive && micLocked && (
@@ -3387,6 +3428,10 @@ export default function App() {
           a dead conversation would be worse than interrupting it. */}
       {studyStatusBlock && (studyStatusBlock === 'access_blocked' || (!isSessionActive && !postSessionData)) && (
         <StudyStatusScreen status={studyStatusBlock} />
+      )}
+
+      {sessionLimitBlock && !studyStatusBlock && !isSessionActive && (
+        <SessionLimitScreen notice={sessionLimitBlock} onClose={() => setSessionLimitBlock(null)} />
       )}
 
       {/* Consent screen (IRB requirement) - must accept before check-in/session start */}

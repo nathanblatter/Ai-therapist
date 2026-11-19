@@ -31,7 +31,7 @@ export default function NotificationBell({ onNavigate }: NotificationBellProps) 
     <div className="relative" ref={containerRef}>
       <button
         onClick={() => setOpen((o) => !o)}
-        className="relative p-2 text-white hover:bg-white/10 rounded-full"
+        className="relative p-2 min-h-[44px] min-w-[44px] flex items-center justify-center text-white hover:bg-white/10 rounded-full"
         title="Notifications"
         aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
       >
@@ -44,7 +44,7 @@ export default function NotificationBell({ onNavigate }: NotificationBellProps) 
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-80 max-w-[90vw] bg-white text-ink rounded-lg shadow-lg border border-gray-200 z-50">
+        <div className="fixed inset-x-2 top-14 sm:absolute sm:inset-x-auto sm:top-auto sm:right-0 mt-2 sm:w-80 max-w-[90vw] sm:max-w-[90vw] bg-white text-ink rounded-lg shadow-lg border border-gray-200 z-50">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100">
             <span className="font-semibold text-sm">Notifications</span>
             {unreadCount > 0 && (
