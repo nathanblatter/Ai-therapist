@@ -48,6 +48,7 @@ import { requireActiveStudyStatus } from '../../middleware/studyStatus.js';
 import { sessionLimitRefusalFor, tooManyAttemptsRefusal } from '../../utils/sessionLimitRefusal.js';
 import { broadcastAdminEvent, broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
 import type { HandoffStartPayload } from '../../../shared/textHandoff.js';
+import type { PreparedHandoff } from '../../services/textHandoff.service.js';
 import type { RecoveryCrisisContact } from '../../../shared/recoveryPrompt.js';
 
 import { createLogger } from '../../utils/logger.js';
@@ -99,6 +100,79 @@ export default function chatRoutes(): Router {
     },
   });
   const chatMessageLimiter = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: true, legacyHeaders: false });
+
+  /**
+   * Put a hand-off's first message where everything else reads it: the
+   * model's context (after the seeded transcript), the messages table as the
+   * session's opening line (so the admin transcript and the session summary
+   * have it) and the live-monitoring feed.
+   */
+  async function installHandoffOpening(sessionId: string, prepared: PreparedHandoff): Promise<void> {
+    const { seedAssistantOpening, injectGuidance } = await import('../../services/chatTherapy.service.js');
+    // Transcript first, then the message that follows it: the model reads the
+    // incident, then its own first words in writing.
+    if (prepared.guidance) injectGuidance(sessionId, prepared.guidance);
+    seedAssistantOpening(sessionId, prepared.firstMessage);
+    await insertMessagesBatch([
+      {
+        session_id: sessionId,
+        role: 'assistant',
+        message_type: OPENING_LINE_MESSAGE_TYPE,
+        content: prepared.firstMessage,
+        // Machine-authored and PHI-free: no redaction call needed.
+        content_redacted: prepared.firstMessage,
+        metadata: { ...OPENING_LINE_METADATA, text_handoff: prepared.payload.kind },
+      },
+    ]).catch((err) => log.error({ err }, '[Handoff] Failed to persist the hand-off first message'));
+    if (global.io) {
+      global.io.to(`session:${sessionId}`).emit('message:new', {
+        sessionId,
+        role: 'assistant',
+        message: prepared.firstMessage,
+        timestamp: new Date(),
+      });
+    }
+  }
+
+  /**
+   * The browser's hand-off fallback (lib/crisisRecovery.ts readHandoffStart):
+   * the chat start answered without hand-off details, so the browser put the
+   * crisis wording on screen itself and now tells the server, on the first
+   * request it can, which voice call this chat continues. The server flags the
+   * chat as a continuation with risk unknown and stores the message the
+   * participant was shown (textHandoff.service recordClientHandoffFallback).
+   * Null when there was nothing to do (already a hand-off, not theirs, ended).
+   */
+  async function applyHandoffFallback(
+    req: Parameters<typeof canAccessSession>[0],
+    sessionId: string,
+    raw: unknown,
+  ): Promise<HandoffStartPayload | null> {
+    const fallback = (raw ?? {}) as { continued_from?: unknown; reason?: unknown };
+    if (typeof fallback.continued_from !== 'string' || !fallback.continued_from) return null;
+    try {
+      const { recordClientHandoffFallback } = await import('../../services/textHandoff.service.js');
+      const { getHandoffSessionRow } = await import('../../db/textHandoff.queries.js');
+      const chatRow = await getHandoffSessionRow(sessionId);
+      if (!chatRow) return null;
+      const cfg = await getSystemConfig();
+      const prepared = await recordClientHandoffFallback({
+        chatSessionId: sessionId,
+        chatRow,
+        continuedFrom: fallback.continued_from,
+        reason: fallback.reason === 'expired' ? 'expired' : 'content',
+        canAccess: (row, id) => canAccessSession(req, row, id),
+        crisisContact: cfg.crisis_contact as RecoveryCrisisContact | undefined,
+        voiceEnabled: (cfg.features as { voice_enabled?: boolean } | undefined)?.voice_enabled !== false,
+      });
+      if (!prepared) return null;
+      await installHandoffOpening(sessionId, prepared);
+      return prepared.payload;
+    } catch (err) {
+      log.error({ err }, '[Handoff] Failed to record the browser hand-off fallback');
+      return null;
+    }
+  }
 
   // POST /api/chat/start - start a chat-only therapy session. Blocked until
   // the participant has accepted the current consent screen.
@@ -358,32 +432,9 @@ export default function chatRoutes(): Router {
               voiceEnabled: (cfg.features as { voice_enabled?: boolean } | undefined)?.voice_enabled !== false,
             });
             if (prepared) {
-              const { seedAssistantOpening, injectGuidance } = await import('../../services/chatTherapy.service.js');
-              // Transcript first, then the message that follows it: the model
-              // reads the incident, then its own first words in writing.
-              if (prepared.guidance) injectGuidance(sessionId, prepared.guidance);
-              seedAssistantOpening(sessionId, prepared.firstMessage);
+              await installHandoffOpening(sessionId, prepared);
               opening = prepared.firstMessage;
               handoff = prepared.payload;
-              await insertMessagesBatch([
-                {
-                  session_id: sessionId,
-                  role: 'assistant',
-                  message_type: OPENING_LINE_MESSAGE_TYPE,
-                  content: prepared.firstMessage,
-                  // Machine-authored and PHI-free: no redaction call needed.
-                  content_redacted: prepared.firstMessage,
-                  metadata: { ...OPENING_LINE_METADATA, text_handoff: prepared.payload.kind },
-                },
-              ]).catch((err) => log.error({ err }, '[ChatStart] Failed to persist the hand-off first message'));
-              if (global.io) {
-                global.io.to(`session:${sessionId}`).emit('message:new', {
-                  sessionId,
-                  role: 'assistant',
-                  message: prepared.firstMessage,
-                  timestamp: new Date(),
-                });
-              }
             } else {
               log.warn(`[ChatStart] continued_from ${continuedFrom} not accessible; starting fresh.`);
             }
@@ -441,6 +492,14 @@ export default function chatRoutes(): Router {
       if (!canAccessSession(req, session, sessionId)) {
         return res.status(403).json({ error: 'Unauthorized: You do not own this session' });
       }
+
+      // The browser's hand-off fallback, if it has not been acknowledged yet:
+      // recorded BEFORE this turn, so the first message the participant was
+      // shown precedes their answer to it, in the transcript and for the model,
+      // and this turn takes the crisis hand-off's path.
+      const fallbackHandoff = req.body?.handoff_fallback
+        ? await applyHandoffFallback(req, sessionId, req.body.handoff_fallback)
+        : null;
 
       // Persist the USER turn FIRST so crisis/eligibility detection has a real
       // message_id and a model failure no longer loses the participant's words
@@ -669,7 +728,9 @@ export default function chatRoutes(): Router {
       // browser may offer a new voice call now. On the narrow first turn the
       // assessor is given a moment to finish, so a "yes" that scores high is
       // already counted; if it has not finished, the answer is no.
-      let handoffState: { voiceReturnAllowed: boolean } | undefined;
+      // `recorded` acknowledges the browser's hand-off fallback: it stops
+      // sending it.
+      let handoffState: { voiceReturnAllowed: boolean; recorded?: boolean } | undefined;
       if (isHandoffSession(sessionId)) {
         let scored = true;
         if (narrowPipeline) {
@@ -682,8 +743,12 @@ export default function chatRoutes(): Router {
           ]);
           clearTimeout(timer);
         }
-        handoffState = { voiceReturnAllowed: scored && (await resolveVoiceReturn(sessionId)) === true };
+        handoffState = {
+          voiceReturnAllowed: scored && (await resolveVoiceReturn(sessionId)) === true,
+          ...(req.body?.handoff_fallback ? { recorded: true } : {}),
+        };
       }
+      if (fallbackHandoff) log.warn(`[Handoff] ${sessionId.substring(0, 12)}... flagged from the browser fallback`);
 
       res.json({
         success: true,
@@ -792,6 +857,29 @@ export default function chatRoutes(): Router {
         error: 'Failed to end session',
         details: error instanceof Error ? error.message : String(error),
       });
+    }
+  });
+
+  // POST /api/chat/handoff-fallback - the browser's hand-off fallback, sent at
+  // once when the chat start answered without hand-off details (see
+  // applyHandoffFallback). The same facts ride on every /api/chat/message
+  // until one is acknowledged, so a failure here costs nothing.
+  router.post('/api/chat/handoff-fallback', chatMessageLimiter, async (req, res) => {
+    const sessionId: unknown = req.body?.sessionId;
+    if (typeof sessionId !== 'string' || !sessionId) {
+      return res.status(400).json({ error: 'sessionId is required' });
+    }
+    try {
+      const session = await getSessionAccessInfo(sessionId);
+      if (!session || !canAccessSession(req, session, sessionId)) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      const payload = await applyHandoffFallback(req, sessionId, req.body);
+      const { isHandoffSession } = await import('../../services/textHandoff.service.js');
+      res.json({ recorded: payload !== null || isHandoffSession(sessionId), handoff: payload });
+    } catch (error: unknown) {
+      log.error({ err: error }, 'Failed to record the hand-off fallback');
+      res.status(500).json({ recorded: false });
     }
   });
 

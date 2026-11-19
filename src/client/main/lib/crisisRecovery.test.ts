@@ -8,7 +8,10 @@ import {
   nextRecoveryStep,
   readHandoffStart,
   recoveryScreenMayClose,
+  runVoiceReturn,
   startInterimSpeech,
+  VOICE_RETURN_FAILED_NOTICE,
+  VOICE_RETURN_REFUSED_NOTICE,
   RECOVERY_FIRST_WORDS_WAIT_MS,
   ELIGIBILITY_GOODBYE_MAX_WAIT_MS,
   ELIGIBILITY_GOODBYE_MIN_WAIT_MS,
@@ -16,6 +19,8 @@ import {
   ELIGIBILITY_GOODBYE_START_WAIT_MS,
 } from './crisisRecovery';
 import {
+  HANDOFF_CEILING_FIRST_MESSAGE,
+  HANDOFF_CHECKIN_FIRST_MESSAGE,
   HANDOFF_CRISIS_FIRST_MESSAGE,
   HANDOFF_NEUTRAL_FIRST_MESSAGE,
   HANDOFF_NEUTRAL_FIRST_MESSAGE_NO_VOICE,
@@ -132,6 +137,7 @@ describe('readHandoffStart: what the participant sees after the hand-off chat st
         voiceReturnAllowed: false,
         spokenBridge: 'spoken line from the server',
       },
+      fallback: null,
     });
   });
 
@@ -180,22 +186,67 @@ describe('readHandoffStart: what the participant sees after the hand-off chat st
     });
   });
 
-  it('a chat session with no hand-off from the server continues on the neutral line, assuming nothing', () => {
-    const outcome = readHandoffStart(200, { sessionId: 'chat_4', opening: null, handoff: null });
+  // PR #77 review, item 3: no client failure path may choose calm wording. The
+  // browser knows the vendor cut the call; without the server's reading the
+  // risk is unknown, and unknown is a crisis.
+  const cut = { voiceSessionId: 'live_A', reason: 'content' as const };
+
+  it('a chat session with no hand-off from the server: crisis wording, pinned card, quick replies, and the server is told', () => {
+    const outcome = readHandoffStart(200, { sessionId: 'chat_4', opening: null, handoff: null }, undefined, cut);
     expect(outcome).toEqual({
       screen: 'chat',
       sessionId: 'chat_4',
-      firstMessage: HANDOFF_NEUTRAL_FIRST_MESSAGE_NO_VOICE,
+      firstMessage: HANDOFF_CRISIS_FIRST_MESSAGE,
       serverAuthored: false,
-      handoff: { kind: 'neutral', quickReplies: [], voiceReturnAllowed: false, spokenBridge: expect.any(String) },
+      handoff: {
+        kind: 'crisis',
+        quickReplies: ['Yes', 'No', 'Not sure'],
+        voiceReturnAllowed: false,
+        spokenBridge: expect.stringMatching(/call or text 988/),
+      },
+      fallback: { continued_from: 'live_A', reason: 'content' },
+    });
+    if (outcome.screen === 'chat') {
+      expect(outcome.firstMessage).not.toBe(HANDOFF_NEUTRAL_FIRST_MESSAGE_NO_VOICE);
+      expect(outcome.firstMessage).not.toMatch(/ended unexpectedly/);
+    }
+  });
+
+  it('the same after the vendor time limit, in the time-limit wording', () => {
+    const outcome = readHandoffStart(200, { sessionId: 'chat_5', opening: 'x' }, undefined, {
+      voiceSessionId: 'live_B',
+      reason: 'expired',
+    });
+    expect(outcome).toMatchObject({
+      screen: 'chat',
+      firstMessage: HANDOFF_CEILING_FIRST_MESSAGE,
+      handoff: { kind: 'ceiling', quickReplies: [], voiceReturnAllowed: false },
+      fallback: { continued_from: 'live_B', reason: 'expired' },
     });
   });
 
-  it('ignores a hand-off kind it does not know, and junk quick replies', () => {
-    expect(readHandoffStart(200, { sessionId: 'c', opening: 'x', handoff: { kind: 'party' } })).toMatchObject({
+  it('a server hand-off needs no fallback', () => {
+    const outcome = readHandoffStart(200, crisisBody, undefined, cut);
+    expect(outcome).toMatchObject({ serverAuthored: true, fallback: null });
+  });
+
+  it('reads the check-in kind', () => {
+    const outcome = readHandoffStart(200, {
+      sessionId: 'chat_6',
+      opening: HANDOFF_CHECKIN_FIRST_MESSAGE,
+      handoff: { kind: 'checkin', quickReplies: [], voiceReturnAllowed: false },
+    });
+    expect(outcome).toMatchObject({ screen: 'chat', serverAuthored: true, handoff: { kind: 'checkin' } });
+  });
+
+  it('ignores a hand-off kind it does not know (unknown risk, crisis wording), and junk quick replies', () => {
+    expect(
+      readHandoffStart(200, { sessionId: 'c', opening: 'x', handoff: { kind: 'party' } }, undefined, cut),
+    ).toMatchObject({
       screen: 'chat',
       serverAuthored: false,
-      handoff: { kind: 'neutral' },
+      handoff: { kind: 'crisis' },
+      fallback: { continued_from: 'live_A' },
     });
     const outcome = readHandoffStart(200, {
       sessionId: 'c',
@@ -203,6 +254,74 @@ describe('readHandoffStart: what the participant sees after the hand-off chat st
       handoff: { kind: 'crisis', quickReplies: ['Yes', 7, '', '  ', 'No'] },
     });
     if (outcome.screen === 'chat') expect(outcome.handoff.quickReplies).toEqual(['Yes', 'No']);
+  });
+});
+
+// PR #77 review, item 6: start the voice call first, end the chat only once it
+// is established; a failure leaves the participant in the chat.
+describe('runVoiceReturn', () => {
+  function steps(over: Partial<Parameters<typeof runVoiceReturn>[0]> = {}) {
+    const order: string[] = [];
+    const s = {
+      checkAllowed: vi.fn(async () => (order.push('check'), true)),
+      startVoice: vi.fn(async () => (order.push('start'), true)),
+      abandonVoice: vi.fn(() => void order.push('abandon')),
+      endChat: vi.fn(async () => void order.push('endChat')),
+      ...over,
+    };
+    return { s, order };
+  }
+
+  it('established: the voice call starts BEFORE the chat is ended', async () => {
+    const { s, order } = steps();
+    expect(await runVoiceReturn(s)).toBe('started');
+    expect(order).toEqual(['check', 'start', 'endChat']);
+    expect(s.abandonVoice).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['the start resolves false (refusal, no session.started)', async () => false],
+    [
+      'the start throws (microphone refused)',
+      async () => {
+        throw new DOMException('denied', 'NotAllowedError');
+      },
+    ],
+  ])('failure (%s): the chat is never ended, the half-started call is released', async (_name, startVoice) => {
+    const { s } = steps({ startVoice: vi.fn(startVoice) });
+    expect(await runVoiceReturn(s)).toBe('failed');
+    expect(s.endChat).not.toHaveBeenCalled();
+    expect(s.abandonVoice).toHaveBeenCalledTimes(1);
+  });
+
+  it('refused by the server (risk not cleared, quiet hours) or the check failing: nothing is started or ended', async () => {
+    for (const checkAllowed of [
+      vi.fn(async () => false),
+      vi.fn(async () => {
+        throw new Error('offline');
+      }),
+    ]) {
+      const { s } = steps({ checkAllowed });
+      expect(await runVoiceReturn(s)).toBe('refused');
+      expect(s.startVoice).not.toHaveBeenCalled();
+      expect(s.endChat).not.toHaveBeenCalled();
+    }
+  });
+
+  it('a chat end that fails does not undo a call that is up', async () => {
+    const { s } = steps({
+      endChat: vi.fn(async () => {
+        throw new Error('network');
+      }),
+    });
+    expect(await runVoiceReturn(s)).toBe('started');
+  });
+
+  it('the participant-facing lines are plain and offer the chat', () => {
+    expect(VOICE_RETURN_FAILED_NOTICE).toBe(
+      "The voice call couldn't be started. We can keep going right here in writing.",
+    );
+    expect(VOICE_RETURN_REFUSED_NOTICE).toMatch(/keep going right here in writing/);
   });
 });
 

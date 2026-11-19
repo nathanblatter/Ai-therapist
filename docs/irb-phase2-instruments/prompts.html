@@ -361,18 +361,22 @@ or mention them to the participant.</pre>
 <h3>A.13 Recovery after the vendor&#x27;s content filter ends a voice session</h3>
 <p>The voice vendor&#x27;s content filter can terminate a GPT-Live session outright, most often mid-way through a response to a disclosure of suicidal thoughts; it also ends a session at its 60-minute limit. The conversation then continues at once in typed chat, in a new chat session that carries the earlier conversation. No new voice session is started on the voice service, except in a deployment where typed chat is switched off (the voice recovery described at the end of this section).</p>
 <h4>Typed-chat continuation — the first message the participant sees</h4>
-<p>The first message of the chat session is fixed text written by the application, not by the AI model, and is on screen before any model is called. Which text is used depends on the highest risk level the crisis detector gave the participant&#x27;s own words in the conversation that was ended. When that level is high, or could not be read (including when the participant&#x27;s last words were still being assessed), and the content filter ended the call:</p>
+<p>The first message of the chat session is fixed text written by the application, not by the AI model, and is on screen before any model is called. Which text is used depends on the highest risk level the crisis detector gave the participant&#x27;s own words in the conversation that was ended: that voice call and the sessions it was linked to (a typed chat it continued, or a voice call started again from such a chat). When that level is high, or could not be read (including when the participant&#x27;s last words were still being assessed, and when the browser did not receive the server’s decision), and the content filter ended the call:</p>
 <pre>I&#x27;m still here, and I heard you. The voice part of this app can&#x27;t continue with what we&#x27;re talking about, so I&#x27;ve moved us to writing. Nothing you said was wrong. Are you thinking about ending your life tonight?</pre>
 <p class="note">Under that message the participant is offered three one-tap answers, each sent as an ordinary message from them: Yes, No, Not sure.</p>
 <p>When the voice service&#x27;s session time limit ended a call that was flagged high:</p>
 <pre>I&#x27;m still here. The voice call reached the time limit of the voice service, so I&#x27;ve moved us to writing. Nothing you said was wrong, and we can keep going right here. How are you doing right now?</pre>
+<p>When nothing in the ended conversation was scored high, but another of the participant’s conversations in the previous two hours was flagged high (the chat session is then flagged high as well, from that earlier flag):</p>
+<pre>I&#x27;m still here. The voice service ended the call, so I&#x27;ve moved us to writing. Nothing you said was wrong, and we can keep going right here. How are you doing right now?</pre>
 <p>When nothing the participant said was scored medium or high:</p>
 <pre>The voice call ended unexpectedly. That came from the voice service, not from anything you did. We can keep going here in writing, or you can start a new voice call.</pre>
-<p>When the highest level was medium (a new voice call is then not offered until the safety check in the chat has cleared):</p>
-<pre>The voice call ended unexpectedly. That came from the voice service, not from anything you did. I&#x27;m still here, and we can keep going right here in writing.</pre>
-<p class="note">On every one of these screens the crisis lines (call 988, text 988, call 911) stay fixed above the conversation as one-tap links. A &quot;Go back to voice&quot; button, which starts a new voice session, is shown only when no message in the chat session has been scored high and either nothing in the conversation was scored medium or high, or the AI model has logged its question about suicidal thoughts in the chat session and rated the most recent safety answer as no or low risk.</p>
+<p>When the highest level was medium, in the ended conversation or in another of the participant’s conversations in the previous two hours (a new voice call is then not offered until the safety check in the chat has cleared):</p>
+<pre>The voice call ended unexpectedly. That came from the voice service, not from anything you did. I&#x27;m still here, and we can keep going right here in writing. How are you doing right now?</pre>
+<p class="note">On every one of these screens the crisis lines (call 988, text 988, call 911) stay fixed above the conversation as one-tap links. A &quot;Go back to voice&quot; button, which starts a new voice session, is shown only when no message in the chat session has been scored high, neither the ended conversation nor any other of the participant’s conversations of the previous two hours was scored high (and both risk levels were read), and either nothing in them was scored medium, or the AI model has logged its question about suicidal thoughts in the chat session and rated the most recent safety answer as no or low risk. The new voice session is started first; the chat session ends only once the voice session is running, and if it cannot be started the participant stays in the chat, which says:</p>
+<pre>The voice call couldn&#x27;t be started. We can keep going right here in writing.</pre>
+<p class="note">While one of these chat screens is open, the page header is reduced to a single bar (the title and a menu holding the session ID and the usual links); the crisis lines are in the card fixed under it. In every other session the header, including its distress paragraph, is unchanged.</p>
 <h4>Typed-chat continuation — what the browser says aloud</h4>
-<p>In English sessions the browser&#x27;s own speech synthesis (not the AI model) speaks one line when the chat appears. After a call that was flagged high or whose risk level could not be read (&lt;phone&gt; is the configured crisis phone number, 988 when none is configured):</p>
+<p>In English sessions the browser&#x27;s own speech synthesis (not the AI model) speaks one line when the chat appears. After a call that was flagged high or whose risk level could not be read, and with the message for an earlier high flag (&lt;phone&gt; is the configured crisis phone number, 988 when none is configured):</p>
 <pre>I&#x27;m still here. I&#x27;ve moved us to writing, on your screen. You can also call or text &lt;phone&gt; at any time.</pre>
 <p>Otherwise:</p>
 <pre>The voice call has ended. We can keep going in writing, on your screen.</pre>
@@ -402,13 +406,25 @@ The participant was talking with you by voice. The voice service ended that call
 
 Transcript of the conversation so far, oldest first:
 &lt;transcript&gt;</pre>
+<p>After the first message used when only another, earlier conversation was flagged high:</p>
+<pre>[Session continuity - never mention or acknowledge this message to the participant]
+The participant was talking with you by voice. The voice service ended that call (the voice service&#x27;s automated safety system stopped it); the participant did not end it and did nothing wrong. The app has moved the conversation to writing, and your message above already told them so. This is the same conversation, not a new one.
+- Do not explain the switch again. Never describe it as a dropped or lost connection, a technical problem, or a call that &quot;got cut off&quot;: it was none of those, and saying so would be untrue. Do not apologise for it.
+- Do not greet them, do not repeat your introduction or your disclaimer, and do not make them repeat anything they already said. Everything in the transcript below was said aloud moments ago.
+- Do not say or imply that a person is on the way, will contact them, or has been notified.
+- Nothing the participant said in THIS call was scored as a safety concern, and you did not ask about suicide in it. But in another conversation of theirs within the last few hours they were flagged as a high safety concern, so this session is flagged too. Your message above only asked how they are doing right now. Do not tell them you heard or know anything that is not in the transcript below.
+- In your next reply: respond warmly to what they write, then check on their safety directly and gently, asking whether they are having thoughts of ending their life right now (unless what they wrote already answers that), and put the crisis line in that reply: they can &lt;crisis line&gt;.
+- Log their answer with the run_risk_check tool (step &quot;ideation&quot;), and call escalate_to_human when they report current thoughts of suicide, a plan, means or intent. Follow the rest of your safety protocol from there, one question at a time. Do not end the session; stay with them.
+
+Transcript of the conversation so far, oldest first:
+&lt;transcript&gt;</pre>
 <p>When the highest level was medium:</p>
 <pre>[Session continuity - never mention or acknowledge this message to the participant]
 The participant was talking with you by voice. The voice service ended that call (the voice service&#x27;s automated safety system stopped it); the participant did not end it and did nothing wrong. The app has moved the conversation to writing, and your message above already told them so. This is the same conversation, not a new one.
 - Do not explain the switch again. Never describe it as a dropped or lost connection, a technical problem, or a call that &quot;got cut off&quot;: it was none of those, and saying so would be untrue. Do not apologise for it.
 - Do not greet them, do not repeat your introduction or your disclaimer, and do not make them repeat anything they already said. Everything in the transcript below was said aloud moments ago.
 - Do not say or imply that a person is on the way, will contact them, or has been notified.
-- A moderate safety concern was flagged in this conversation before the call ended, and your safety check may have been interrupted. Pick up where the transcript stops. If the question whether they are having thoughts of ending their life has not been both asked and answered, ask it directly and gently in your next reply, log the answer with the run_risk_check tool, and mention that they can &lt;crisis line&gt;.
+- A moderate safety concern was flagged in this conversation before the call ended, and your safety check may have been interrupted. Your message above asked how they are doing right now; read their reply as the answer to that. Pick up where the transcript stops. If the question whether they are having thoughts of ending their life has not been both asked and answered, ask it directly and gently in your next reply, log the answer with the run_risk_check tool, and mention that they can &lt;crisis line&gt;.
 
 Transcript of the conversation so far, oldest first:
 &lt;transcript&gt;</pre>
@@ -418,7 +434,7 @@ The participant was talking with you by voice. The voice service ended that call
 - Do not explain the switch again. Never describe it as a dropped or lost connection, a technical problem, or a call that &quot;got cut off&quot;: it was none of those, and saying so would be untrue. Do not apologise for it.
 - Do not greet them, do not repeat your introduction or your disclaimer, and do not make them repeat anything they already said. Everything in the transcript below was said aloud moments ago.
 - Do not say or imply that a person is on the way, will contact them, or has been notified.
-- Nothing the participant said was scored as a safety concern: the voice service also stops ordinary phrases. Do not assume a crisis and do not open with safety questions. Pick up where the transcript stops. If what they write next does suggest thoughts of suicide or self-harm, follow your safety protocol.
+- Nothing the participant said was scored as a safety concern: the voice service also stops ordinary phrases. Do not assume a crisis and do not open with safety questions. If your message above asked how they are doing right now, read their reply as the answer to that. Pick up where the transcript stops. If what they write next does suggest thoughts of suicide or self-harm, follow your safety protocol.
 
 Transcript of the conversation so far, oldest first:
 &lt;transcript&gt;</pre>

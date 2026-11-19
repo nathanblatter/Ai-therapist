@@ -283,6 +283,99 @@ describe.skipIf(!LIVE)('paging SQL against a scratch Postgres', () => {
     });
   });
 
+  // ai-therapist-356 follow-up: the text hand-off's own link rows are the
+  // source of truth for the chain; the stamp-and-start-order walk is the
+  // fallback for a session without one. The hand-off words its first message
+  // from this chain only, so it must not reach an unrelated earlier session.
+  describe('the incident chain follows the hand-off link rows', () => {
+    const link = async (sessionId: string, event: string, details: Record<string, unknown>) => {
+      await q(
+        `INSERT INTO intervention_actions (session_id, action_type, action_details)
+         VALUES ($1, 'external_api_called', $2::jsonb)`,
+        [sessionId, JSON.stringify({ event, ...details })],
+      );
+    };
+    const handoff = (chat: string, voice: string) =>
+      Promise.all([
+        link(chat, 'voice_cut_text_handoff', { role: 'continuation', from: voice }),
+        link(voice, 'voice_cut_text_handoff', { role: 'cut_session', to: chat }),
+      ]);
+    const backstop = () => new Date(Date.now() - 12 * HOUR);
+
+    it('an ordinary call cut 90 minutes after a high flag elsewhere is a chain of its own', async () => {
+      const u = await (async () => {
+        const { rows } = await q(
+          `INSERT INTO users (username, password, role, organization_id)
+           SELECT $1, 'x', 'participant', organization_id FROM users WHERE userid = $2 RETURNING userid`,
+          [`${tag}_twohour`, userId],
+        );
+        return rows[0].userid as number;
+      })();
+      const earlier = await makeSession('th_earlier', u, 100 * 60_000);
+      await flagEvent(earlier, { severity: 'high', score: 82, agoMs: 95 * 60_000 });
+      const voice = await makeSession('th_voice', u, 8 * 60_000);
+      expect(await getIncidentChainSessionIds(voice, backstop())).toEqual([voice]);
+      // Its hand-off chat, stamped high from the earlier flag (look-back), and
+      // linked explicitly: the chain is the chat and the cut call, nothing older.
+      const chat = await makeSession('th_chat', u, 0);
+      await stamp(chat, 82);
+      await handoff(chat, voice);
+      const chain = await getIncidentChainSessionIds(chat, backstop());
+      expect(chain).toEqual([chat, voice]);
+      expect(chain).not.toContain(earlier);
+      // The chain's own risk reads (userId null: no look-back) see nothing high.
+      const flags = await getParticipantFlagEvents(chain, null, new Date());
+      expect(flags.filter((e) => e.severity === 'high')).toHaveLength(0);
+    });
+
+    it('voice -> chat -> voice again (unstamped) -> cut: the whole chain, through both kinds of link', async () => {
+      const v1 = await makeSession('vr_v1', userId, 40 * 60_000);
+      await flagEvent(v1, { severity: 'medium', score: 55, agoMs: 39 * 60_000 });
+      const c1 = await makeSession('vr_c1', userId, 38 * 60_000);
+      await stamp(c1, 55, 38 * 60_000);
+      await handoff(c1, v1);
+      const v2 = await makeSession('vr_v2', userId, 20 * 60_000);
+      await link(v2, 'voice_resumed_from_text', { from: c1 });
+      expect(await getIncidentChainSessionIds(v2, backstop())).toEqual([v2, c1, v1]);
+    });
+
+    it('the link row wins over start order and over a vendor-cut row on another session', async () => {
+      const { rows } = await q(
+        `INSERT INTO users (username, password, role, organization_id)
+         SELECT $1, 'x', 'participant', organization_id FROM users WHERE userid = $2 RETURNING userid`,
+        [`${tag}_linkwins`, userId],
+      );
+      const u = rows[0].userid as number;
+      const voice = await makeSession('lw_voice', u, 30 * 60_000);
+      const other = await makeSession('lw_other', u, 10 * 60_000);
+      const otherCut = await insertPagingRecord(
+        other,
+        'external_api_called',
+        { paging: { decision: 'no_page', kind: 'vendor_cut', delivered: false } },
+        null,
+      );
+      expect(otherCut).toBeGreaterThan(0);
+      const chat = await makeSession('lw_chat', u, 0);
+      await stamp(chat, 80);
+      await handoff(chat, voice);
+      expect(await getIncidentChainSessionIds(chat, backstop())).toEqual([chat, voice]);
+    });
+
+    it('an anonymous participant: the link rows alone make the chain', async () => {
+      const voice = await makeSession('anon_voice', null, 15 * 60_000);
+      const chat = await makeSession('anon_chat', null, 0);
+      await handoff(chat, voice);
+      expect(await getIncidentChainSessionIds(chat, backstop())).toEqual([chat, voice]);
+    });
+
+    it("never follows a link to another participant's session", async () => {
+      const theirs = await makeSession('xl_theirs', otherUserId, 15 * 60_000);
+      const chat = await makeSession('xl_chat', thirdUserId, 0);
+      await link(chat, 'voice_cut_text_handoff', { role: 'continuation', from: theirs });
+      expect(await getIncidentChainSessionIds(chat, backstop())).toEqual([chat]);
+    });
+  });
+
   describe('recordRecoveryDisclosure', () => {
     it('writes one real high flag for a stamp-only session, and corrects the session row', async () => {
       const s = await makeSession('disc_1', userId, 60_000);

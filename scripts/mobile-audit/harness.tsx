@@ -19,8 +19,10 @@ import QuietHoursScreen from '../../src/client/main/components/QuietHoursScreen'
 import SessionControls from '../../src/client/main/components/SessionControls';
 import StudyStatusScreen from '../../src/client/main/components/StudyStatusScreen';
 import {
+  HANDOFF_CHECKIN_FIRST_MESSAGE,
   HANDOFF_CRISIS_FIRST_MESSAGE,
   HANDOFF_NEUTRAL_FIRST_MESSAGE,
+  HANDOFF_NEUTRAL_FIRST_MESSAGE_NO_VOICE,
   HANDOFF_QUICK_REPLIES,
   type HandoffKind,
 } from '../../src/shared/textHandoff';
@@ -84,12 +86,37 @@ const HANDOFF: Record<string, HandoffFixture> = {
     awaitingReply: false,
     voiceReturnAllowed: true,
   },
+  // A medium flag in this call: the calm wording, ending on an open question;
+  // no quick replies, no voice offer until the check clears.
+  'handoff-medium': {
+    kind: 'neutral',
+    messages: [
+      ...NEUTRAL_VOICE.slice(0, 2),
+      ['user', 'Would stop.'] as [string, string],
+      ['assistant', HANDOFF_NEUTRAL_FIRST_MESSAGE_NO_VOICE] as [string, string],
+    ].map(([r, t], i) => msg(r, t, i)),
+    quickReplies: [],
+    awaitingReply: false,
+    voiceReturnAllowed: false,
+  },
+  // Nothing risky in this call, a high flag in another session earlier: the
+  // open check-in, the pinned card in the alert colours, no quick replies.
+  'handoff-checkin': {
+    kind: 'checkin',
+    messages: [...NEUTRAL_VOICE, ['assistant', HANDOFF_CHECKIN_FIRST_MESSAGE] as [string, string]].map(([r, t], i) =>
+      msg(r, t, i),
+    ),
+    quickReplies: [],
+    awaitingReply: false,
+    voiceReturnAllowed: false,
+  },
 };
 
 function HandoffChat({ fixture }: { fixture: HandoffFixture }) {
   return (
     <>
-      <Header sessionId="chat_1795093264257_fixture" timeRemaining={null} />
+      {/* App.tsx renders the compact header for as long as a hand-off chat is on screen. */}
+      <Header sessionId="chat_1795093264257_fixture" timeRemaining={null} compact />
       <PinnedCrisisCard crisisContact={crisisContact} kind={fixture.kind} onMoreResources={() => undefined} />
       <main className="flex-1 flex flex-col items-center overflow-hidden">
         <div className="w-full flex-1 overflow-y-auto px-4 py-2 sm:p-4">

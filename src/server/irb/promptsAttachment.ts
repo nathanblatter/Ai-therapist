@@ -102,12 +102,14 @@ import {
 } from '../services/minorSafeguard.service.js';
 import {
   HANDOFF_CEILING_FIRST_MESSAGE,
+  HANDOFF_CHECKIN_FIRST_MESSAGE,
   HANDOFF_CRISIS_FIRST_MESSAGE,
   HANDOFF_NEUTRAL_FIRST_MESSAGE,
   HANDOFF_NEUTRAL_FIRST_MESSAGE_NO_VOICE,
   HANDOFF_QUICK_REPLIES,
   handoffFailedSpokenLine,
   handoffSpokenBridge,
+  VOICE_RETURN_FAILED_NOTICE,
 } from '../../shared/textHandoff.js';
 import { NARROW_TURN_DOCUMENTATION_PROMPT } from '../services/chatTherapy.service.js';
 import {
@@ -662,9 +664,11 @@ function buildItems(): Item[] {
     'p',
     'The first message of the chat session is fixed text written by the application, not by the AI model, and is ' +
       'on screen before any model is called. Which text is used depends on the highest risk level the crisis ' +
-      "detector gave the participant's own words in the conversation that was ended. When that level is high, or " +
-      "could not be read (including when the participant's last words were still being assessed), and the " +
-      'content filter ended the call:',
+      "detector gave the participant's own words in the conversation that was ended: that voice call and the " +
+      'sessions it was linked to (a typed chat it continued, or a voice call started again from such a chat). ' +
+      "When that level is high, or could not be read (including when the participant's last words were still " +
+      'being assessed, and when the browser did not receive the server’s decision), and the content filter ' +
+      'ended the call:',
   );
   add('pre', HANDOFF_CRISIS_FIRST_MESSAGE);
   add(
@@ -674,28 +678,46 @@ function buildItems(): Item[] {
   );
   add('p', "When the voice service's session time limit ended a call that was flagged high:");
   add('pre', HANDOFF_CEILING_FIRST_MESSAGE);
+  add(
+    'p',
+    'When nothing in the ended conversation was scored high, but another of the participant’s conversations in ' +
+      'the previous two hours was flagged high (the chat session is then flagged high as well, from that earlier ' +
+      'flag):',
+  );
+  add('pre', HANDOFF_CHECKIN_FIRST_MESSAGE);
   add('p', 'When nothing the participant said was scored medium or high:');
   add('pre', HANDOFF_NEUTRAL_FIRST_MESSAGE);
   add(
     'p',
-    'When the highest level was medium (a new voice call is then not offered until the safety check in the chat ' +
-      'has cleared):',
+    'When the highest level was medium, in the ended conversation or in another of the participant’s ' +
+      'conversations in the previous two hours (a new voice call is then not offered until the safety check in ' +
+      'the chat has cleared):',
   );
   add('pre', HANDOFF_NEUTRAL_FIRST_MESSAGE_NO_VOICE);
   add(
     'note',
     'On every one of these screens the crisis lines (call 988, text 988, call 911) stay fixed above the ' +
       'conversation as one-tap links. A "Go back to voice" button, which starts a new voice session, is shown only ' +
-      'when no message in the chat session has been scored high and either nothing in the conversation was scored ' +
-      'medium or high, or the AI model has logged its question about suicidal thoughts in the chat session and ' +
-      'rated the most recent safety answer as no or low risk.',
+      'when no message in the chat session has been scored high, neither the ended conversation nor any other of ' +
+      'the participant’s conversations of the previous two hours was scored high (and both risk levels were ' +
+      'read), and either nothing in them was scored medium, or the AI model has logged its question about suicidal ' +
+      'thoughts in the chat session and rated the most recent safety answer as no or low risk. The new voice ' +
+      'session is started first; the chat session ends only once the voice session is running, and if it cannot ' +
+      'be started the participant stays in the chat, which says:',
+  );
+  add('pre', VOICE_RETURN_FAILED_NOTICE);
+  add(
+    'note',
+    'While one of these chat screens is open, the page header is reduced to a single bar (the title and a menu ' +
+      'holding the session ID and the usual links); the crisis lines are in the card fixed under it. In every ' +
+      'other session the header, including its distress paragraph, is unchanged.',
   );
   add('h3', 'Typed-chat continuation — what the browser says aloud');
   add(
     'p',
     "In English sessions the browser's own speech synthesis (not the AI model) speaks one line when the chat " +
-      'appears. After a call that was flagged high or whose risk level could not be read (<phone> is the ' +
-      'configured crisis phone number, 988 when none is configured):',
+      'appears. After a call that was flagged high or whose risk level could not be read, and with the message for ' +
+      'an earlier high flag (<phone> is the configured crisis phone number, 988 when none is configured):',
   );
   add('pre', handoffSpokenBridge('crisis', { enabled: true, phone: '<phone>' }));
   add('p', 'Otherwise:');
@@ -719,6 +741,11 @@ function buildItems(): Item[] {
   add(
     'pre',
     buildVoiceContinuationGuidance('<transcript>', { kind: 'ceiling', severity: 'high', crisisLine: '<crisis line>' }),
+  );
+  add('p', 'After the first message used when only another, earlier conversation was flagged high:');
+  add(
+    'pre',
+    buildVoiceContinuationGuidance('<transcript>', { kind: 'checkin', severity: 'none', crisisLine: '<crisis line>' }),
   );
   add('p', 'When the highest level was medium:');
   add(

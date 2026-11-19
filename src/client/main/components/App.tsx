@@ -66,7 +66,11 @@ import {
   nextRecoveryStep,
   readHandoffStart,
   recoveryScreenMayClose,
+  runVoiceReturn,
   startInterimSpeech,
+  VOICE_RETURN_FAILED_NOTICE,
+  VOICE_RETURN_REFUSED_NOTICE,
+  type HandoffFallback,
   type InterimSpeechEnv,
 } from '../lib/crisisRecovery';
 import { HandoffReplyBar, PinnedCrisisCard, useVisualViewportHeight } from './CrisisHandoffPanel';
@@ -389,6 +393,16 @@ export default function App() {
   // Latest hand-off state for handlers registered once per chat socket.
   const handoffRef = useRef(handoff);
   handoffRef.current = handoff;
+  // A hand-off this browser worded itself because the chat start came back
+  // without hand-off details (lib/crisisRecovery.ts readHandoffStart): sent to
+  // the server at once and on every chat message until it is acknowledged, so
+  // the chat is flagged to match what is on screen.
+  const handoffFallbackRef = useRef<HandoffFallback | null>(null);
+  // Set while a return to voice is being started from a hand-off chat
+  // (returnToVoice): the chat stays live until the new call is established,
+  // so a start failure must not run the ordinary teardown, which would end
+  // the chat instead of the call that never came up.
+  const voiceReturnPendingRef = useRef<{ failed: boolean } | null>(null);
   // Sizes the page to the visible area while the hand-off chat is open, so the
   // on-screen keyboard cannot cover the input (CrisisHandoffPanel.tsx).
   const handoffViewportHeight = useVisualViewportHeight(handoff !== null);
@@ -765,6 +779,7 @@ export default function App() {
     setModerationRecovery(null); // and any leftover content-filter recovery screen
     setHandoff(null); // a new session is never a hand-off chat
     setHandoffAwaitingReply(false);
+    handoffFallbackRef.current = null;
     setIsConnecting(true);
     try {
       if (features.voice_enabled === false) {
@@ -1026,6 +1041,7 @@ export default function App() {
   ) {
     setModerationRecovery('text');
     const requestedAt = performance.now();
+    const cut = { voiceSessionId, reason };
     const request = (async () => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), HANDOFF_START_TIMEOUT_MS);
@@ -1040,9 +1056,9 @@ export default function App() {
           }),
           signal: controller.signal,
         });
-        return readHandoffStart(response.status, await response.json().catch(() => null));
+        return readHandoffStart(response.status, await response.json().catch(() => null), undefined, cut);
       } catch (error) {
-        return readHandoffStart(0, null, error instanceof Error ? error.message : String(error));
+        return readHandoffStart(0, null, error instanceof Error ? error.message : String(error), cut);
       } finally {
         clearTimeout(timer);
       }
@@ -1078,10 +1094,33 @@ export default function App() {
 
     // The voice captions are deliberately left on screen: this is the same
     // conversation continuing, not a new one. The first message follows them.
-    setMessages((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), role: outcome.serverAuthored ? 'assistant' : 'system', text: outcome.firstMessage },
-    ]);
+    // A message the browser worded itself (no hand-off from the server) is
+    // shown the same way: the server is told at once, and stores it as the
+    // chat's first message when it records the fallback.
+    setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'assistant', text: outcome.firstMessage }]);
+    handoffFallbackRef.current = outcome.fallback;
+    if (outcome.fallback) {
+      const fallback = outcome.fallback;
+      reportClientEvent(
+        'chat_send_failed',
+        { where: 'handoff_without_details', message: 'chat start returned no hand-off; crisis wording used' },
+        voiceSessionId,
+      );
+      void fetch('/api/chat/handoff-fallback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: outcome.sessionId, ...fallback }),
+      })
+        .then(async (res) => {
+          const body = (await res.json().catch(() => null)) as { recorded?: unknown } | null;
+          if (res.ok && body?.recorded === true && handoffFallbackRef.current === fallback) {
+            handoffFallbackRef.current = null;
+          }
+        })
+        .catch((err: unknown) =>
+          console.error('[Live] Hand-off fallback not recorded yet; retrying with the next message:', err),
+        );
+    }
     setHandoff({
       kind: outcome.handoff.kind,
       quickReplies: outcome.handoff.quickReplies,
@@ -1113,63 +1152,100 @@ export default function App() {
   /**
    * Start a new voice call from a text hand-off chat. Offered only while the
    * server says the risk check has cleared (shared/textHandoff.ts
-   * voiceReturnAllowed), and the server is asked again here before anything is
-   * torn down: if the answer has changed, the chat simply continues.
+   * voiceReturnAllowed: never after a call whose risk was high or unknown),
+   * and the server is asked again here, quiet hours included, before anything
+   * happens.
+   *
+   * The voice call is started FIRST and the chat is ended only once that call
+   * is established (lib/crisisRecovery.ts runVoiceReturn). While it connects
+   * the chat stays on screen and live: the session state is not switched to
+   * the call until `session.started` (startRealtimeSession, `resumeFromChat`),
+   * and a failure on the way (microphone, a server refusal, no
+   * `session.started`) releases what the start left behind and leaves the
+   * participant in the chat with a plain line, never on Home with a toast.
    */
   async function returnToVoice() {
     if (returningToVoice || sessionType !== 'chat' || !sessionId || !handoff?.voiceReturnAllowed) return;
     const chatSessionId = sessionId;
+    const chatSocket = socketRef.current;
     setReturningToVoice(true);
     try {
-      let allowed = false;
-      try {
-        const res = await fetch('/api/chat/voice-return', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId: chatSessionId }),
-        });
-        allowed = res.ok && ((await res.json()) as { allowed?: boolean }).allowed === true;
-      } catch (error) {
-        console.error('[Chat] Could not check whether voice is available again:', error);
-      }
-      if (!allowed) {
-        setHandoff((prev) => (prev ? { ...prev, voiceReturnAllowed: false } : prev));
+      const outcome = await runVoiceReturn({
+        checkAllowed: async () => {
+          const res = await fetch('/api/chat/voice-return', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId: chatSessionId }),
+          });
+          return res.ok && ((await res.json()) as { allowed?: boolean }).allowed === true;
+        },
+        startVoice: async () => {
+          // The continuation exemption (`resume_from`) is a GPT-Live start.
+          if ((await detectVoiceBackend()) === 'grok') return false;
+          voiceReturnPendingRef.current = { failed: false };
+          // The voice start wires its own socket; the chat's stays connected
+          // and out of its way until the call is up.
+          socketRef.current = null;
+          stopInterimSpeechRef.current();
+          const result = await startRealtimeSession(null, false, chatSessionId);
+          if (!result.ok) return false;
+          const deadline = Date.now() + LIVE_START_TIMEOUT_MS;
+          while (Date.now() < deadline) {
+            if (liveStartedRef.current) return true;
+            if (voiceReturnPendingRef.current?.failed) return false;
+            await new Promise((resolve) => setTimeout(resolve, 150));
+          }
+          return liveStartedRef.current;
+        },
+        abandonVoice: () => {
+          voiceReturnPendingRef.current = null;
+          if (liveStartTimeoutRef.current) {
+            clearTimeout(liveStartTimeoutRef.current);
+            liveStartTimeoutRef.current = null;
+          }
+          liveSessionIdRef.current = null;
+          // Releases the peer connection, the microphone, the call's socket and
+          // its server-side session; it also clears the session state, which
+          // is put straight back to the chat.
+          cleanupFailedStart();
+          socketRef.current = chatSocket;
+          setSessionId(chatSessionId);
+          setSessionType('chat');
+          setIsSessionActive(true);
+        },
+        endChat: async () => {
+          voiceReturnPendingRef.current = null;
+          // Quietly: no post-session screen between the two halves of one
+          // conversation. The call is already live and owns the screen.
+          setHandoff(null);
+          setHandoffAwaitingReply(false);
+          setToolUI(null);
+          handoffFallbackRef.current = null;
+          if (chatSocket) {
+            chatSocket.emit('session:leave', { sessionId: chatSessionId });
+            chatSocket.disconnect();
+          }
+          await fetch('/api/chat/end', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId: chatSessionId }),
+          });
+        },
+      });
+      if (outcome === 'refused' || outcome === 'failed') {
+        if (outcome === 'refused') setHandoff((prev) => (prev ? { ...prev, voiceReturnAllowed: false } : prev));
+        else console.error('[Chat] The voice call could not be started; staying in the hand-off chat.');
         setMessages((prev) => [
           ...prev,
           {
             id: crypto.randomUUID(),
             role: 'system',
-            text: "A voice call isn't available again just yet. We can keep going right here in writing.",
+            text: outcome === 'refused' ? VOICE_RETURN_REFUSED_NOTICE : VOICE_RETURN_FAILED_NOTICE,
           },
         ]);
-        return;
       }
-
-      // End the chat quietly: no post-session screen between the two halves of
-      // one conversation.
-      stopInterimSpeechRef.current();
-      try {
-        await fetch('/api/chat/end', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId: chatSessionId }),
-        });
-      } catch (error) {
-        console.error('[Chat] Failed to end the hand-off chat before returning to voice:', error);
-      }
-      if (socketRef.current) {
-        socketRef.current.emit('session:leave', { sessionId: chatSessionId });
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
-      setHandoff(null);
-      setHandoffAwaitingReply(false);
-      setToolUI(null);
-      setIsSessionActive(false);
-      setSessionId(null);
-      setSessionType(null);
-      await startSession(null, chatSessionId);
     } finally {
+      voiceReturnPendingRef.current = null;
       setReturningToVoice(false);
     }
   }
@@ -1517,8 +1593,19 @@ export default function App() {
     // right away; 'disconnected' can self-heal, so give it a short grace
     // period before treating it as a drop. Either way the participant gets an
     // explanation and the post-session screen instead of a frozen orb.
+    // A return to voice that has not come up yet: the hand-off chat is still
+    // the participant's session, so a failure here is reported to
+    // returnToVoice (which stays in the chat) instead of running the teardown,
+    // which would end the chat.
+    const failPendingVoiceReturn = (): boolean => {
+      const pending = voiceReturnPendingRef.current;
+      if (!resumeFromChat || !pending || liveStartedRef.current) return false;
+      pending.failed = true;
+      return true;
+    };
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
+      if ((state === 'failed' || state === 'disconnected') && failPendingVoiceReturn()) return;
       if (state === 'connected') {
         if (disconnectTimerRef.current) {
           clearTimeout(disconnectTimerRef.current);
@@ -1611,6 +1698,12 @@ export default function App() {
           }
           pendingStartSessionRef.current = null; // start succeeded — nothing to release
           setIsConnecting(false);
+          if (resumeFromChat && liveSessionIdRef.current) {
+            // Return to voice: the call is up, so it takes the screen now and
+            // returnToVoice ends the chat it came from.
+            setSessionId(liveSessionIdRef.current);
+            setSessionType('realtime');
+          }
           setIsSessionActive(true);
           setEvents([]);
           // A content-filter recovery session (incident 2026-09-11) is a new
@@ -1819,7 +1912,9 @@ export default function App() {
       const errorData = (await response.json().catch(() => null)) as SessionStartErrorBody | null;
       const refusal = classifySessionStartRefusal(response.status, errorData);
       if (refusal) {
-        switch (refusal) {
+        // A return to voice from a hand-off chat: the participant stays in the
+        // chat, which says so itself (returnToVoice). No screen swap, no toast.
+        switch (voiceReturnPendingRef.current ? null : refusal) {
           case 'rate_limited':
             console.warn('Rate limit exceeded:', errorData);
             // During a content-filter takeover the crisis screen owns the
@@ -1893,7 +1988,7 @@ export default function App() {
     // Check if session already exists (idempotency check)
     if (data.session?.exists) {
       console.warn('Active session already exists:', data.session.id);
-      if (!moderationTakeoverRef.current) {
+      if (!moderationTakeoverRef.current && !voiceReturnPendingRef.current) {
         toast.warning(data.message || 'You already have an active session. Please end it before starting a new one.');
       }
       abortStart();
@@ -1911,8 +2006,12 @@ export default function App() {
     liveSessionIdRef.current = newSessionId;
     liveChannelLockedRef.current = data.data_channel_locked === true;
     leadConversationRef.current = data.lead_conversation === true;
-    setSessionId(newSessionId);
-    setSessionType('realtime');
+    // A return to voice keeps the hand-off chat on screen until this call is
+    // established; the switch happens at `session.started` (returnToVoice).
+    if (!resumeFromChat) {
+      setSessionId(newSessionId);
+      setSessionType('realtime');
+    }
     pendingStartSessionRef.current = { id: newSessionId, kind: 'realtime' };
 
     // Set up session timer if duration limit exists
@@ -2030,6 +2129,7 @@ export default function App() {
     liveStartTimeoutRef.current = setTimeout(() => {
       liveStartTimeoutRef.current = null;
       if (liveStartedRef.current) return;
+      if (failPendingVoiceReturn()) return;
       console.error('[Live] No session.started within the timeout; abandoning this connection.');
       reportClientEvent(
         'webrtc_failed',
@@ -2740,6 +2840,7 @@ export default function App() {
       // A text hand-off chat ends like any other chat session.
       setHandoff(null);
       setHandoffAwaitingReply(false);
+      handoffFallbackRef.current = null;
       stopInterimSpeechRef.current();
       return;
     }
@@ -2963,11 +3064,18 @@ export default function App() {
         setHandoffAwaitingReply(true);
       }
 
+      // A hand-off the browser worded itself rides along until the server
+      // says it has recorded it (see continueInChat).
+      const pendingFallback = handoffFallbackRef.current;
       try {
         const response = await fetch('/api/chat/message', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId, message }),
+          body: JSON.stringify({
+            sessionId,
+            message,
+            ...(pendingFallback ? { handoff_fallback: pendingFallback } : {}),
+          }),
         });
 
         if (response.status === 403) {
@@ -3004,9 +3112,13 @@ export default function App() {
         setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'assistant', text: data.response }]);
         // Whether a new voice call may be offered now: the server's answer,
         // recomputed on every turn of a hand-off chat.
-        const voiceReturn = (data.handoff as { voiceReturnAllowed?: unknown } | undefined)?.voiceReturnAllowed;
-        if (typeof voiceReturn === 'boolean') {
+        const handoffReply = data.handoff as { voiceReturnAllowed?: unknown; recorded?: unknown } | undefined;
+        if (typeof handoffReply?.voiceReturnAllowed === 'boolean') {
+          const voiceReturn = handoffReply.voiceReturnAllowed;
           setHandoff((prev) => (prev ? { ...prev, voiceReturnAllowed: voiceReturn } : prev));
+        }
+        if (handoffReply?.recorded === true && handoffFallbackRef.current === pendingFallback) {
+          handoffFallbackRef.current = null;
         }
 
         // Tool parity (ai-therapist-118): the server executes chat tool calls
@@ -3413,6 +3525,9 @@ export default function App() {
             : undefined
         }
         messagesOpen={activeView === 'messages'}
+        // Only while a hand-off chat, with its own pinned crisis card, is on
+        // screen; every ordinary session keeps the full header.
+        compact={handoffChat !== null}
       />
       {/* Text hand-off (ai-therapist-356): the crisis lines, pinned above the
           conversation for as long as the hand-off chat is open. Plain links

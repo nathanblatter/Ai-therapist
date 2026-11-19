@@ -117,16 +117,30 @@ export function buildVoiceContinuationGuidance(
       `your reply: they can ${ctx.crisisLine}.\n` +
       '- Log each safety answer with the run_risk_check tool and call escalate_to_human when they report current ' +
       'thoughts of suicide, a plan, means or intent. Do not end the session; stay with them.\n';
+  } else if (ctx.kind === 'checkin') {
+    specific =
+      '- Nothing the participant said in THIS call was scored as a safety concern, and you did not ask about ' +
+      'suicide in it. But in another conversation of theirs within the last few hours they were flagged as a high ' +
+      'safety concern, so this session is flagged too. Your message above only asked how they are doing right ' +
+      'now. Do not tell them you heard or know anything that is not in the transcript below.\n' +
+      '- In your next reply: respond warmly to what they write, then check on their safety directly and gently, ' +
+      'asking whether they are having thoughts of ending their life right now (unless what they wrote already ' +
+      `answers that), and put the crisis line in that reply: they can ${ctx.crisisLine}.\n` +
+      '- Log their answer with the run_risk_check tool (step "ideation"), and call escalate_to_human when they ' +
+      'report current thoughts of suicide, a plan, means or intent. Follow the rest of your safety protocol from ' +
+      'there, one question at a time. Do not end the session; stay with them.\n';
   } else if (ctx.severity === 'medium') {
     specific =
       '- A moderate safety concern was flagged in this conversation before the call ended, and your safety check ' +
-      'may have been interrupted. Pick up where the transcript stops. If the question whether they are having ' +
+      'may have been interrupted. Your message above asked how they are doing right now; read their reply as the ' +
+      'answer to that. Pick up where the transcript stops. If the question whether they are having ' +
       'thoughts of ending their life has not been both asked and answered, ask it directly and gently in your next ' +
       `reply, log the answer with the run_risk_check tool, and mention that they can ${ctx.crisisLine}.\n`;
   } else {
     specific =
       '- Nothing the participant said was scored as a safety concern: the voice service also stops ordinary ' +
-      'phrases. Do not assume a crisis and do not open with safety questions. Pick up where the transcript stops. ' +
+      'phrases. Do not assume a crisis and do not open with safety questions. If your message above asked how they ' +
+      'are doing right now, read their reply as the answer to that. Pick up where the transcript stops. ' +
       'If what they write next does suggest thoughts of suicide or self-harm, follow your safety protocol.\n';
   }
 
