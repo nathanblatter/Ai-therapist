@@ -54,6 +54,7 @@ vi.mock('../db/index.js', () => ({
 }));
 
 const { executeGraduatedResponse, maybeSteerSession } = await import('./crisisIntervention.service.js');
+const { _resetPagingStateForTests } = await import('./crisisPaging.service.js');
 
 /**
  * Wait until a fire-and-forget spy has been called.
@@ -87,6 +88,16 @@ const waitForCall = async (spy: { mock: { calls: unknown[] } }, times = 1, label
  * budget — kept deliberately generous, since a too-short settle here produces a
  * FALSE PASS (the page hadn't been attempted yet) rather than a visible failure.
  */
+/** Paging-decision rows crisisPaging.service wrote through the mocked pool:
+ *  [session_id, action_type, action_details (parsed), risk_score]. */
+const pagingRows = () =>
+  poolQueryMock.mock.calls
+    .filter((c) => typeof c[0] === 'string' && c[0].includes('INSERT INTO intervention_actions'))
+    .map((c) => {
+      const [sessionId, actionType, details, riskScore] = c[1] as [string, string, string, number | null];
+      return { sessionId, actionType, details: JSON.parse(details) as Record<string, unknown>, riskScore };
+    });
+
 const settle = async () => {
   for (let i = 0; i < 25; i++) await new Promise((r) => setTimeout(r, 2));
 };
@@ -98,6 +109,7 @@ beforeEach(() => {
   logInterventionActionMock.mockResolvedValue(undefined);
   sendCrisisAlertMock.mockResolvedValue(undefined);
   isSandboxAccountSessionMock.mockResolvedValue(false);
+  _resetPagingStateForTests();
 });
 
 describe('executeGraduatedResponse — session timer (ai-therapist-281)', () => {
@@ -170,7 +182,17 @@ describe('executeGraduatedResponse — high-risk paging', () => {
     await executeGraduatedResponse('sess-1', 'high', 90);
     await waitForCall(sendCrisisAlertMock, 1, 'sendCrisisAlert');
     expect(sendCrisisAlertMock).toHaveBeenCalledTimes(1);
-    expect(logInterventionActionMock).toHaveBeenCalledWith('sess-1', 'crisis_sms_alert', { riskScore: 90 });
+    // The page text says WHY: a risk score, as opposed to a vendor cut.
+    expect(String(sendCrisisAlertMock.mock.calls[0][0])).toMatch(/RISK SCORE 90\/100/);
+    await settle();
+    expect(pagingRows()).toEqual([
+      expect.objectContaining({
+        sessionId: 'sess-1',
+        actionType: 'crisis_sms_alert',
+        riskScore: 90,
+        details: expect.objectContaining({ riskScore: 90, paging: expect.objectContaining({ kind: 'risk' }) }),
+      }),
+    ]);
   });
 
   it('suppresses the page only on an affirmative sandbox=true (suppression logged out-of-band)', async () => {
@@ -178,11 +200,13 @@ describe('executeGraduatedResponse — high-risk paging', () => {
     await executeGraduatedResponse('sbx-1', 'high', 90);
     await settle();
     expect(sendCrisisAlertMock).not.toHaveBeenCalled();
-    expect(logInterventionActionMock).toHaveBeenCalledWith(
-      'sbx-1',
-      'external_api_called',
-      expect.objectContaining({ suppressed: 'crisis_sms_alert', reason: 'sandbox' }),
-    );
+    expect(pagingRows()).toEqual([
+      expect.objectContaining({
+        sessionId: 'sbx-1',
+        actionType: 'external_api_called',
+        details: expect.objectContaining({ suppressed: 'crisis_sms_alert', reason: 'sandbox' }),
+      }),
+    ]);
   });
 
   it('FAILS TOWARD PAGING: a throwing sandbox lookup still sends the real page', async () => {
@@ -195,6 +219,7 @@ describe('executeGraduatedResponse — high-risk paging', () => {
   it('a throwing suppression log cannot resurrect or break anything (sandbox path)', async () => {
     isSandboxAccountSessionMock.mockResolvedValue(true);
     logInterventionActionMock.mockRejectedValue(new Error('log down'));
+    poolQueryMock.mockRejectedValue(new Error('log down'));
     await expect(executeGraduatedResponse('sbx-1', 'high', 90)).resolves.toBeUndefined();
     await settle();
     expect(sendCrisisAlertMock).not.toHaveBeenCalled();

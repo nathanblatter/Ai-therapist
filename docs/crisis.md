@@ -168,8 +168,8 @@ What the context wake changes downstream:
   safety-protocol steer.
 - In a session **already flagged high**, a context-wake turn scored high does not force the
   safety-protocol steer again (it follows the ordinary 3-minute cooldown) and does not re-flag
-  or re-page unless its score exceeds the stored score by more than 10, the existing re-flag
-  rule. Without this, every short answer in a crisis conversation would restart the
+  unless its score exceeds the stored score by more than 10, the existing re-flag rule. A
+  re-flag asks for a page; whether one is sent is the paging policy's decision (below). Without this, every short answer in a crisis conversation would restart the
   assessment protocol. Keyword turns are unchanged and still force.
 - The periodic sweep is independent: a context wake does not reset its counter, and when a
   sweep is due on the same turn there is one call, labelled `llm_sweep`.
@@ -295,6 +295,36 @@ Responses are tiered by severity/score:
   section 7.
 - **Medium severity**: real-time dashboard alert plus a work-queue item for the study team.
   No SMS page.
+- **Whether a high-severity event becomes an SMS** is decided in one place,
+  `crisisPaging.service.ts` (ai-therapist-350; before it, one person in one crisis produced
+  four texts in 2.5 minutes because each recovery session is a new session id and "risk is
+  high" and "the vendor ended the session" paged independently). The rules:
+  - The first page for a participant always goes out at once.
+  - De-duplication is **per participant, across sessions**, for **15 minutes** from the last
+    *delivered* page (the on-call acknowledgement target in `docs/on-call-sop.md`; the window
+    is not extended by folded events). An event that says nothing new or worse than a page
+    already delivered in that window is folded into it: no SMS, an `external_api_called`
+    intervention row with `reason: folded_into_recent_page` and the `action_id` of the page
+    it was folded into, and a `session:page-decision` event to the admin dashboards. Anonymous
+    sessions have no participant to follow, so they de-duplicate per session only.
+  - New, worse information pages immediately inside the window: a higher level (vendor cut at
+    medium, then high, then a high score of 90 or more, the stand-in for "attempt in
+    progress"), or the first vendor termination of a high-risk session.
+  - **Vendor content-filter cut**, by the participant's peak flag in the incident (crisis
+    events on this session or on the participant's other sessions in the last two hours; the
+    automatic `recovery_continuation` stamp does not count): **high** pages once per incident;
+    **medium** pages once per incident, worded "vendor cut, NOT a high risk score" (the filter
+    typically cuts the screening question itself, so the answer is what was lost); **none**
+    does not page at the cut: it is recorded, shown on the dashboard, and checked again after
+    3 minutes, when the on-call is paged if the participant has not spoken in any session
+    since (the filter can end a session before the last words reach us). Unreadable risk is
+    treated as medium, not as none.
+  - Only a page known to be delivered absorbs another. Lookup failures, timeouts (2 s) and an
+    undelivered page all fail toward paging.
+  - Every page text has a `Why:` line: `RISK SCORE n/100`, `VENDOR CUT`, or
+    `VENDOR SESSION LIMIT`.
+  Not covered (unchanged): system alerts (assessor outage, spend cap, lost monitoring
+  connection, eval drift) and thread-message alerts, which have their own throttles or none.
 - **Risk score >= 25 (low and up)**: the system injects hidden de-escalation steering
   guidance into the model's context (`session.instructions.append` over the sideband for
   voice sessions; system message for chat). This changes how the agent responds — grounding, safety-checking,

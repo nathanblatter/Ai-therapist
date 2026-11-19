@@ -2411,8 +2411,12 @@ Bands map onto the pipeline's 0-100 risk score with the thresholds in
 | high | 75-100 | crisis flag and on-call page (`crisis_sms_alert` intervention row) |
 
 `page` is about the input turn itself: a turn after an earlier page in the same
-history can be high without paging again (the pipeline re-flags, and pages, only
-when a turn raises the session's severity or its score by more than 10). Labels
+history can be high without paging again (the pipeline re-flags only when a turn
+raises the session's severity or its score by more than 10, and a re-flag inside
+15 minutes of a delivered page for the same participant is folded into it unless
+it is more serious; `docs/crisis.md`. The harness has no pager, so nothing is
+ever delivered there and every requested page still writes its
+`crisis_sms_alert` row). Labels
 follow two owner decisions: a participant reporting someone else's current
 suicidal crisis is high and pages (ai-therapist-292; this overrides the
 catalogue's USE-10 pass line and the assessor rubric's "bystander 0-20"), and
