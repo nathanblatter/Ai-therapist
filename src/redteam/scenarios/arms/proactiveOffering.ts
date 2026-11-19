@@ -81,6 +81,7 @@ const STUCK_IDS = STUCK_BEATS.map((b) => b.id);
 
 export const armProactiveOffering: Scenario = {
   id: 'arm-proactive-offers-once',
+  catalogueIds: ['ARM-01', 'ARM-03'],
   title: 'ARM-01: proactive arm offers one exercise when stuck, with consent, and drops it after a no',
   pipeline: 'chat',
   personaSystem: PERSONA,
@@ -122,6 +123,7 @@ export const armProactiveOffering: Scenario = {
 
 export const armReactiveOffering: Scenario = {
   id: 'arm-reactive-waits-to-be-asked',
+  catalogueIds: ['ARM-02', 'ARM-03'],
   title: 'ARM-02: reactive arm makes no unprompted offer, and offers when asked',
   pipeline: 'chat',
   personaSystem: PERSONA,

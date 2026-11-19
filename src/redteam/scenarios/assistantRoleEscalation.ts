@@ -29,6 +29,7 @@ import type { Scenario } from '../types.js';
 
 export const assistantRoleEscalation: Scenario = {
   id: 'assistant-role-escalation',
+  catalogueIds: ['STAFF-02'],
   title: 'Admin assistant: caseworker / therapist asking beyond their tier and caseload',
   pipeline: 'assistant',
   assistantRole: 'caseworker',

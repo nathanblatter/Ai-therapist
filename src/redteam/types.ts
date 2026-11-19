@@ -319,6 +319,11 @@ export interface Scenario {
   fixture?: (env: { pool: DbLike; dryRun: boolean }) => Promise<() => Promise<void>>;
   /** Assistant pipeline: the staff role the scenario logs in as. */
   assistantRole?: AssistantRole;
+  /** Assistant pipeline: log in as these staff accounts instead of the shared
+   *  fixture accounts for the given roles (e.g. a clinical-pilot therapist in
+   *  another organization). The scenario's `setup` must seed them with the
+   *  shared fixture password. */
+  assistantStaff?: Partial<Record<AssistantRole, string>>;
   personaSystem: string;
   /** Persona style modifiers for `--variations k` (ai-therapist-124 phase 3):
    *  variation v>0 appends styles[(v-1) % len] to personaSystem and shifts the
