@@ -5,7 +5,16 @@
 //
 // Runs fire-and-forget from every session-end path, alongside redaction,
 // recording finalize, and session naming. Idempotent: skips sessions that
-// already have insights.
+// already have complete insights.
+//
+// Never stores nothing (ai-therapist-346). The call uses strict Structured
+// Outputs and checks finish_reason, so a reply cut off at the token cap is
+// recognised as truncation rather than discovered as a JSON parse error. A
+// failed first attempt is retried once with the essential fields only
+// (summary + SOAP); if that also fails, a fallback row is stored with the
+// deterministic safety line, the session's crisis flag and peak severity and
+// score, and incomplete=true, so staff views and the safety record are never
+// blank after a crisis.
 import OpenAI from 'openai';
 import { getOpenAIKey } from '../config/secrets.js';
 import {
@@ -17,7 +26,9 @@ import {
   getUserCaseProfile,
   upsertUserCaseProfile,
   getSessionSafetyContext,
+  getSessionRiskPeak,
   hasSafetyContext,
+  type SessionRiskPeak,
   type SessionSafetyContext,
   type SessionSummary,
   type SoapNote,
@@ -29,8 +40,39 @@ import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('sessionInsights');
 
+// A non-reasoning model: completion_tokens_details.reasoning_tokens is 0, so
+// the whole output cap goes to the JSON itself.
 const INSIGHTS_MODEL = 'gpt-4o-mini';
+
+// Prompt bounds: a very long session cannot grow the request without limit.
+// The transcript keeps its opening and, for most of the budget, its END,
+// where a crisis and the session's resolution usually are.
 const MAX_TRANSCRIPT_CHARS = 12000;
+const TRANSCRIPT_HEAD_CHARS = 3000;
+const MAX_SAFETY_LINE_CHARS = 300;
+const MAX_CHECKIN_FIELD_CHARS = 300;
+const MAX_PROFILE_ITEM_CHARS = 200;
+
+// Output caps. A complete reply measured about 1,150 tokens compact and about
+// 1,730 when the model pretty-prints it (2-space indented JSON, as the stage
+// failure on 2026-11-18 was); the old 1,400 cap sat between the two. Strict
+// Structured Outputs bounds the shape (affect <= 30 entries, list lengths),
+// and the cap leaves room for the indented form with headroom. The cap is a
+// ceiling, not a charge: billing is for the tokens actually generated.
+export const FULL_MAX_COMPLETION_TOKENS = 3200;
+// The retry asks only for summary + SOAP (about 500 tokens compact).
+export const ESSENTIAL_MAX_COMPLETION_TOKENS = 2000;
+
+/** Prompt bound for the transcript: whole when short, otherwise the opening
+ *  plus the end, with a marker saying how much of the middle was left out. */
+export function boundTranscript(text: string, max = MAX_TRANSCRIPT_CHARS, head = TRANSCRIPT_HEAD_CHARS): string {
+  if (text.length <= max) return text;
+  const tail = max - head;
+  const omitted = text.length - head - tail;
+  return `${text.slice(0, head)}\n[... ${omitted} characters from the middle of the session omitted ...]\n${text.slice(-tail)}`;
+}
+
+const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 3)}...` : s);
 
 const SYSTEM_PROMPT = `You are a clinical documentation assistant for an AI-assisted therapy research study.
 Given a support-conversation transcript, produce STRICT JSON with parts:
@@ -70,6 +112,79 @@ If no prior case profile is supplied, build a fresh one from this session alone 
 Never include names, places, or other identifying details anywhere in the JSON.
 Return ONLY the JSON object: {"summary": {...}, "soap": {...}, "affect": [...], "case_profile": {...}}`;
 
+/** Added to the retry only: the first attempt failed, so ask for less. */
+const ESSENTIAL_RETRY_NOTE =
+  'RETRY: the previous attempt did not complete. Return ONLY "summary" and "soap" (no "affect", no "case_profile"), ' +
+  'and keep every field brief: one or two sentences per text field. The "safety" rule above still applies in full.';
+
+// ---- Strict Structured Outputs schemas (ai-therapist-346) ----
+// Strict mode needs every property listed in "required" and
+// additionalProperties false; "may be empty" fields are empty strings or
+// arrays. The array limits mirror the prompt so the reply stays bounded.
+const str = { type: 'string' } as const;
+const strList = (maxItems: number) => ({ type: 'array', items: str, maxItems });
+const obj = (properties: Record<string, unknown>) => ({
+  type: 'object',
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
+});
+
+const SUMMARY_SCHEMA = obj({
+  headline: str,
+  topics: strList(4),
+  mood_trajectory: str,
+  techniques_discussed: strList(6),
+  techniques_helped: strList(6),
+  follow_up: str,
+  safety: str,
+});
+const SOAP_SCHEMA = obj({ subjective: str, objective: str, assessment: str, plan: str });
+const AFFECT_SCHEMA = {
+  type: 'array',
+  maxItems: 30,
+  items: obj({
+    turn: { type: 'integer', minimum: 1 },
+    valence: { type: 'number', minimum: -1, maximum: 1 },
+    arousal: { type: 'number', minimum: 0, maximum: 1 },
+    label: str,
+  }),
+};
+const CASE_PROFILE_SCHEMA = obj({
+  presenting_concerns: strList(5),
+  recurring_themes: strList(5),
+  stressors: strList(5),
+  support_system: strList(5),
+  coping_repertoire: {
+    type: 'array',
+    maxItems: 6,
+    items: obj({ technique: str, helpfulness: { type: 'string', enum: ['helped', 'mixed', 'did_not_help'] } }),
+  },
+  values: strList(5),
+  screener_trend: str,
+});
+
+type InsightsMode = 'full' | 'essential';
+
+/** The response_format for one attempt. case_profile is requested only for a
+ *  memory-consented participant (it is discarded otherwise), and the
+ *  essential retry asks for summary + SOAP alone. */
+export function insightsResponseFormat(mode: InsightsMode, withCaseProfile: boolean) {
+  const properties: Record<string, unknown> = { summary: SUMMARY_SCHEMA, soap: SOAP_SCHEMA };
+  if (mode === 'full') {
+    properties.affect = AFFECT_SCHEMA;
+    if (withCaseProfile) properties.case_profile = CASE_PROFILE_SCHEMA;
+  }
+  return {
+    type: 'json_schema' as const,
+    json_schema: {
+      name: mode === 'full' ? 'session_insights' : 'session_insights_essential',
+      strict: true,
+      schema: obj(properties),
+    },
+  };
+}
+
 /** Validate/clamp the model's affect array (ai-therapist-86): numbers clamped
  *  to range, malformed entries dropped, sorted by turn, hard-capped at 60
  *  points, single-token labels only (a verbatim quote can't sneak through as
@@ -100,9 +215,16 @@ const timeOf = (at: Date | string | null): string => (at ? new Date(at).toISOStr
 
 /** The SAFETY EVENTS block handed to the summarizer (ai-therapist-256).
  *  Empty string when nothing safety-relevant happened in the session. */
-export function buildSafetyBlock(ctx: SessionSafetyContext): string {
-  if (!hasSafetyContext(ctx)) return '';
+export function buildSafetyBlock(ctx: SessionSafetyContext, peak: SessionRiskPeak = NO_PEAK): string {
+  if (!needsSafetyLine(ctx, peak)) return '';
   const lines: string[] = [];
+  // A flag on the session row with no crisis_events row behind it still has
+  // to reach the summarizer (ai-therapist-346).
+  if (ctx.crisisEvents.length === 0 && peak.crisis_flagged) {
+    lines.push(
+      `- session crisis flag${peak.peak_severity ? ` (severity: ${peak.peak_severity})` : ''}${peak.peak_risk_score !== null ? ` (risk score: ${peak.peak_risk_score})` : ''}`,
+    );
+  }
   for (const e of ctx.crisisEvents) {
     lines.push(
       `- ${timeOf(e.created_at)} crisis event: ${e.event_type}${e.severity ? ` (severity: ${e.severity})` : ''}`,
@@ -124,20 +246,37 @@ export function buildSafetyBlock(ctx: SessionSafetyContext): string {
       `- ${timeOf(a.created_at)} adverse-event report #${a.report_id} (${a.category}, severity: ${a.severity}, ${a.status}): ${a.summary}`,
     );
   }
-  return `SAFETY EVENTS recorded during this session (these DID happen — the "safety" field is REQUIRED and the summary must reflect them):\n${lines.join('\n')}\n\n`;
+  return `SAFETY EVENTS recorded during this session (these DID happen — the "safety" field is REQUIRED and the summary must reflect them):\n${lines.map((l) => clip(l, MAX_SAFETY_LINE_CHARS)).join('\n')}\n\n`;
+}
+
+const NO_PEAK: SessionRiskPeak = { crisis_flagged: false, peak_severity: null, peak_risk_score: null };
+
+/** A safety line is required when anything safety-relevant was recorded OR
+ *  the session row carries a crisis flag (ai-therapist-346). */
+export function needsSafetyLine(ctx: SessionSafetyContext, peak: SessionRiskPeak = NO_PEAK): boolean {
+  return hasSafetyContext(ctx) || peak.crisis_flagged;
 }
 
 /** Deterministic safety line, used when the model returns none despite a
- *  SAFETY EVENTS block. A reviewer must never see a summary that omits the
- *  event just because the LLM did. */
-export function fallbackSafetyLine(ctx: SessionSafetyContext): string {
+ *  SAFETY EVENTS block or a crisis flag, and on the fallback row when the
+ *  model fails. A reviewer must never see a summary that omits the event just
+ *  because the LLM did. */
+export function fallbackSafetyLine(ctx: SessionSafetyContext, peak: SessionRiskPeak = NO_PEAK): string {
   const parts: string[] = [];
+  const order = ['low', 'medium', 'high'];
+  const eventWorst = ctx.crisisEvents.reduce<string | null>(
+    (w, e) => (e.severity && order.indexOf(e.severity) > order.indexOf(w ?? '') ? e.severity : w),
+    null,
+  );
   const worst =
-    ctx.crisisEvents.find((e) => e.severity === 'high')?.severity ??
-    ctx.crisisEvents.find((e) => e.severity)?.severity ??
-    null;
+    peak.peak_severity && order.indexOf(peak.peak_severity) > order.indexOf(eventWorst ?? '')
+      ? peak.peak_severity
+      : eventWorst;
+  const score = peak.peak_risk_score !== null ? `, peak risk score ${peak.peak_risk_score}` : '';
   if (ctx.crisisEvents.length > 0) {
-    parts.push(`${ctx.crisisEvents.length} crisis event(s)${worst ? `, highest severity ${worst}` : ''}`);
+    parts.push(`${ctx.crisisEvents.length} crisis event(s)${worst ? `, highest severity ${worst}` : ''}${score}`);
+  } else if (peak.crisis_flagged) {
+    parts.push(`a crisis flag${worst ? `, highest severity ${worst}` : ''}${score}`);
   }
   if (ctx.escalations.length > 0) parts.push(`${ctx.escalations.length} escalation(s) to a human`);
   if (ctx.resourceCards.length > 0) {
@@ -159,6 +298,99 @@ async function getClient(): Promise<OpenAI> {
   return openaiClient;
 }
 
+/** Prompt bound for the prior case profile: list lengths to the prompt's
+ *  limits and every string clipped, so a profile that grew past them (it is
+ *  model-written) cannot grow the request. */
+export function boundCaseProfile(profile: CaseProfile): CaseProfile {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(profile as Record<string, unknown>)) {
+    if (typeof value === 'string') out[key] = clip(value, MAX_PROFILE_ITEM_CHARS);
+    else if (Array.isArray(value)) {
+      out[key] = value.slice(0, key === 'coping_repertoire' ? 6 : 5).map((v) => {
+        if (typeof v === 'string') return clip(v, MAX_PROFILE_ITEM_CHARS);
+        if (v && typeof v === 'object' && typeof (v as { technique?: unknown }).technique === 'string') {
+          const t = v as { technique: string };
+          return { ...t, technique: clip(t.technique, MAX_PROFILE_ITEM_CHARS) };
+        }
+        return v;
+      });
+    } else out[key] = value;
+  }
+  return out as CaseProfile;
+}
+
+interface ParsedInsights {
+  summary: SessionSummary;
+  soap: SoapNote;
+  affect?: unknown;
+  case_profile?: CaseProfile;
+}
+
+type AttemptResult = { ok: true; parsed: ParsedInsights } | { ok: false; reason: string };
+
+/** One model call. Truncation, a content-filter stop and a refusal are read
+ *  from the response itself (finish_reason / refusal), before any parse. */
+async function requestInsights(
+  sessionId: string,
+  mode: InsightsMode,
+  withCaseProfile: boolean,
+  userContent: string,
+): Promise<AttemptResult> {
+  const client = await getClient();
+  const maxTokens = mode === 'full' ? FULL_MAX_COMPLETION_TOKENS : ESSENTIAL_MAX_COMPLETION_TOKENS;
+  // Post-session job: flex halves the cost where the model supports it
+  // (a no-op on gpt-4o-mini, which is not flex-eligible — see flexTier.ts).
+  const { withFlex } = await import('../utils/flexTier.js');
+  const response = await withFlex(INSIGHTS_MODEL, (tierParams) =>
+    client.chat.completions.create({
+      model: INSIGHTS_MODEL,
+      response_format: insightsResponseFormat(mode, withCaseProfile),
+      temperature: 0.3,
+      max_completion_tokens: maxTokens,
+      store: false,
+      ...tierParams,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        ...(mode === 'essential' ? [{ role: 'system' as const, content: ESSENTIAL_RETRY_NOTE }] : []),
+        { role: 'user', content: userContent },
+      ],
+    }),
+  );
+
+  // Cost tracking (ai-therapist-25c): best-effort, never blocks insights generation.
+  import('../db/index.js')
+    .then(({ recordLlmUsage }) =>
+      recordLlmUsage(
+        sessionId,
+        'insights',
+        INSIGHTS_MODEL,
+        response.usage?.prompt_tokens ?? null,
+        response.usage?.completion_tokens ?? null,
+      ),
+    )
+    .catch((err) => log.error({ err }, 'Failed to record LLM usage (non-fatal)'));
+
+  const choice = response.choices[0];
+  if (choice?.finish_reason === 'length') {
+    return {
+      ok: false,
+      reason: `reply cut off at max_completion_tokens=${maxTokens} (completion_tokens=${response.usage?.completion_tokens ?? 'unknown'})`,
+    };
+  }
+  if (choice?.finish_reason === 'content_filter') return { ok: false, reason: 'reply stopped by the content filter' };
+  if (choice?.message?.refusal) return { ok: false, reason: `model refused: ${clip(choice.message.refusal, 200)}` };
+  const raw = choice?.message?.content;
+  if (!raw) return { ok: false, reason: 'empty reply' };
+  let parsed: Partial<ParsedInsights>;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false, reason: `reply was not valid JSON: ${raw.substring(0, 200)}` };
+  }
+  if (!parsed.summary || !parsed.soap) return { ok: false, reason: 'reply missing summary or soap' };
+  return { ok: true, parsed: parsed as ParsedInsights };
+}
+
 export async function generateSessionInsights(sessionId: string): Promise<void> {
   const session = await getSession(sessionId);
   if (!session) {
@@ -167,8 +399,9 @@ export async function generateSessionInsights(sessionId: string): Promise<void> 
   }
 
   // Idempotency: session naming and redaction re-run safely; so does this.
+  // A fallback row (incomplete) is not final: any later run tries again.
   const existing = await getSessionInsights(sessionId);
-  if (existing?.summary) {
+  if (existing?.summary && !existing.summary.incomplete) {
     log.info(`Insights already exist for ${sessionId}; skipping`);
     return;
   }
@@ -190,7 +423,7 @@ export async function generateSessionInsights(sessionId: string): Promise<void> 
 
   const checkin = (session as { checkin?: SessionCheckin | null }).checkin;
   const checkinLine = checkin
-    ? `Pre-session check-in — mood: ${checkin.mood ?? 'n/a'}/10, topic: ${checkin.topic || 'n/a'}, goal: ${checkin.goal || 'n/a'}\n\n`
+    ? `Pre-session check-in — mood: ${checkin.mood ?? 'n/a'}/10, topic: ${clip(checkin.topic || 'n/a', MAX_CHECKIN_FIELD_CHARS)}, goal: ${clip(checkin.goal || 'n/a', MAX_CHECKIN_FIELD_CHARS)}\n\n`
     : '';
 
   // Rolling case profile (ai-therapist-47): only participate for logged-in,
@@ -201,88 +434,118 @@ export async function generateSessionInsights(sessionId: string): Promise<void> 
   const caseProfileEnabled = userId ? await getUserMemoryEnabled(userId) : false;
   const existingProfile = caseProfileEnabled && userId ? await getUserCaseProfile(userId) : null;
   const priorProfileLine = existingProfile
-    ? `PRIOR CASE PROFILE (update/merge this):\n${JSON.stringify(existingProfile.profile)}\n\n`
+    ? `PRIOR CASE PROFILE (update/merge this):\n${JSON.stringify(boundCaseProfile(existingProfile.profile))}\n\n`
     : '';
 
   // Safety context (ai-therapist-256): crisis events, escalations, resource
   // cards and AE drafts from this session. Without it the summarizer sees
-  // only the transcript and can miss a disclosure entirely.
-  const safetyContext = await getSessionSafetyContext(sessionId);
-  const safetyBlock = buildSafetyBlock(safetyContext);
+  // only the transcript and can miss a disclosure entirely. The risk peak
+  // (ai-therapist-346) also counts a flag on the session row itself.
+  const [safetyContext, riskPeak] = await Promise.all([
+    getSessionSafetyContext(sessionId),
+    getSessionRiskPeak(sessionId),
+  ]);
+  const safetyBlock = buildSafetyBlock(safetyContext, riskPeak);
+  const safetyRequired = needsSafetyLine(safetyContext, riskPeak);
 
-  const client = await getClient();
-  // Post-session job: flex halves the cost where the model supports it
-  // (a no-op on gpt-4o-mini, which is not flex-eligible — see flexTier.ts).
-  const { withFlex } = await import('../utils/flexTier.js');
-  const response = await withFlex(INSIGHTS_MODEL, (tierParams) =>
-    client.chat.completions.create({
-      model: INSIGHTS_MODEL,
-      response_format: { type: 'json_object' },
-      temperature: 0.3,
-      max_tokens: 1400, // affect array (ai-therapist-86) adds ~30 compact entries
-      store: false,
-      ...tierParams,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        {
-          role: 'user',
-          content: `${checkinLine}${priorProfileLine}${safetyBlock}Transcript:\n${conversation.substring(0, MAX_TRANSCRIPT_CHARS)}`,
-        },
-      ],
-    }),
-  );
+  const userContent = `${checkinLine}${priorProfileLine}${safetyBlock}Transcript:\n${boundTranscript(conversation)}`;
 
-  // Cost tracking (ai-therapist-25c): best-effort, never blocks insights generation.
-  import('../db/index.js')
-    .then(({ recordLlmUsage }) =>
-      recordLlmUsage(
-        sessionId,
-        'insights',
-        INSIGHTS_MODEL,
-        response.usage?.prompt_tokens ?? null,
-        response.usage?.completion_tokens ?? null,
-      ),
-    )
-    .catch((err) => log.error({ err }, 'Failed to record LLM usage (non-fatal)'));
-
-  const raw = response.choices[0]?.message?.content;
-  if (!raw) throw new Error('Empty insights response from model');
-
-  let parsed: { summary?: SessionSummary; soap?: SoapNote; affect?: unknown; case_profile?: CaseProfile };
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error(`Insights response was not valid JSON: ${raw.substring(0, 200)}`);
-  }
-  if (!parsed.summary || !parsed.soap) {
-    throw new Error('Insights response missing summary or soap');
+  // Up to two attempts: the full reply, then the essential fields only. An
+  // API error counts as a failed attempt (the SDK has already retried
+  // connection errors and 5xx/429 itself).
+  let result: ParsedInsights | null = null;
+  let mode: InsightsMode = 'full';
+  const failures: string[] = [];
+  for (const attempt of ['full', 'essential'] as const) {
+    mode = attempt;
+    try {
+      const r = await requestInsights(sessionId, attempt, caseProfileEnabled, userContent);
+      if (r.ok) {
+        result = r.parsed;
+        break;
+      }
+      failures.push(`${attempt}: ${r.reason}`);
+    } catch (err) {
+      failures.push(`${attempt}: API error: ${clip(err instanceof Error ? err.message : String(err), 200)}`);
+    }
+    if (attempt === 'full') {
+      log.warn(`Insights attempt failed for ${sessionId} (${failures[0]}); retrying with the essential fields only`);
+    }
   }
 
-  // The safety line is not optional when safety events exist: if the model
-  // skipped it (or emptied it), substitute the deterministic one.
-  const summary: SessionSummary = { ...parsed.summary };
-  if (hasSafetyContext(safetyContext)) {
+  if (!result) {
+    await storeSafetyFallback(sessionId, session.user_id ?? null, safetyContext, riskPeak, failures);
+    return;
+  }
+
+  // The safety line is not optional when safety events or a crisis flag
+  // exist: if the model skipped it (or emptied it), substitute the
+  // deterministic one.
+  const summary: SessionSummary = { ...result.summary };
+  if (safetyRequired) {
     if (typeof summary.safety !== 'string' || !summary.safety.trim()) {
-      summary.safety = fallbackSafetyLine(safetyContext);
+      summary.safety = fallbackSafetyLine(safetyContext, riskPeak);
       log.warn(`Model omitted the safety line for ${sessionId}; substituted the deterministic one`);
     }
-  } else if (summary.safety !== undefined && !summary.safety.trim()) {
+  } else if (typeof summary.safety === 'string' && !summary.safety.trim()) {
     delete summary.safety;
   }
 
-  const affectCurve = sanitizeAffectCurve(parsed.affect);
-  await upsertSessionInsights(sessionId, session.user_id ?? null, summary, parsed.soap, INSIGHTS_MODEL, affectCurve);
-  log.info(`Insights stored for ${sessionId} ("${parsed.summary.headline ?? ''}")`);
+  const affectCurve = sanitizeAffectCurve(result.affect);
+  await upsertSessionInsights(sessionId, session.user_id ?? null, summary, result.soap, INSIGHTS_MODEL, affectCurve);
+  log.info(
+    `Insights stored for ${sessionId} ("${summary.headline ?? ''}")${mode === 'essential' ? ' from the essential-fields retry: no affect curve or case profile update' : ''}`,
+  );
 
-  if (caseProfileEnabled && userId && parsed.case_profile) {
+  if (caseProfileEnabled && userId && result.case_profile) {
     try {
-      await upsertUserCaseProfile(userId, parsed.case_profile);
+      await upsertUserCaseProfile(userId, result.case_profile);
       log.info(`Case profile updated for user ${userId}`);
     } catch (err) {
       // Non-fatal: the session summary/SOAP note above is already saved.
       log.error({ err }, `Failed to update case profile for user ${userId}`);
     }
   }
+}
+
+/** Headline of the fallback row; also what staff see in every summary view. */
+export const INCOMPLETE_HEADLINE = 'Summary unavailable: automatic generation failed';
+
+/**
+ * Last resort (ai-therapist-346): both attempts failed. Store what matters for
+ * safety without the model, mark the row incomplete, and log at error level
+ * with a stable tag. The row is what staff see (headline, safety line,
+ * regenerate button) and the next end-of-session run or a therapist's
+ * regenerate replaces it. The case profile and affect curve are left as they
+ * were.
+ */
+async function storeSafetyFallback(
+  sessionId: string,
+  userId: number | null,
+  ctx: SessionSafetyContext,
+  peak: SessionRiskPeak,
+  failures: string[],
+): Promise<void> {
+  const reason = clip(failures.join('; '), 500);
+  const summary: SessionSummary = {
+    headline: INCOMPLETE_HEADLINE,
+    incomplete: true,
+    incomplete_reason: reason,
+    crisis_flagged: peak.crisis_flagged,
+    peak_severity: peak.peak_severity,
+    peak_risk_score: peak.peak_risk_score,
+  };
+  if (needsSafetyLine(ctx, peak)) summary.safety = fallbackSafetyLine(ctx, peak);
+  const soap: SoapNote = {
+    assessment:
+      'Automated draft unavailable: the post-session summarizer failed twice for this session. ' +
+      'Review the session record directly, or regenerate this note.',
+  };
+  log.error(
+    { sessionId, failures, crisisFlagged: peak.crisis_flagged, peakSeverity: peak.peak_severity },
+    `[insights] summary generation failed twice for ${sessionId}; stored the safety fallback (summary incomplete)`,
+  );
+  await upsertSessionInsights(sessionId, userId, summary, soap, INSIGHTS_MODEL, null);
 }
 
 /** Fire-and-forget wrapper used by the session-end paths. */

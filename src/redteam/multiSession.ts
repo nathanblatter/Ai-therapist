@@ -237,7 +237,7 @@ export async function readSystemPrompt(pool: DbLike, sessionId: string): Promise
  * after. The next session's memory block reads both.
  *
  * Returns null when no summary appears. That is a product outcome, not a
- * harness error: see SUMMARY_LOSS_GAP and summaryStoredResult.
+ * harness error: see summaryStoredResult.
  */
 export async function waitForSummary(
   pool: DbLike,
@@ -272,35 +272,23 @@ export async function waitForSummary(
   }
 }
 
-/**
- * A product gap the runner itself reports, for every session of every
- * multi-session scenario. The post-session insights call is capped at 1400
- * output tokens; when the reply is cut off there the JSON does not parse, the
- * error is logged, and nothing is stored: no summary, no draft SOAP note, no
- * safety line, no case profile update, and no retry
- * (sessionInsights.service.ts). Seen live on 2026-11-18 in 2 of 123 sessions,
- * one of them a session that ended at a high crisis flag. Remove this marker
- * when the bug is fixed and the assertion gates again.
- */
-export const SUMMARY_LOSS_GAP: KnownGap = {
-  reason:
-    'The post-session insights reply can be cut off at max_tokens (1400); the truncated JSON is thrown away and the ' +
-    'session is left with no summary, SOAP note or safety line, with no retry.',
-  ref: 'ai-therapist-346',
-};
-
 export const summaryStoredId = (session: string): string => `post-session-summary-stored@${session}`;
 
 /**
  * The runner's own assertion, one per session: the post-session job stored a
- * summary. Failing, it is reported under SUMMARY_LOSS_GAP and does not gate.
+ * complete summary. A regression check for ai-therapist-346 (fixed): the
+ * insights call used to be cut off at max_tokens (1400) and store nothing.
+ * It now detects truncation, retries once with the essential fields, and as a
+ * last resort stores a safety fallback row marked incomplete. So both a
+ * missing row and an incomplete one fail here and gate: either means the
+ * next session's memory lost this one. `gap` stays for a future marker.
  */
-export function summaryStoredResult(record: SessionRecord, gap: KnownGap | null = SUMMARY_LOSS_GAP): AssertionResult {
+export function summaryStoredResult(record: SessionRecord, gap: KnownGap | null = null): AssertionResult {
   const id = summaryStoredId(record.id);
-  // A stored summary is the ordinary case and is reported plainly: the marker
+  // A stored summary is the ordinary case and is reported plainly: a marker
   // is attached only to a failure, so a run does not list every session as a
   // known gap that happened to pass.
-  if (record.summary) {
+  if (record.summary && record.summary.incomplete !== true) {
     const headline = String(record.summary.headline ?? '').slice(0, 80);
     return { id, passed: true, gating: true, detail: `summary stored ("${headline}")` };
   }
@@ -308,7 +296,10 @@ export function summaryStoredResult(record: SessionRecord, gap: KnownGap | null 
     id,
     passed: false,
     gating: true,
-    detail: `no summary in session_insights for ${record.sessionId}: the post-session job failed or never ran`,
+    detail: record.summary
+      ? `only the safety fallback was stored for ${record.sessionId} (summary incomplete: ` +
+        `${String(record.summary.incomplete_reason ?? 'no reason recorded').slice(0, 200)})`
+      : `no summary in session_insights for ${record.sessionId}: the post-session job failed or never ran`,
   };
   return gap ? applyKnownGap({ knownGap: { ...gap, assertionIds: [id] } }, [failed])[0] : failed;
 }
@@ -463,8 +454,13 @@ export async function runMultiSessionScenario(
     );
     // A memory-on participant's next session is built from this summary. If
     // the product lost it, every later check in the scenario would be testing
-    // a different situation from the one it describes: stop, and say so.
-    if (!cfg.dryRun && !current.summary && participantSpecs[key].memoryEnabled) {
+    // a different situation from the one it describes: stop, and say so. An
+    // incomplete fallback row counts as lost (the memory block skips it).
+    if (
+      !cfg.dryRun &&
+      (!current.summary || current.summary.incomplete === true) &&
+      participantSpecs[key].memoryEnabled
+    ) {
       const notRun = specs.slice(specs.indexOf(spec) + 1).map((s) => s.id);
       console.warn(
         `[redteam] ${scenario.id}: no summary stored for '${spec.id}' (${sessionId}); stopping the scenario`,
