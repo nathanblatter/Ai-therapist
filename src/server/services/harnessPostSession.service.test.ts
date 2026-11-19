@@ -19,9 +19,13 @@ vi.mock('../db/index.js', () => ({
   recordLlmUsage: vi.fn(),
 }));
 
+import { readFileSync } from 'node:fs';
 import {
   HARNESS_PROCESS_ENV,
+  REDTEAM_TRIGGER_ENV,
   RESERVED_PARTICIPANT_USERID_MIN,
+  harnessProcessSignalOn,
+  setHarnessProcessSignal,
   _resetHarnessPostSessionForTests,
   optInPostSessionWork,
   shouldSkipPostSessionWork,
@@ -35,6 +39,7 @@ import { generateSessionInsightsAsync } from './sessionInsights.service.js';
 const HARNESS_USER = RESERVED_PARTICIPANT_USERID_MIN + 7;
 const REAL_USER = 42;
 const savedNodeEnv = process.env.NODE_ENV;
+const savedTrigger = process.env[REDTEAM_TRIGGER_ENV];
 
 /** therapy_sessions lookup answers with `userId`; the redaction job's message
  *  read answers one unredacted row so a run is visible as a redactPHIBatch call. */
@@ -53,11 +58,55 @@ beforeEach(() => {
   redactBatchMock.mockClear();
   getSessionMock.mockClear();
   delete process.env[HARNESS_PROCESS_ENV];
+  delete process.env[REDTEAM_TRIGGER_ENV];
   process.env.NODE_ENV = 'test';
 });
 afterEach(() => {
   delete process.env[HARNESS_PROCESS_ENV];
+  if (savedTrigger === undefined) delete process.env[REDTEAM_TRIGGER_ENV];
+  else process.env[REDTEAM_TRIGGER_ENV] = savedTrigger;
   process.env.NODE_ENV = savedNodeEnv;
+});
+
+describe('the in-app runner (REDTEAM_TRIGGER present) never has the signal on', () => {
+  // Its child runs against a deployment's live database and inherits the
+  // container's environment: a leaked REDTEAM_HARNESS_PROCESS must not reach
+  // the gate there, at either layer.
+  const TRIGGERS = ['nightly', 'admin', 'ci-voice', ''];
+
+  it('setHarnessProcessSignal deletes a leaked signal when REDTEAM_TRIGGER is present', () => {
+    for (const trigger of TRIGGERS) {
+      const env: NodeJS.ProcessEnv = { [REDTEAM_TRIGGER_ENV]: trigger, [HARNESS_PROCESS_ENV]: '1', NODE_ENV: 'test' };
+      setHarnessProcessSignal(env);
+      expect(HARNESS_PROCESS_ENV in env).toBe(false);
+      expect(harnessProcessSignalOn(env)).toBe(false);
+    }
+  });
+
+  it('setHarnessProcessSignal turns it on for a standalone CLI run', () => {
+    const env: NodeJS.ProcessEnv = { NODE_ENV: 'test' };
+    setHarnessProcessSignal(env);
+    expect(env[HARNESS_PROCESS_ENV]).toBe('1');
+    expect(harnessProcessSignalOn(env)).toBe(true);
+  });
+
+  it('the gate treats the signal as off while REDTEAM_TRIGGER is present, even if it is set', async () => {
+    for (const trigger of TRIGGERS) {
+      _resetHarnessPostSessionForTests();
+      process.env[HARNESS_PROCESS_ENV] = '1';
+      process.env[REDTEAM_TRIGGER_ENV] = trigger;
+      db(HARNESS_USER);
+      expect(await shouldSkipPostSessionWork(`t-${trigger}`, 'redaction')).toBe(false);
+      expect(queryMock).not.toHaveBeenCalled();
+    }
+  });
+
+  it('cli.ts sets the signal only through setHarnessProcessSignal(process.env)', () => {
+    const src = readFileSync(new URL('../../redteam/cli.ts', import.meta.url), 'utf8');
+    expect(src).toMatch(/^setHarnessProcessSignal\(process\.env\);$/m);
+    // No other write to the variable anywhere in the CLI.
+    expect(src).not.toMatch(/REDTEAM_HARNESS_PROCESS\s*=|\[\s*['"]REDTEAM_HARNESS_PROCESS['"]\s*\]\s*=/);
+  });
 });
 
 describe('shouldSkipPostSessionWork', () => {

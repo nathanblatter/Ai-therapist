@@ -46,10 +46,30 @@ const optedIn = new Set<string>();
 /** session id -> skip decision, so each session is looked up and logged once. */
 const decided = new Map<string, boolean>();
 
+/** Set by the in-app runner (harnessRunner.service.ts) on the harness child it
+ *  spawns against a deployment's live database. */
+export const REDTEAM_TRIGGER_ENV = 'REDTEAM_TRIGGER';
+
+/**
+ * Called by the harness CLI before the server loads: turn the harness-process
+ * signal on for a standalone run, and actively remove it under the in-app
+ * runner (REDTEAM_TRIGGER present), whose child runs against a live database
+ * and inherits the deployment's environment, so a variable that leaked into a
+ * container's environment cannot reach it.
+ */
+export function setHarnessProcessSignal(env: NodeJS.ProcessEnv): void {
+  if (env[REDTEAM_TRIGGER_ENV] !== undefined) delete env[HARNESS_PROCESS_ENV];
+  else env[HARNESS_PROCESS_ENV] = '1';
+}
+
+/** The signal is on only when set to exactly "1", outside NODE_ENV=production,
+ *  and never in a process the in-app runner started (REDTEAM_TRIGGER present). */
+export function harnessProcessSignalOn(env: NodeJS.ProcessEnv): boolean {
+  return env[HARNESS_PROCESS_ENV] === '1' && env.NODE_ENV !== 'production' && env[REDTEAM_TRIGGER_ENV] === undefined;
+}
+
 function isHarnessProcess(): boolean {
-  if (processSignal === null) {
-    processSignal = process.env[HARNESS_PROCESS_ENV] === '1' && process.env.NODE_ENV !== 'production';
-  }
+  if (processSignal === null) processSignal = harnessProcessSignalOn(process.env);
   return processSignal;
 }
 

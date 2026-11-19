@@ -49,11 +49,16 @@ process.env.ASSISTANT_ENABLED = 'true';
 // The harness-process signal for skipping post-session model work on harness
 // sessions (server/services/harnessPostSession.service.ts, ai-therapist-383).
 // Only this CLI sets it, in its own process, and only for runs against a
-// disposable database: the in-app runner (REDTEAM_TRIGGER set) runs against a
-// deployment's live database and keeps today's behaviour. The server also
-// needs the session's user in the reserved harness id range before it skips.
-if (!process.env.REDTEAM_TRIGGER) process.env.REDTEAM_HARNESS_PROCESS = '1';
+// disposable database: the in-app runner (REDTEAM_TRIGGER present) runs against
+// a deployment's live database and keeps today's behaviour, so there the
+// signal is actively deleted, in case it leaked into the container's
+// environment (the gate also ignores it while REDTEAM_TRIGGER is present). The
+// server also needs the session's user in the reserved harness id range
+// before it skips. (The import is hoisted, so the function is ready here; the
+// module reads nothing at load.)
+setHarnessProcessSignal(process.env);
 
+import { setHarnessProcessSignal } from '../server/services/harnessPostSession.service.js';
 import type OpenAI from 'openai';
 import {
   DEFAULTS,
