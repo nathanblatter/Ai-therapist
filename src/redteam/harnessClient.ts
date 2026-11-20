@@ -202,11 +202,15 @@ export class HarnessClient {
     let res = await agent.post('/api/chat/start').send(body);
     // chat.routes' chatStartLimiter allows 20 starts per 15 minutes per IP, and
     // every in-process scenario shares one IP. A full suite with 20+ chat
-    // scenarios can trip it; the limiter's own 429 carries no body (a session-
-    // limit 429 does), so wait out its window once instead of failing the
-    // scenario. Never retried for a session-limit 429.
+    // scenarios can trip it, so wait out its window once instead of failing
+    // the scenario. Its 429 is told apart from a session-limit 429 (cooldown,
+    // daily limit: never retried) by reason "too_many_attempts"; before it had
+    // a body it was the 429 with no error field. Since harness sessions skip
+    // post-session work the suite is fast enough to trip this every night
+    // (run 44774414682, 2026-11-20: two scenarios errored on it).
     const resetSeconds = Number(res.headers?.['ratelimit-reset']);
-    if (res.status === 429 && !res.body?.error && Number.isFinite(resetSeconds) && resetSeconds <= 16 * 60) {
+    const startLimiter429 = res.status === 429 && (!res.body?.error || res.body?.reason === 'too_many_attempts');
+    if (startLimiter429 && Number.isFinite(resetSeconds) && resetSeconds <= 16 * 60) {
       console.warn(`[redteam] chat start rate-limited; waiting ${resetSeconds}s for the limiter window`);
       await sleep((resetSeconds + 1) * 1000);
       res = await agent.post('/api/chat/start').send(body);

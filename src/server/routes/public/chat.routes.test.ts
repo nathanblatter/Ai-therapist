@@ -343,7 +343,7 @@ describe('POST /api/chat/start opening line', () => {
       crisis_contact: { enabled: true, hotline: 'Campus Line', phone: '555-0100', text: 'Text HELP to 12345' },
     });
     const res = await request(makeApp()).post('/api/chat/start').send({});
-    expect(res.body.opening).toContain('call the Campus Line crisis line at 555-0100 or text Text HELP to 12345');
+    expect(res.body.opening).toContain('call the Campus Line crisis line at 555-0100 or text HELP to 12345');
   });
 
   it('skips the opening on a continuation of a terminated voice session', async () => {

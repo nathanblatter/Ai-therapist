@@ -3,6 +3,7 @@ import { pool } from '../config/db.js';
 import { fetchSystemConfigRows } from '../db/index.js';
 import { getStartOfTodaySLC } from './timezoneHelpers.js';
 import { createLogger } from './logger.js';
+import { crisisTextLinePhrase } from '../../shared/openingPrompt.js';
 import type {
   CrisisContact,
   SessionLimits,
@@ -705,7 +706,7 @@ export async function resolveVendorCeilingMinutes(): Promise<number> {
 /** The {{crisis_text}} interpolated into the base prompt, from the configured crisis contact. */
 export function buildCrisisText(crisisContact: CrisisContact): string {
   return crisisContact.enabled
-    ? `${crisisContact.hotline} ${crisisContact.phone}${crisisContact.text ? ', text ' + crisisContact.text : ''}, or 911`
+    ? `${crisisContact.hotline} ${crisisContact.phone}${crisisTextLinePhrase(crisisContact.text, ', ')}, or 911`
     : '988 (Suicide and Crisis Lifeline), or 911 for immediate danger';
 }
 

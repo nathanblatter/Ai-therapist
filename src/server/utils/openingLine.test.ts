@@ -12,7 +12,7 @@ describe('buildChatOpeningLine', () => {
     });
     expect(line).toMatch(/I'm an AI/);
     expect(line).toMatch(/not a licensed therapist or doctor/);
-    expect(line).toContain('call the 988 Suicide & Crisis Lifeline crisis line at 988 or text Text HOME to 741741');
+    expect(line).toContain('call the 988 Suicide & Crisis Lifeline crisis line at 988 or text HOME to 741741');
   });
 
   it('lead-conversation flag appends one invitation and leaves the disclosure unchanged', () => {
