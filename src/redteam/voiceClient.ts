@@ -45,6 +45,7 @@ import type { Agent, HarnessClient } from './harnessClient.js';
 import { generatePersonaTurn } from './personaDriver.js';
 import { runJudge } from './judge.js';
 import { Timeline } from './voice/timeline.js';
+import { openingSpokenAssertion } from './voice/openingSpoken.js';
 import type { RunMetrics, TurnFacts } from './voice/metrics.js';
 import { applyCondition } from './voice/acoustics.js';
 import { voiceExpectation } from './voice/scenarios.js';
@@ -991,6 +992,14 @@ export async function runVoiceScenario(
   );
   const transcript: Turn[] = [];
   const assertions: AssertionResult[] = [];
+  // Every GPT-Live start that has an opening (not a CRAWL/WALK resume): was
+  // the AI disclosure spoken, within the server watchdog's bound
+  // (voice/openingSpoken.ts, ai-therapist-315)?
+  if (backend !== 'grok' && vs.timing && !evalOpts.start.history?.length) {
+    const spoken = openingSpokenAssertion(vs.timing);
+    console.log(`[redteam:voice] ${spoken.id}: ${spoken.passed ? 'ok' : 'FAIL'} ${spoken.detail}`);
+    assertions.push(spoken);
+  }
   const beatPostTimes: Record<string, Date> = {};
   const transports: VoiceTransport[] = [vs];
   /** GPT-Live: per-beat band, layer and cut, for liveScenarioAssertions. */

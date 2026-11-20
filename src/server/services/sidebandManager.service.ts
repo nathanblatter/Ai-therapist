@@ -55,6 +55,35 @@ import { clearVoiceToolOutcomes, reportVoiceToolOutcome, voiceOverlayEvent, with
 import { buildRecoverySpeakFirstNudge, type RecoveryCrisisContact } from '../../shared/recoveryPrompt.js';
 import { rememberTurn } from '../utils/recentTurns.js';
 import { noteVoiceHeadsUpSpeech, voiceHeadsUpPending } from './voiceHeadsUp.service.js';
+import {
+  clearLiveOpening,
+  liveOpeningAwaitingSpeech,
+  noteLiveOpeningAssistantSpeech,
+  noteLiveOpeningCrisis,
+  noteLiveOpeningParticipantSpeech,
+} from './liveOpening.service.js';
+
+/**
+ * Peak sample level (PCM16) above which a reflected output frame counts as the
+ * assistant speaking rather than silence. The same threshold the red-team
+ * harness uses on the received WebRTC track (liveVoiceClient isAudiblePcm).
+ */
+const OPENING_AUDIBLE_PEAK = 500;
+
+/** True when a base64 PCM16LE `session.output_audio.delta` frame carries speech-level energy. */
+export function isAudibleOutputDelta(deltaBase64: unknown): boolean {
+  if (typeof deltaBase64 !== 'string' || deltaBase64.length === 0) return false;
+  let buf: Buffer;
+  try {
+    buf = Buffer.from(deltaBase64, 'base64');
+  } catch {
+    return false;
+  }
+  for (let i = 0; i + 1 < buf.length; i += 2) {
+    if (Math.abs(buf.readInt16LE(i)) > OPENING_AUDIBLE_PEAK) return true;
+  }
+  return false;
+}
 
 /**
  * When the server re-sends the speak-first instruction to a recovery session
@@ -1886,6 +1915,9 @@ export class SidebandManager {
         const state = this.sessions.get(sessionId);
         if (!state) break;
         state.lastUserDeltaAt = Date.now();
+        // Before any assistant speech this is a barge-in before the opening:
+        // the opening watchdog stands down (liveOpening.service.ts).
+        noteLiveOpeningParticipantSpeech(sessionId);
         state.userTranscript.add({
           delta: String(event.delta ?? ''),
           start_ms: Number(event.start_ms ?? 0),
@@ -1900,6 +1932,8 @@ export class SidebandManager {
         if (!state) break;
         state.assistantSpoke = true;
         state.lastAssistantDeltaAt = Date.now();
+        // Latches the opening as spoken (ai-therapist-315).
+        noteLiveOpeningAssistantSpeech(sessionId, 'transcript');
         state.assistantTranscript.add({
           delta: String(event.delta ?? ''),
           start_ms: Number(event.start_ms ?? 0),
@@ -1914,6 +1948,15 @@ export class SidebandManager {
         }
         break;
       }
+
+      // Reflected copies of the assistant's audio. Read only until the opening
+      // has been heard: the first audible frame latches it (and times it),
+      // usually before its transcript arrives. Decoding stops after that.
+      case 'session.output_audio.delta':
+        if (liveOpeningAwaitingSpeech(sessionId) && isAudibleOutputDelta(event.delta)) {
+          noteLiveOpeningAssistantSpeech(sessionId, 'audio');
+        }
+        break;
 
       // --- Delegation ------------------------------------------------------
       case 'session.delegation.created': {
@@ -2018,6 +2061,8 @@ export class SidebandManager {
           // before.
           await this.handleModerationTermination(sessionId, 'expired');
         }
+        // Records the opening's timing if it is still open, and drops it.
+        clearLiveOpening(sessionId);
         break;
       }
 
@@ -2533,6 +2578,8 @@ export class SidebandManager {
     const kind = clinicalSteerKind(content);
     if (steered && kind === 'risk') steered.lastRiskSteerAt = Date.now();
     else if (steered && kind) steered.lastOtherSteerAt = Date.now();
+    // A risk steer owns the next words: the opening watchdog stands down.
+    if (kind === 'risk') noteLiveOpeningCrisis(sessionId);
   }
 
   /**

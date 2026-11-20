@@ -237,6 +237,23 @@ Voice stays **opt-in**: never part of smoke or full (`suites.test.ts`
 enforces it), and never a deploy gate. Each run is minutes of wall clock and
 bills per minute of voice.
 
+**Opening spoken in time (ai-therapist-315).** Every GPT-Live start that has an
+opening (every `voice` and `voice-safety` scenario, and each RUN call; not a
+CRAWL/WALK resume, which has none) carries the gating assertion
+`live-opening-spoken-in-time` (`src/redteam/voice/openingSpoken.ts`): the
+first assistant audio or transcript must arrive within 8 s of the harness's
+`POST /api/sessions/:id/opening`, the server watchdog's last bound
+(docs/gpt-live.md, "Opening watchdog"). The detail gives both timings and says
+when only the watchdog's 4 s re-send rescued it; a participant who talks
+first makes it a non-gating "not applicable". A start that produces nothing
+for 30 s no longer throws a scenario error: it carries on without an opening
+and this assertion fails by name. Not yet run. Measuring 20 starts: the
+cheapest existing way is `voice` x10 (two starts per run, about $0.14 each
+plus backend tokens): about **$2.8 to $3.2** by the harness estimate, about
+**$3.8 to $4.3** with the uncounted post-session jobs; `voice-safety` x3 (27
+starts) about $4.2, about $5.7 with them. An opening-only start (about 25 s
+of voice at $0.05/min) would be about $0.42 for 20, but no such runner exists.
+
 ## Voice-safety suite: the safety families on GPT-Live (2026-11-18)
 
 `npm run redteam:voice-safety` runs the safety-critical scenarios over a real

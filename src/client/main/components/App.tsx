@@ -73,6 +73,11 @@ import type { ChatMessage } from './ChatLog';
 // Canonical crisis-contact blob shape is shared with the server (src/shared).
 import type { CrisisContact } from '../../../shared/systemConfig';
 import { LIVE_RECOVERY_NUDGE_LOG, liveOpeningInstruction, openingPreamble } from '../../../shared/openingPrompt';
+import {
+  LIVE_OPENING_CLIENT_BACKSTOP_MS,
+  clientOpeningFallbackDue,
+  liveOpeningScreenText,
+} from '../../../shared/liveOpeningWatch';
 import { buildRecoverySpeakFirstNudge, recoveryInterimSpokenLine } from '../../../shared/recoveryPrompt';
 import { handoffFailedSpokenLine, type HandoffKind, type HandoffReason } from '../../../shared/textHandoff';
 import {
@@ -500,6 +505,18 @@ export default function App() {
   // on the live data channel. Read by the age-eligibility end to tell when
   // the goodbye has finished (ai-therapist-296).
   const lastAssistantSpeechAtRef = useRef<number | null>(null);
+  // The GPT-Live opening watch (ai-therapist-315, shared/liveOpeningWatch.ts).
+  // When the server confirmed it delivered the ordinary opening (null = not
+  // yet, or a recovery call), the first assistant and participant captions of
+  // the call, whether a crisis signal has arrived, and whether the opening's
+  // text has already been put on screen because it was never spoken.
+  const openingRequestedAtRef = useRef<number | null>(null);
+  const firstAssistantCaptionAtRef = useRef<number | null>(null);
+  const firstParticipantCaptionAtRef = useRef<number | null>(null);
+  const openingCrisisRef = useRef(false);
+  const openingShownRef = useRef(false);
+  const openingBackstopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showUnspokenOpeningRef = useRef<(source: 'server' | 'client') => void>(() => undefined);
 
   // Start-flow feedback (ai-therapist-117): true from the moment the
   // participant confirms the check-in until the data channel opens (realtime)
@@ -1833,6 +1850,13 @@ export default function App() {
           if (!recovery) setMessages([]);
           setAssistantStream('');
           startPeriodicFlush();
+          openingRequestedAtRef.current = null;
+          firstAssistantCaptionAtRef.current = null;
+          firstParticipantCaptionAtRef.current = null;
+          openingCrisisRef.current = false;
+          openingShownRef.current = false;
+          if (openingBackstopRef.current) clearTimeout(openingBackstopRef.current);
+          openingBackstopRef.current = null;
 
           // GPT-Live never speaks unprompted, so the session needs an opening
           // instruction: the disclosure preamble, or on a recovery session the
@@ -1846,6 +1870,7 @@ export default function App() {
         // Participant speech. There is no completion event and no item id, so
         // the caption row is grouped and owned entirely on our side.
         case 'session.input_transcript.delta':
+          firstParticipantCaptionAtRef.current ??= Date.now();
           appendTranscriptDelta(
             'user',
             String(event.delta ?? ''),
@@ -1858,6 +1883,7 @@ export default function App() {
         // has produced something to say.
         case 'session.output_transcript.delta':
           lastAssistantSpeechAtRef.current = Date.now();
+          firstAssistantCaptionAtRef.current ??= lastAssistantSpeechAtRef.current;
           markBackendThinking(false);
           appendTranscriptDelta(
             'assistant',
@@ -1939,7 +1965,10 @@ export default function App() {
           // it can also arrive with no close at all; either way the
           // participant just heard a reply stop partway, so the crisis lines
           // go on screen now, without waiting for the server.
-          if (isModerationStop(err)) setToolUI({ kind: 'resource', resourceType: 'all' });
+          if (isModerationStop(err)) {
+            openingCrisisRef.current = true;
+            setToolUI({ kind: 'resource', resourceType: 'all' });
+          }
           reportClientEvent(
             'data_channel_error',
             {
@@ -2738,10 +2767,17 @@ export default function App() {
     // marks the session as in crisis (lib/crisisRecovery.ts).
     socket.on('session:crisis-emergency', (data: { severity?: unknown } | undefined) => {
       if (crisisEmergencyMarksCrisis(data)) crisisActiveRef.current = true;
+      openingCrisisRef.current = true;
       setToolUI({ kind: 'resource', resourceType: 'all' });
       // Counted for the study; never unmutes (lib/speakerMute.ts). The card
       // pins "Tap to hear the assistant" while the voice is muted.
       speakerApi.crisisSignal();
+    });
+
+    // The server's opening watchdog gave up (ai-therapist-315): the opening
+    // was sent twice and never spoken. Its text goes on screen instead.
+    socket.on('session:opening-unspoken', () => {
+      showUnspokenOpeningRef.current('server');
     });
 
     // Backstop for the content-filter takeover (incident 2026-09-11). The
@@ -3519,7 +3555,20 @@ export default function App() {
         console.error('[Live] Opening request failed:', err);
       }
     }
-    if (delivered) return;
+    if (delivered) {
+      // Watch the ordinary opening from here (shared/liveOpeningWatch.ts). The
+      // server's watchdog re-sends it and, if it is still unspoken, says so on
+      // the socket; this timer covers a lost socket message.
+      if (!recovery) {
+        openingRequestedAtRef.current = Date.now();
+        if (openingBackstopRef.current) clearTimeout(openingBackstopRef.current);
+        openingBackstopRef.current = setTimeout(() => {
+          openingBackstopRef.current = null;
+          showUnspokenOpeningRef.current('client');
+        }, LIVE_OPENING_CLIENT_BACKSTOP_MS);
+      }
+      return;
+    }
 
     if (liveChannelLockedRef.current) {
       // Nothing more the browser can do: the server's own timer is the
@@ -3585,6 +3634,33 @@ export default function App() {
   // from the data-channel handler and the participant socket, both of which were
   // registered in the session-start render.
   moderationHandlerRef.current = handleModerationTermination;
+  // The opening that was never spoken (ai-therapist-315): its own text, shown
+  // as the assistant's message, once per call, and only while nothing has been
+  // spoken. Called from the socket and from a timer registered at session
+  // start, hence the latest-ref.
+  showUnspokenOpeningRef.current = (source) => {
+    if (!liveStartedRef.current || isTearingDownRef.current) return;
+    const due = clientOpeningFallbackDue({
+      source,
+      now: Date.now(),
+      requestedAt: openingRequestedAtRef.current,
+      assistantSpokeAt: firstAssistantCaptionAtRef.current,
+      participantSpokeAt: firstParticipantCaptionAtRef.current,
+      crisis: openingCrisisRef.current || crisisActiveRef.current,
+      shown: openingShownRef.current,
+    });
+    if (!due) return;
+    openingShownRef.current = true;
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        text: liveOpeningScreenText(crisisContact, leadConversationRef.current),
+      },
+    ]);
+    reportClientEvent('data_channel_error', { stage: 'opening_unspoken_shown', source }, liveSessionIdRef.current);
+  };
 
   const fns = {
     stopSession: () => stopSessionRef.current(),

@@ -4,7 +4,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const logMock = vi.hoisted(() => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }));
-const sidebandMocks = vi.hoisted(() => ({ tryInject: vi.fn() }));
+const sidebandMocks = vi.hoisted(() => ({ tryInject: vi.fn(), tryCommentary: vi.fn() }));
 const dbMocks = vi.hoisted(() => ({ insertMessage: vi.fn() }));
 
 vi.mock('../utils/logger.js', () => ({ createLogger: () => logMock }));
@@ -17,8 +17,17 @@ import {
   deliverLiveOpeningViaSideband,
   scheduleLiveOpeningFallback,
   clearLiveOpening,
+  noteLiveOpeningAssistantSpeech,
+  noteLiveOpeningParticipantSpeech,
+  noteLiveOpeningCrisis,
+  liveOpeningAwaitingSpeech,
   _resetLiveOpeningsForTests,
+  _setLiveOpeningWatchDepsForTests,
+  _liveOpeningOutcomeForTests,
+  type LiveOpeningTiming,
+  type LiveOpeningWatchDeps,
 } from './liveOpening.service.js';
+import { LIVE_OPENING_RETRIGGER_MS, LIVE_OPENING_UNSPOKEN_MS } from '../../shared/liveOpeningWatch.js';
 
 const ID = 'live_test_1';
 const OPENING = { text: "Say this phrase exactly: 'Hello!'", logMessage: 'Initial prompt: hello' };
@@ -27,6 +36,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   _resetLiveOpeningsForTests();
   sidebandMocks.tryInject.mockResolvedValue(true);
+  sidebandMocks.tryCommentary.mockResolvedValue(true);
   dbMocks.insertMessage.mockResolvedValue({});
 });
 
@@ -173,5 +183,266 @@ describe('scheduleLiveOpeningFallback', () => {
     await vi.advanceTimersByTimeAsync(10_000);
 
     expect(sidebandMocks.tryInject).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The opening watchdog (ai-therapist-315)
+// ---------------------------------------------------------------------------
+describe('opening watchdog (ai-therapist-315)', () => {
+  const ORDINARY = { ...OPENING, via: 'commentary' as const, watch: true };
+  let deps: {
+    resend: ReturnType<typeof vi.fn>;
+    onUnspoken: ReturnType<typeof vi.fn>;
+    record: ReturnType<typeof vi.fn>;
+    onRetrigger: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    deps = {
+      resend: vi.fn().mockResolvedValue(true),
+      onUnspoken: vi.fn().mockResolvedValue(undefined),
+      record: vi.fn().mockResolvedValue(undefined),
+      onRetrigger: vi.fn(),
+    };
+    _setLiveOpeningWatchDepsForTests(deps as unknown as Partial<LiveOpeningWatchDeps>);
+  });
+
+  /** Register, then deliver as the browser's request does. */
+  async function start(opening: Parameters<typeof registerLiveOpening>[1] = ORDINARY) {
+    registerLiveOpening(ID, opening);
+    const result = await deliverLiveOpeningViaSideband(ID);
+    expect(result).toMatchObject({ delivered: true, already: false });
+  }
+
+  /** Every opening send: the delivery plus any re-trigger. */
+  const sends = () => sidebandMocks.tryCommentary.mock.calls.length + deps.resend.mock.calls.length;
+
+  it('delivers the ordinary opening as commentary, its exact registered text', async () => {
+    await start();
+    expect(sidebandMocks.tryCommentary).toHaveBeenCalledWith(ID, OPENING.text);
+    expect(sidebandMocks.tryInject).not.toHaveBeenCalled();
+  });
+
+  it('a normal start produces exactly one opening and no signal', async () => {
+    await start();
+    await vi.advanceTimersByTimeAsync(1_500);
+    noteLiveOpeningAssistantSpeech(ID, 'audio');
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(sends()).toBe(1);
+    expect(deps.onUnspoken).not.toHaveBeenCalled();
+    expect(_liveOpeningOutcomeForTests(ID)).toBe('spoken');
+  });
+
+  it('re-triggers once at the first bound, never before it', async () => {
+    await start();
+    await vi.advanceTimersByTimeAsync(LIVE_OPENING_RETRIGGER_MS - 1);
+    expect(deps.resend).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(deps.resend).toHaveBeenCalledTimes(1);
+    expect(deps.resend).toHaveBeenCalledWith(ID, OPENING.text);
+    expect(deps.onRetrigger).toHaveBeenCalledWith(ID, LIVE_OPENING_RETRIGGER_MS, true);
+    expect(logMock.warn).toHaveBeenCalledWith(expect.stringContaining('LIVE OPENING SILENT'));
+  });
+
+  it('gives up at the second bound: one re-trigger, the unspoken signal, no loop', async () => {
+    await start();
+    await vi.advanceTimersByTimeAsync(LIVE_OPENING_UNSPOKEN_MS - 1);
+    expect(deps.onUnspoken).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(deps.onUnspoken).toHaveBeenCalledTimes(1);
+    expect(logMock.error).toHaveBeenCalledWith(expect.stringContaining('LIVE OPENING UNSPOKEN'));
+
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(deps.resend).toHaveBeenCalledTimes(1);
+    expect(deps.onUnspoken).toHaveBeenCalledTimes(1);
+    expect(sends()).toBe(2);
+    expect(_liveOpeningOutcomeForTests(ID)).toBe('unspoken');
+    const detail = deps.record.mock.calls[0][1] as LiveOpeningTiming;
+    expect(detail).toMatchObject({
+      firstAudioMs: null,
+      firstTranscriptMs: null,
+      retriggerMs: LIVE_OPENING_RETRIGGER_MS,
+      unspokenMs: LIVE_OPENING_UNSPOKEN_MS,
+      watched: 1,
+    });
+  });
+
+  it('latches on the first assistant audio just before the first bound: nothing is re-sent', async () => {
+    await start();
+    await vi.advanceTimersByTimeAsync(LIVE_OPENING_RETRIGGER_MS - 1);
+    noteLiveOpeningAssistantSpeech(ID, 'audio');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.resend).not.toHaveBeenCalled();
+    expect(deps.onUnspoken).not.toHaveBeenCalled();
+  });
+
+  it('latches on a transcript as well as on audio', async () => {
+    await start();
+    await vi.advanceTimersByTimeAsync(2_000);
+    noteLiveOpeningAssistantSpeech(ID, 'transcript');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.resend).not.toHaveBeenCalled();
+    // Audio not seen yet: the sideband keeps checking frames, for the record.
+    expect(liveOpeningAwaitingSpeech(ID)).toBe(true);
+    noteLiveOpeningAssistantSpeech(ID, 'audio');
+    expect(liveOpeningAwaitingSpeech(ID)).toBe(false);
+  });
+
+  it('spoken after the re-trigger: no unspoken signal', async () => {
+    await start();
+    await vi.advanceTimersByTimeAsync(LIVE_OPENING_RETRIGGER_MS + 900);
+    noteLiveOpeningAssistantSpeech(ID, 'audio');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.resend).toHaveBeenCalledTimes(1);
+    expect(deps.onUnspoken).not.toHaveBeenCalled();
+  });
+
+  it('never fires when the participant speaks first', async () => {
+    await start();
+    await vi.advanceTimersByTimeAsync(1_000);
+    noteLiveOpeningParticipantSpeech(ID);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.resend).not.toHaveBeenCalled();
+    expect(deps.onUnspoken).not.toHaveBeenCalled();
+    expect(_liveOpeningOutcomeForTests(ID)).toBe('participant_first');
+  });
+
+  it('a participant who spoke before the request also stands it down', async () => {
+    registerLiveOpening(ID, ORDINARY);
+    noteLiveOpeningParticipantSpeech(ID);
+    await deliverLiveOpeningViaSideband(ID);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.resend).not.toHaveBeenCalled();
+    expect(deps.onUnspoken).not.toHaveBeenCalled();
+  });
+
+  it('participant speech after the assistant began is not a barge-in before the opening', async () => {
+    await start();
+    noteLiveOpeningAssistantSpeech(ID, 'audio');
+    noteLiveOpeningParticipantSpeech(ID);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(_liveOpeningOutcomeForTests(ID)).toBe('spoken');
+    expect((deps.record.mock.calls[0][1] as LiveOpeningTiming).participantFirstMs).toBeNull();
+  });
+
+  it('a crisis signal in the first seconds takes priority: nothing is re-sent or shown', async () => {
+    await start();
+    await vi.advanceTimersByTimeAsync(1_200);
+    noteLiveOpeningCrisis(ID);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.resend).not.toHaveBeenCalled();
+    expect(deps.onUnspoken).not.toHaveBeenCalled();
+    expect(_liveOpeningOutcomeForTests(ID)).toBe('crisis');
+  });
+
+  it('a crisis signal before the request (a flagged check-in) also takes priority', async () => {
+    registerLiveOpening(ID, ORDINARY);
+    noteLiveOpeningCrisis(ID);
+    await deliverLiveOpeningViaSideband(ID);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.resend).not.toHaveBeenCalled();
+    expect(deps.onUnspoken).not.toHaveBeenCalled();
+  });
+
+  it('a crisis after the re-trigger still stops the unspoken signal', async () => {
+    await start();
+    await vi.advanceTimersByTimeAsync(LIVE_OPENING_RETRIGGER_MS + 500);
+    noteLiveOpeningCrisis(ID);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.onUnspoken).not.toHaveBeenCalled();
+  });
+
+  it('does not send the opening at all when the assistant is already speaking at the request', async () => {
+    registerLiveOpening(ID, ORDINARY);
+    // The startup developer message alone made it greet.
+    noteLiveOpeningAssistantSpeech(ID, 'audio');
+    const result = await deliverLiveOpeningViaSideband(ID);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(result).toMatchObject({ delivered: true, already: false });
+    expect(sends()).toBe(0);
+    expect(deps.onUnspoken).not.toHaveBeenCalled();
+    expect((deps.record.mock.calls[0][1] as LiveOpeningTiming).firstAudioMs).toBeLessThanOrEqual(0);
+  });
+
+  it('a sideband that is down at the re-trigger (reconnect in the first seconds) does not loop or double', async () => {
+    deps.resend.mockResolvedValue(false);
+    await start();
+    await vi.advanceTimersByTimeAsync(LIVE_OPENING_RETRIGGER_MS);
+    expect(deps.onRetrigger).toHaveBeenCalledWith(ID, LIVE_OPENING_RETRIGGER_MS, false);
+    // The reconnected sideband reports the opening being spoken.
+    await vi.advanceTimersByTimeAsync(1_500);
+    noteLiveOpeningAssistantSpeech(ID, 'transcript');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.resend).toHaveBeenCalledTimes(1);
+    expect(deps.onUnspoken).not.toHaveBeenCalled();
+  });
+
+  it('a second request after delivery neither re-sends nor re-arms', async () => {
+    await start();
+    await vi.advanceTimersByTimeAsync(LIVE_OPENING_RETRIGGER_MS - 500);
+    expect(await deliverLiveOpeningViaSideband(ID)).toMatchObject({ already: true });
+    await vi.advanceTimersByTimeAsync(LIVE_OPENING_RETRIGGER_MS);
+    expect(deps.resend).toHaveBeenCalledTimes(1);
+  });
+
+  it('never runs its timers on a recovery opening (it has its own re-send), but still records its timing', async () => {
+    await start({ ...OPENING, via: 'commentary' });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.resend).not.toHaveBeenCalled();
+    expect(deps.onUnspoken).not.toHaveBeenCalled();
+
+    noteLiveOpeningAssistantSpeech(ID, 'audio');
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(deps.record).toHaveBeenCalledTimes(1);
+    expect((deps.record.mock.calls[0][1] as LiveOpeningTiming).watched).toBe(0);
+  });
+
+  it('records the timing once, numbers only, with audio and transcript', async () => {
+    await start();
+    await vi.advanceTimersByTimeAsync(1_000);
+    noteLiveOpeningAssistantSpeech(ID, 'audio');
+    await vi.advanceTimersByTimeAsync(700);
+    noteLiveOpeningAssistantSpeech(ID, 'transcript');
+    await vi.advanceTimersByTimeAsync(10_000);
+    clearLiveOpening(ID);
+
+    expect(deps.record).toHaveBeenCalledTimes(1);
+    const detail = deps.record.mock.calls[0][1] as LiveOpeningTiming;
+    expect(detail).toEqual({
+      requestAfterCreateMs: 0,
+      firstAudioMs: 1_000,
+      firstTranscriptMs: 1_700,
+      participantFirstMs: null,
+      crisisMs: null,
+      retriggerMs: null,
+      unspokenMs: null,
+      watched: 1,
+    });
+    for (const v of Object.values(detail)) expect(v === null || typeof v === 'number').toBe(true);
+  });
+
+  it('a session that closes before anything was spoken is recorded and its timers stop', async () => {
+    await start();
+    await vi.advanceTimersByTimeAsync(2_000);
+    clearLiveOpening(ID);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.resend).not.toHaveBeenCalled();
+    expect(deps.onUnspoken).not.toHaveBeenCalled();
+    expect(deps.record).toHaveBeenCalledTimes(1);
+  });
+
+  it('nothing is armed for an opening that was never delivered', async () => {
+    registerLiveOpening(ID, ORDINARY);
+    sidebandMocks.tryCommentary.mockResolvedValue(false);
+    expect(await deliverLiveOpeningViaSideband(ID)).toMatchObject({ delivered: false });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.resend).not.toHaveBeenCalled();
+    expect(deps.onUnspoken).not.toHaveBeenCalled();
   });
 });

@@ -23,6 +23,7 @@ import {
   LIVE_MAX_REASONING_EFFORT,
 } from './liveSessionConfig.js';
 import type { ToolDefinition } from '../services/toolRegistry.service.js';
+import { DEFAULT_CRISIS_CONTACT, liveOpeningInstruction } from '../../shared/openingPrompt.js';
 
 const CLINICAL_PROMPT = 'CLINICAL_PROMPT_SENTINEL: you are a supportive therapist.';
 
@@ -489,6 +490,35 @@ describe('recovery session startup input (ai-therapist-293)', () => {
   it('has no startup input at all without a speak-first instruction', () => {
     expect(build({ recovery: { crisisLine: '988' } })).not.toHaveProperty('input');
     expect(build({ recovery: { crisisLine: '988', speakFirst: '   ' } })).not.toHaveProperty('input');
+  });
+});
+
+describe('ordinary session startup input: the opening (ai-therapist-315)', () => {
+  const OPENING = liveOpeningInstruction('en', DEFAULT_CRISIS_CONTACT, false).text;
+
+  it('carries the ordinary opening, verbatim, as one developer message (the same recipe as recovery)', () => {
+    expect(build({ speakFirst: OPENING }).input).toEqual([
+      { type: 'message', role: 'developer', content: [{ type: 'input_text', text: OPENING }] },
+    ]);
+  });
+
+  it('a recovery session carries its own nudge, never the ordinary opening', () => {
+    const input = build({ speakFirst: OPENING, recovery: { crisisLine: '988', speakFirst: 'Speak first.' } })
+      .input as Array<{ content: Array<{ text: string }> }>;
+    expect(input).toHaveLength(1);
+    expect(input[0].content[0].text).toBe('Speak first.');
+    expect(build({ speakFirst: OPENING, recovery: { crisisLine: '988' } })).not.toHaveProperty('input');
+  });
+
+  it('a session resuming with history has no opening: the history is the whole input', () => {
+    const input = build({ speakFirst: OPENING, history: [{ role: 'user', content: 'earlier' }] }).input as Array<{
+      role: string;
+    }>;
+    expect(input.map((i) => i.role)).toEqual(['user']);
+  });
+
+  it('no opening asked for, no input (the SIDEBAND_ENABLED=false path)', () => {
+    expect(build({})).not.toHaveProperty('input');
   });
 });
 

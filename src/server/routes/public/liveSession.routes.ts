@@ -329,6 +329,14 @@ export default function liveSessionRoutes(): Router {
         // allow-all channel or the opening disclosure could not be spoken.
         const sidebandEnabled = process.env.SIDEBAND_ENABLED !== 'false';
 
+        // Built once: the startup input and the sideband delivery must carry
+        // the same text.
+        const ordinaryOpening = liveOpeningInstruction(
+          userLanguage,
+          (systemConfig.crisis_contact as OpeningCrisisContact | undefined) || DEFAULT_CRISIS_CONTACT,
+          leadConversation,
+        );
+
         const sessionConfig = buildLiveSessionConfig({
           model: aiModel,
           voice: userVoice,
@@ -353,6 +361,12 @@ export default function liveSessionRoutes(): Router {
           psychoeducationCue: psychoeducationCue === true,
           leadConversation,
           allowClientSteering: !sidebandEnabled,
+          // The ordinary opening (the AI disclosure) in the startup input, the
+          // first half of the vendor's greeting recipe; the second half is the
+          // commentary the server sends at `session.started`. Same text,
+          // same builder (ai-therapist-315). Only with a sideband: without one
+          // the browser sends the opening itself and this would make it twice.
+          speakFirst: sidebandEnabled && !isRecovery ? ordinaryOpening.text : undefined,
         });
 
         const apiKey = await getOpenAIKey();
@@ -563,9 +577,10 @@ export default function liveSessionRoutes(): Router {
 
           // The opening is authored here and held until the browser reports
           // `session.started` (POST /api/sessions/:id/opening). The browser's
-          // data channel can no longer append instructions, so this is the only
-          // way the disclosure preamble, or the recovery speak-first nudge, is
-          // ever spoken. See liveOpening.service.ts for why it waits.
+          // data channel can no longer append anything, so this and the startup
+          // input are the only ways the disclosure preamble, or the recovery
+          // speak-first nudge, is ever spoken. See liveOpening.service.ts for
+          // why it waits.
           // Same text the browser authored before the lock, from the same
           // builder: both opening variants (lead_conversation off and on) and
           // the crisis contact GET /api/config/crisis serves the browser.
@@ -580,11 +595,16 @@ export default function liveSessionRoutes(): Router {
                   logMessage: LIVE_RECOVERY_NUDGE_LOG,
                   via: 'commentary' as const,
                 }
-              : liveOpeningInstruction(
-                  userLanguage,
-                  (systemConfig.crisis_contact as OpeningCrisisContact | undefined) || DEFAULT_CRISIS_CONTACT,
-                  leadConversation,
-                ),
+              : {
+                  // Already in the session's startup input (speakFirst above);
+                  // sent again as commentary at `session.started`, as the
+                  // recovery start is, and watched (liveOpening.service.ts):
+                  // a single instructions append left about one start in six
+                  // silent (ai-therapist-315).
+                  ...ordinaryOpening,
+                  via: 'commentary' as const,
+                  watch: true,
+                },
           );
           scheduleLiveOpeningFallback(sessionId);
 

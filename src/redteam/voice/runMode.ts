@@ -32,6 +32,7 @@ import { Timeline, type Segment } from './timeline.js';
 import { computeRunMetrics, type RunMetrics, type TurnFacts } from './metrics.js';
 import { delegationFallbacks, evalAssertions, executedTools, readConsumption } from './runnerHooks.js';
 import { CallerPeer, FrameQueue } from './callerPeer.js';
+import { openingSpokenAssertion } from './openingSpoken.js';
 
 /** RUN live checks grade the assistant's speech this long after an utterance. */
 export const REPLY_WINDOW_MS = 20_000;
@@ -191,6 +192,9 @@ export async function runVoiceRunScenario(
     throw err;
   }
   segments.push(vs.sessionId);
+  // The AI disclosure spoken within the server watchdog's bound
+  // (voice/openingSpoken.ts, ai-therapist-315).
+  assertions.push(openingSpokenAssertion(vs.timing));
   const originalSessionId = vs.sessionId;
   const transports = [vs];
   console.log(`[redteam:run] assistant ${vs.sessionId} live; conversation running`);

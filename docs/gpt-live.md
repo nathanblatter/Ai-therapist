@@ -170,14 +170,121 @@ DB hiccup would be worse than running with a lazily-created row.
 ### Opening preamble
 
 Realtime opened the conversation with a hidden user turn plus a forced response.
-GPT-Live has neither. The preamble is delivered as a trusted instructions append
-telling the model to speak first, immediately, then pause and listen.
+GPT-Live has neither, and never speaks unprompted. The opening is the AI
+disclosure (that the participant is talking to an AI, what it is not, the
+crisis line), so a session that never speaks it is a consent and
+study-integrity failure, not just a participant facing silence.
 
-The server authors that append and sends it over the sideband. The browser only
-reports when its audio path is up, by calling `POST /api/sessions/:id/opening`
-on `session.started`; the request carries no text. If the browser never asks
-(a tab still running an older bundle), the server delivers the opening itself
-after 10 seconds. A recovery session gets the speak-first nudge the same way.
+**How it is delivered (since ai-therapist-315, 2026-11-19).** The same text
+(`liveOpeningInstruction`, `shared/openingPrompt.ts`; wording unchanged) goes
+out twice, the vendor's greeting recipe, exactly as a recovery session's
+speak-first nudge already did:
+
+1. At session creation, as a `developer` message in `session.input`
+   (`buildLiveSessionConfig`, `speakFirst`). Not on a session seeded with
+   history, and not when `SIDEBAND_ENABLED=false` (the browser then sends the
+   opening itself on its unlocked channel, and the two would double).
+2. When the browser reports `session.started` (`POST /api/sessions/:id/opening`,
+   no text in the request), once as `session.commentary.append` over the
+   sideband. If the assistant has already started speaking by then (the
+   developer message alone can make it greet), nothing is sent: a second
+   trigger would have it say the disclosure twice. If the browser never asks
+   (a tab still running an older bundle), the server delivers it itself after
+   10 seconds.
+
+What the vendor documents, quoted from "Greet before the caller speaks"
+(live-conversations, read 2026-11-19 through the OpenAI docs tool): "For best
+results when GPT-Live should open the conversation, include greeting
+instructions in a `developer` message in `session.input` when you create the
+session. [...] Check the output audio and transcript to verify that the
+assistant greeted the caller. Startup instructions can improve greeting
+behavior, but do not guarantee that the model will speak." The delegation
+guide ("Send the right kind of update") says the same: "For an opening
+greeting, include a developer message in session.input when creating the
+session." It lists `session.commentary.append` as "Information the model
+should speak aloud, paraphrasing the appended text". The page no longer shows
+the step quoted below in the recovery section ("then send the same greeting
+instructions once through `session.commentary.append`"); the commentary is
+kept because it is what the recovery measurements were taken with, and the
+developer message alone has not been measured here.
+
+**Why the old delivery failed silently.** Until 2026-11-19 the ordinary
+opening was step 2 alone, as a `session.instructions.append`. Nothing told the
+model to open the conversation at creation, and an instructions append is a
+mid-conversation channel ("Instructions for an ongoing live conversation"),
+not a trigger: the vendor never promises it makes the model speak, and its
+`session.instructions.appended` acknowledgement only says the text was
+injected. Measured: 4 of 17 recovery starts with an instructions append stayed
+silent for 11 s or more, and ordinary starts went silent too (1 of 9
+scenario starts on 2026-11-18 never spoke in 90 s; on 2026-11-19 a fourth
+`voice-heads-up-ordinary-stress` session never spoke its opening). Nothing
+watched for it: the participant sat in a started, billing session, and the
+AI disclosure was never said.
+
+**The paraphrase question.** Commentary is documented as paraphrased, an
+instructions append as the place for exact wording. The text itself still
+says "Say this phrase exactly", in both the developer message and the
+commentary. Whether the ordinary disclosure is now said verbatim is
+not measured yet; the voice suites' disclaimer assertions read it on every
+run.
+
+### Opening watchdog (ai-therapist-315)
+
+`liveOpening.service.ts`, armed when an ordinary opening is delivered (the
+browser's request or the 10 s server fallback). Times are from that request.
+
+| When | What |
+|---|---|
+| first audible reflected `session.output_audio.delta` (peak above 500) or first `session.output_transcript.delta` | latched as spoken; nothing is sent again, ever |
+| participant transcript before any assistant speech | stands down: a barge-in before the opening is legitimate, the model is answering |
+| a risk steer, crisis resources (our own high flag), or a vendor stop or cut | stands down: the crisis path owns the next words |
+| 4 s, none of the above (`LIVE_OPENING_RETRIGGER_MS`) | the opening once more as commentary; `LIVE OPENING SILENT` log, `live:opening-silent` admin broadcast |
+| 8 s, none of the above (`LIVE_OPENING_UNSPOKEN_MS`) | no third send. `LIVE OPENING UNSPOKEN` log, `live:opening-unspoken` admin broadcast, a system row in the session's messages, and `session:opening-unspoken` to the participant's socket: the browser shows the opening's own text in the chat log as the assistant's message |
+| 12 s with no assistant caption, no participant caption and no crisis signal (`LIVE_OPENING_CLIENT_BACKSTOP_MS`) | the browser shows the same text itself, in case the socket message was lost (the participant socket is unreliable through the tunnel) |
+
+Why 4 s and 8 s: a healthy start with the recipe speaks 0.6 to 1.6 s after
+`session.started`, and up to 3.2 s with the old instructions append (measured
+2026-11-18, see the recovery section); 4 s waits out that whole range, and is
+the same first bound as the recovery re-send. 8 s gives the re-send the same
+4 s. There is no loop because re-sends did not rescue silent recovery
+sessions (two stayed silent through re-sends at 4 s and 8 s), and a model that
+finally answered every send would say the disclosure several times.
+
+What the participant sees on failure: `liveOpeningScreenText`
+(`shared/liveOpeningWatch.ts`), i.e. exactly the words inside the quotes of
+the voice instruction (the disclosure preamble with its microphone note),
+followed by the typed-chat invitation ("What would you like to focus on
+today?") when `lead_conversation` is on, as a typed-chat opening ends. No new
+wording. It is English even on a non-English session (the voice model would
+have translated it). The browser reports it as a `data_channel_error` client
+event, stage `opening_unspoken_shown`, with `source` `server` or `client`.
+
+The latch is per session in the service, not on the sideband's per-attach
+state, so a sideband reconnect in the first seconds neither forgets an opening
+already spoken nor re-arms anything; a re-send while the sideband is down is
+logged as not sent and the 8 s bound still applies. Recovery sessions are not
+watched here (they have their own re-send, below, and two watchdogs would send
+twice); the return to voice from a text hand-off is an ordinary start and is
+watched; Grok Voice opens with a system item plus `response.create`, an
+explicit response trigger, and is untouched.
+
+**Measured per session.** Every delivered opening, recovery included, writes
+one `client_events` row of kind `live_opening` (server-written; the public
+beacon route does not accept that kind), numbers only, ms from the request
+(negative = before it, null = did not happen): `requestAfterCreateMs`,
+`firstAudioMs`, `firstTranscriptMs`, `participantFirstMs`, `crisisMs`,
+`retriggerMs`, `unspokenMs`, and `watched` (1 for an ordinary opening). The
+same numbers are logged as `live opening timing`. The voice red-team suites
+assert it from the harness side (`live-opening-spoken-in-time`,
+`src/redteam/voice/openingSpoken.ts`, docs/redteam.md).
+
+Not proven without a live session: that the developer message plus commentary
+removes the ordinary silent starts the way it did for recovery (8 of 8 there);
+whether the startup developer message alone makes the model greet before the
+browser asks (handled, but its frequency is unknown); that reflected output
+audio carries no audible energy while the model is silent (the latch assumes
+so; a false latch would only skip the re-send); and verbatim delivery of the
+disclosure through commentary.
 
 ### Data-channel permissions
 
@@ -302,7 +409,7 @@ acknowledgements, and `error`.
 |---|---|---|
 | `session.instructions.append` | Trusted application instruction | Crisis steering, phase nudges, wrap-up, admin injections, stop-speaking |
 | `session.thinking.append` | Quiet context the model may use but should not announce | Re-grounding summaries |
-| `session.commentary.append` | A verified result the model should say aloud (it may paraphrase) | Exposed on the manager; **no callers yet** |
+| `session.commentary.append` | A verified result the model should say aloud (it may paraphrase) | The opening and the recovery speak-first nudge, their re-sends, the silence-after-steer and delegation fallbacks |
 
 All three are capped at **500 tokens** by the API ("Each event takes
 plain-string content of up to 500 tokens", Managing GPT-Live sessions, "Add
@@ -778,8 +885,9 @@ does now. Measured the same day over 8 starts: first word 0.6 to 1.6 s after
 `session.started` (median 0.66 s), none silent. The guide is explicit that
 this still does "not guarantee that the model will speak", which is what the
 server's re-send and the browser's 12 s bound on the recovery screen are for.
-The ordinary session opening (the disclosure preamble) still uses an
-instructions append; moving it to the same recipe is a separate change.
+The ordinary session opening (the disclosure preamble) moved to the same
+recipe on 2026-11-19, with its own watchdog (ai-therapist-315, "Opening
+preamble" above).
 
 The recovery wording changed on 2026-11-18 in two respects only. It no longer
 tells the model, or has the model tell the participant, that "the connection

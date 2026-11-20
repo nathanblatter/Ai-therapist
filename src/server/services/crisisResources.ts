@@ -21,6 +21,8 @@
 //
 // Nothing here throws: an emission problem must never break a crisis path.
 
+import { noteLiveOpeningCrisis } from './liveOpening.service.js';
+
 export type CrisisResourceReason =
   /** Our own pipeline scored the turn high. */
   | 'high_risk'
@@ -74,6 +76,9 @@ function kindOf(reason: CrisisResourceReason): Kind {
  */
 export function emitCrisisResources(sessionId: string, payload: CrisisResourcePayload, now = Date.now()): boolean {
   try {
+    // Our own high flag and a vendor stop or cut take priority over a GPT-Live
+    // opening that has not been spoken yet (ai-therapist-315).
+    noteLiveOpeningCrisis(sessionId);
     const kind = kindOf(payload.reason);
     const entry = lastEmittedAt.get(sessionId) ?? {};
     const last = entry[kind];
