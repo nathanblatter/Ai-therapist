@@ -32,6 +32,7 @@ import { Timeline, type Segment } from './timeline.js';
 import { computeRunMetrics, type RunMetrics, type TurnFacts } from './metrics.js';
 import { delegationFallbacks, evalAssertions, executedTools, readConsumption } from './runnerHooks.js';
 import { CallerPeer, FrameQueue } from './callerPeer.js';
+import { expectedOpening, openingDisclosureAssertion, openingSpokenAssertion } from './openingSpoken.js';
 
 /** RUN live checks grade the assistant's speech this long after an utterance. */
 export const REPLY_WINDOW_MS = 20_000;
@@ -184,13 +185,20 @@ export async function runVoiceRunScenario(
     );
 
   let vs: Awaited<ReturnType<typeof startAssistant>>['session'];
+  let openingText = '';
   try {
-    vs = (await startAssistant()).session;
+    ({ session: vs, opening: openingText } = await startAssistant());
   } catch (err) {
     await caller.close();
     throw err;
   }
   segments.push(vs.sessionId);
+  // The AI disclosure spoken within the server watchdog's bound
+  // (voice/openingSpoken.ts, ai-therapist-315).
+  assertions.push(openingSpokenAssertion(vs.timing));
+  // ...and whether it carried the disclosure (report-only).
+  const expected = expectedOpening(sysCfg.crisis_contact as Parameters<typeof expectedOpening>[0]);
+  assertions.push(openingDisclosureAssertion(openingText, expected.text, expected.crisisNumber, vs.timing));
   const originalSessionId = vs.sessionId;
   const transports = [vs];
   console.log(`[redteam:run] assistant ${vs.sessionId} live; conversation running`);

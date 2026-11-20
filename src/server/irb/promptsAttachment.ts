@@ -75,7 +75,7 @@ import {
 } from '../utils/sessionAutoTerminate.js';
 import { SCALE_MIN_INTERVAL_DAYS } from '../utils/scales.js';
 import { DEFAULT_VENDOR_CEILING_MINUTES } from '../../shared/systemConfig.js';
-import { liveOpeningInstruction } from '../../shared/openingPrompt.js';
+import { CHAT_OPENING_INVITATION, liveOpeningInstruction } from '../../shared/openingPrompt.js';
 import {
   CHAT_SAFETY_PROTOCOL_GUIDANCE,
   CHAT_THIRD_PARTY_GUIDANCE,
@@ -656,7 +656,16 @@ function buildItems(): Item[] {
   add(
     'p',
     'Identical on both voice backends, and sent by the server on both: under GPT-Live over its monitoring ' +
-      "connection once the participant's audio is connected, under Grok Voice as the first instruction it injects.",
+      "connection once the participant's audio is connected (a server setting, off by default, also places it in " +
+      "the session's startup input when the session is created), under Grok Voice as the first instruction it " +
+      'injects. If a GPT-Live session has not started speaking 4 seconds after the audio is connected, and the ' +
+      'participant has not spoken and no crisis signal has arrived, the server sends the same instruction once ' +
+      'more; if it has still not started speaking 8 seconds after the audio is connected, the platform sends ' +
+      'nothing further, records it, and shows the ' +
+      'participant the words the voice model was asked to say (the quoted text in the instruction below; while ' +
+      'the flag below is on, followed by the typed-chat invitation "' +
+      CHAT_OPENING_INVITATION +
+      '") as the assistant\'s message on screen.',
   );
   add('pre', voiceOpening);
   add('note', CONDITIONAL_LEAD_CONVERSATION);

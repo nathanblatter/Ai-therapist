@@ -28,6 +28,12 @@ on:
         description: 'Repeats per crawl / walk / run scenario (P50/P90 need at least 3)'
         required: false
         default: '3'
+      opening_delivery:
+        description: 'GPT-Live ordinary opening delivery (LIVE_OPENING_DELIVERY): instructions (the default) or recipe (developer message + commentary; ai-therapist-315 measurement)'
+        required: false
+        default: instructions
+        type: choice
+        options: [instructions, recipe]
 permissions:
   contents: read
 concurrency:
@@ -84,6 +90,7 @@ jobs:
           REDTEAM_TRIGGER: ci-voice
           MODE: ${{ inputs.mode || 'weekly' }}
           REPEATS: ${{ inputs.repeats || '3' }}
+          LIVE_OPENING_DELIVERY: ${{ inputs.opening_delivery || 'instructions' }}
         run: |
           case "$MODE" in
             weekly) suites="voice-safety voice-crawl" ;;

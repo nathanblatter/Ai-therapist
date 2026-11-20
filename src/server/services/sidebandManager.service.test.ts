@@ -43,6 +43,11 @@ const {
   safetyIdentifierMock: vi.fn(),
 }));
 
+const openingDbMocks = vi.hoisted(() => ({
+  insertMessage: vi.fn().mockResolvedValue({}),
+  insertClientEvent: vi.fn().mockResolvedValue(undefined),
+}));
+
 interface FakeSocket {
   on: ReturnType<typeof vi.fn>;
   send: ReturnType<typeof vi.fn>;
@@ -84,6 +89,9 @@ vi.mock('../db/index.js', () => ({
   insertMessagesBatch: insertMessagesBatchMock,
   insertToolInvocation: insertToolInvocationMock,
   recordLlmUsage: recordLlmUsageMock,
+  // The opening's records (liveOpening.service.ts, ai-therapist-315).
+  insertMessage: openingDbMocks.insertMessage,
+  insertClientEvent: openingDbMocks.insertClientEvent,
 }));
 vi.mock('../db/liveUsage.queries.js', () => ({ recordLiveUsage: recordLiveUsageMock }));
 vi.mock('./crisisPipeline.service.js', () => ({ runCrisisPipeline: runCrisisPipelineMock }));
@@ -3280,5 +3288,221 @@ describe('session.closed reason=expired', () => {
     } finally {
       delete (global as { io?: unknown }).io;
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The ordinary opening over the real sideband (ai-therapist-315)
+// ---------------------------------------------------------------------------
+// liveOpening.service.ts is NOT mocked here: these drive the real delivery,
+// the real latch and the real watchdog through the events the sideband reads.
+describe('ordinary opening: delivery and watchdog (ai-therapist-315)', () => {
+  const OPENING_TEXT = "Say this phrase exactly: 'Hello! I'm an AI.' Say it immediately, then pause and listen.";
+  const commentary = (ws: FakeSocket) => sentEvents(ws).filter((e) => e.type === 'session.commentary.append');
+  const settle = async () => {
+    await flush();
+    await vi.dynamicImportSettled();
+    await flush();
+  };
+  let emit: ReturnType<typeof vi.fn>;
+  let opening: typeof import('./liveOpening.service.js');
+
+  beforeEach(async () => {
+    opening = await import('./liveOpening.service.js');
+    opening._resetLiveOpeningsForTests();
+    openingDbMocks.insertMessage.mockClear();
+    openingDbMocks.insertClientEvent.mockClear();
+    emit = vi.fn();
+    (global as Internal).io = { to: vi.fn(() => ({ emit })) };
+  });
+
+  afterEach(() => {
+    opening._resetLiveOpeningsForTests();
+  });
+
+  /** The route's registration, then the browser's POST /opening. */
+  async function startOrdinary(sessionId: string): Promise<FakeSocket> {
+    const ws = await attach(sessionId);
+    opening.registerLiveOpening(sessionId, {
+      text: OPENING_TEXT,
+      logMessage: 'Initial prompt',
+      via: 'commentary',
+      watch: true,
+    });
+    await fire(sessionId, { type: 'session.started', session: { id: `live_${sessionId}` } });
+    ws.send.mockClear();
+    expect(await opening.deliverLiveOpeningViaSideband(sessionId)).toMatchObject({ delivered: true });
+    return ws;
+  }
+
+  const unspokenEmits = () => emit.mock.calls.filter((c: unknown[]) => c[0] === 'session:opening-unspoken');
+  const audioFrame = (peak: number) => {
+    const buf = Buffer.alloc(960);
+    buf.writeInt16LE(peak, 100);
+    return { type: 'session.output_audio.delta', delta: buf.toString('base64'), start_ms: 0, end_ms: 20 };
+  };
+
+  it('sends the opening once, as commentary with its exact text, and a spoken start gets nothing more', async () => {
+    const sessionId = 's-open-normal';
+    const ws = await startOrdinary(sessionId);
+    expect(commentary(ws).map((e) => e.content)).toEqual([OPENING_TEXT]);
+    expect(commentary(ws)[0].delegation_id).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(1_500);
+    await fire(sessionId, { type: 'session.output_transcript.delta', delta: 'Hello!', start_ms: 0, end_ms: 300 });
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+    expect(commentary(ws)).toHaveLength(1);
+    expect(unspokenEmits()).toHaveLength(0);
+  });
+
+  it('a silent start: one re-send at 4 s, then the participant and admins are told at 8 s, and it stops', async () => {
+    const sessionId = 's-open-silent';
+    const ws = await startOrdinary(sessionId);
+
+    await vi.advanceTimersByTimeAsync(3_999);
+    await settle();
+    expect(commentary(ws)).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await settle();
+    expect(commentary(ws).map((e) => e.content)).toEqual([OPENING_TEXT, OPENING_TEXT]);
+
+    await vi.advanceTimersByTimeAsync(3_999);
+    await settle();
+    expect(unspokenEmits()).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    await settle();
+    expect(unspokenEmits()).toEqual([['session:opening-unspoken', { sessionId }]]);
+    expect(broadcastMock).toHaveBeenCalledWith(
+      expect.anything(),
+      'live:opening-unspoken',
+      expect.objectContaining({ sessionId }),
+      sessionId,
+    );
+    // The timing record waits out a late start before it is written.
+    expect(openingDbMocks.insertClientEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId, kind: 'live_opening' }),
+    );
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    await settle();
+    expect(commentary(ws)).toHaveLength(2);
+    expect(unspokenEmits()).toHaveLength(1);
+    expect(openingDbMocks.insertClientEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId, kind: 'live_opening' }),
+    );
+  });
+
+  it('the first audible reflected audio frame latches it; a silent frame does not', async () => {
+    const quiet = 's-open-audio-quiet';
+    const wsQuiet = await startOrdinary(quiet);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await fire(quiet, audioFrame(0));
+    await vi.advanceTimersByTimeAsync(3_000);
+    await settle();
+    expect(commentary(wsQuiet)).toHaveLength(2); // the silent frame did not count
+
+    const loud = 's-open-audio-loud';
+    const wsLoud = await startOrdinary(loud);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await fire(loud, audioFrame(8_000));
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+    expect(commentary(wsLoud)).toHaveLength(1);
+  });
+
+  it('participant speech first stands it down', async () => {
+    const sessionId = 's-open-barge';
+    const ws = await startOrdinary(sessionId);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await fire(sessionId, userDelta('Hi, is anyone there?', 0));
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+    expect(commentary(ws)).toHaveLength(1);
+    expect(unspokenEmits()).toHaveLength(0);
+  });
+
+  it('a risk steer in the first seconds takes priority', async () => {
+    const sessionId = 's-open-risk';
+    const ws = await startOrdinary(sessionId);
+    await vi.advanceTimersByTimeAsync(800);
+    await sidebandManager.tryInject(sessionId, 'system', SAFETY_PROTOCOL_GUIDANCE, true);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+    expect(commentary(ws).filter((e) => e.content === OPENING_TEXT)).toHaveLength(1);
+    expect(unspokenEmits()).toHaveLength(0);
+  });
+
+  it('a vendor moderation stop in the first seconds takes priority', async () => {
+    const sessionId = 's-open-vendor';
+    const ws = await startOrdinary(sessionId);
+    await vi.advanceTimersByTimeAsync(800);
+    await fire(sessionId, { type: 'error', error: { code: 'content_filter', message: 'stopped' } });
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+    expect(commentary(ws).filter((e) => e.content === OPENING_TEXT)).toHaveLength(1);
+    expect(unspokenEmits()).toHaveLength(0);
+  });
+
+  it('session.closed records the opening and stops its timers', async () => {
+    const sessionId = 's-open-closed';
+    const ws = await startOrdinary(sessionId);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await fire(sessionId, { type: 'session.closed', reason: 'client', usage: { seconds: 2 } });
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+    expect(commentary(ws)).toHaveLength(1);
+    expect(unspokenEmits()).toHaveLength(0);
+    expect(openingDbMocks.insertClientEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('a reconnect in the first seconds keeps the latch: speech before it is not forgotten', async () => {
+    const sessionId = 's-open-reconnect';
+    const first = await startOrdinary(sessionId);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await fire(sessionId, { type: 'session.output_transcript.delta', delta: 'Hello', start_ms: 0, end_ms: 200 });
+    // The sideband rebuilds its per-attach state (assistantSpoke back to false).
+    sb.sessions.delete(sessionId);
+    const second = await attach(sessionId);
+    second.send.mockClear();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+    expect(commentary(first)).toHaveLength(1);
+    expect(commentary(second)).toHaveLength(0);
+    expect(unspokenEmits()).toHaveLength(0);
+  });
+
+  it('a reconnect in the first seconds of a silent start: the re-send goes on the new socket, once', async () => {
+    const sessionId = 's-open-reconnect-silent';
+    const first = await startOrdinary(sessionId);
+    await vi.advanceTimersByTimeAsync(1_000);
+    sb.sessions.delete(sessionId);
+    const second = await attach(sessionId);
+    second.send.mockClear();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+    expect(commentary(first)).toHaveLength(1);
+    expect(commentary(second).map((e) => e.content)).toEqual([OPENING_TEXT]);
+    expect(unspokenEmits()).toHaveLength(1);
+  });
+
+  it('a recovery opening is left to the recovery watchdog: no extra sends from this one', async () => {
+    const sessionId = 's-open-recovery';
+    getSystemConfigMock.mockResolvedValue({ features: {} });
+    const ws = (await sidebandManager.connect(sessionId, `live_${sessionId}`, 'sk-test', {
+      model: MODEL,
+      backendModel: BACKEND_MODEL,
+      delegationMode: 'client',
+      initialAttach: true,
+    })) as unknown as FakeSocket;
+    opening.registerLiveOpening(sessionId, { text: 'Speak first.', logMessage: 'nudge', via: 'commentary' });
+    await fire(sessionId, { type: 'session.started', session: { id: `live_${sessionId}` } });
+    ws.send.mockClear();
+    await opening.deliverLiveOpeningViaSideband(sessionId);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+    // The delivery plus the recovery watchdog's two re-sends (4 s, 8 s), nothing else.
+    expect(commentary(ws)).toHaveLength(3);
+    expect(unspokenEmits()).toHaveLength(0);
   });
 });

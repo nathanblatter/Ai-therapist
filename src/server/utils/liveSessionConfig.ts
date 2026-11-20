@@ -784,6 +784,15 @@ export interface LiveSessionConfigInput {
    * monitored session leaves this unset.
    */
   allowClientSteering?: boolean;
+  /**
+   * The ordinary opening instruction (shared/openingPrompt.ts
+   * liveOpeningInstruction), placed in `session.input` as a developer message:
+   * the same documented greeting recipe as `recovery.speakFirst`
+   * (ai-therapist-315). Ignored on a recovery session, which carries its own,
+   * and on a session seeded with history, which resumes a conversation already
+   * under way and has no opening.
+   */
+  speakFirst?: string;
 }
 
 /**
@@ -954,10 +963,14 @@ export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<st
   // which would mean hanging up on someone in crisis twice. Enforced here
   // rather than trusted to every call site.
   finalizeSession(session, recovery ? undefined : history);
-  if (recovery?.speakFirst?.trim()) {
-    session.input = [
-      { type: 'message', role: 'developer', content: [{ type: 'input_text', text: recovery.speakFirst.trim() }] },
-    ];
+  // The greeting recipe ("include greeting instructions in a `developer`
+  // message in `session.input` when you create the session",
+  // live-conversations#greet-before-the-caller-speaks), for the recovery
+  // nudge and the ordinary opening alike. The sideband sends the same text
+  // again as commentary at `session.started` (liveOpening.service.ts).
+  const speakFirst = recovery ? recovery.speakFirst?.trim() : session.input ? undefined : input.speakFirst?.trim();
+  if (speakFirst) {
+    session.input = [{ type: 'message', role: 'developer', content: [{ type: 'input_text', text: speakFirst }] }];
   }
   return session;
 }
