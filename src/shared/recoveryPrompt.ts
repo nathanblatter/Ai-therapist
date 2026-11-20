@@ -21,6 +21,8 @@
 //     no restating of the disclosure, no naming of what the line is for.
 
 /** The participant-facing crisis contact fields these lines need. */
+import { crisisTextLineWords } from './openingPrompt.js';
+
 export interface RecoveryCrisisContact {
   phone?: string | null;
   text?: string | null;
@@ -38,7 +40,7 @@ export const DEFAULT_RECOVERY_CRISIS_TEXT = 'HOME to 741741';
 export function recoveryCrisisLinePhrase(contact?: RecoveryCrisisContact | null): string {
   const enabled = contact?.enabled !== false;
   const phone = (enabled && contact?.phone?.trim()) || DEFAULT_RECOVERY_CRISIS_PHONE;
-  const text = (enabled && contact?.text?.trim()) || DEFAULT_RECOVERY_CRISIS_TEXT;
+  const text = (enabled && crisisTextLineWords(contact?.text)) || DEFAULT_RECOVERY_CRISIS_TEXT;
   return `call or text ${phone} at any time, or text ${text}`;
 }
 

@@ -66,10 +66,11 @@ const OPENING_LANGUAGE_NAMES: Record<string, string> = {
  * migration 090, "Text HOME to 741741" in the fallback defaults and on older
  * rows), and a renderer that assumed one form printed "text Text HOME to
  * 741741" or "hOME to 741741" for the other. Every participant-facing sentence
- * goes through this and writes the word "text" itself. Empty when unset.
+ * goes through this and writes the word "text" itself ("Text: HOME to 741741"
+ * is accepted too). Empty when unset, or when the value is only the word.
  */
 export function crisisTextLineWords(text: string | null | undefined): string {
-  return typeof text === 'string' ? text.trim().replace(/^text\s+/i, '') : '';
+  return typeof text === 'string' ? text.trim().replace(/^text(?:\s*:\s*|\s+|$)/i, '') : '';
 }
 
 /** " or text HOME to 741741" (with `lead`), or '' when no text line is configured. */
