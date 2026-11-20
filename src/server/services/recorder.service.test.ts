@@ -826,6 +826,26 @@ describe('lost audio is filled with silence and described in the sidecar (ai-the
     expect(wavPuts()[0][3]).toEqual({ 'track-data': 'stored' });
   });
 
+  it('a 192 kHz track is recorded, and its fills stay within the byte bound (review of #105)', async () => {
+    const s = sid('rate-192k');
+    const rate = 192000;
+    send(s, 'participant', [0, 1, 3], { sampleRate: rate });
+    send(s, 'participant', [1_000_000_000_000], { sampleRate: rate });
+    await finalize(s);
+    const t = sidecarOf(s).tracks.participant;
+    expect(t.sampleRate).toBe(rate);
+    // An ordinary one-chunk gap is filled exactly.
+    expect(t.gaps[0]).toEqual({ start: 2 * N, length: N, chunks: 1, reason: 'sequence_gap' });
+    // A huge gap: capped by bytes, at most 60 s x 96 kHz samples (11.52 MB), i.e. 30 s of 192 kHz time.
+    // (The wall-clock span here is a few ms, so the total cap leaves it just under that.)
+    expect(t.gaps[1].capped).toBe(true);
+    expect(t.gaps[1].length).toBeLessThanOrEqual(60 * MAX_FILL_SAMPLE_RATE);
+    expect(t.gaps[1].length).toBeGreaterThan(59 * MAX_FILL_SAMPLE_RATE);
+    // Every byte of inserted silence on the track: within 60 s x 96 kHz plus the span allowance (< 1 s here).
+    expect(t.insertedSilenceSamples * 2).toBeLessThanOrEqual(2 * 61 * MAX_FILL_SAMPLE_RATE);
+    expect(pcmOf(s, 'participant').length).toBe(t.totalSamples);
+  });
+
   it('reports the rate a track was opened at, for the route to refuse another (review of #105)', async () => {
     const s = sid('rate');
     expect(trackSampleRate(s, 'participant')).toBeNull();

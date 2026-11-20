@@ -49,9 +49,11 @@ arrival to now) plus 60 s. A capped fill is listed with `capped: true` and
 `missingSamples`; the track's timeline is not intact after it
 (`timelineIntact: false`). The sample rate is the client's own number, so the
 caps are counted at no more than 96 kHz (a bogus rate cannot scale them), and
-a track with no usable rate gets no fills. The audio route also refuses (400)
+a track with no usable rate gets no fills. The caps bound bytes written, so on
+a 176.4 or 192 kHz track one fill covers at most 30 s of audio time (longer
+gaps there are capped and marked). The audio route also refuses (400)
 a `sampleRate` that is not a browser capture rate (8000, 11025, 16000, 22050,
-24000, 32000, 44100, 48000, 88200 or 96000 Hz) and a batch whose rate differs
+24000, 32000, 44100, 48000, 88200, 96000, 176400 or 192000 Hz) and a batch whose rate differs
 from its track's first batch (it would play at the wrong speed).
 
 Chunks whose index has already passed (a retry the server had in fact stored,

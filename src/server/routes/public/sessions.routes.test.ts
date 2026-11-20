@@ -122,7 +122,7 @@ describe('POST /api/sessions/:id/audio recording-consent gate (039/086)', () => 
   });
 
   it('refuses a sample rate that is not a browser capture rate (review of #105)', async () => {
-    for (const sampleRate of [0, -48000, 1e9, 1e300, 47999, 48000.5, 7999, 192000, 4000]) {
+    for (const sampleRate of [0, -48000, 1e9, 1e300, 47999, 48000.5, 7999, 191999, 384000, 4000]) {
       const res = await request(makeApp())
         .post(`/api/sessions/${SESSION_ID}/audio`)
         .send({ ...body, sampleRate });
@@ -137,7 +137,7 @@ describe('POST /api/sessions/:id/audio recording-consent gate (039/086)', () => 
     }
     expect(recorderMocks.appendChunk).not.toHaveBeenCalled();
     // Every rate a browser records at still works (old clients send the device rate).
-    for (const sampleRate of [8000, 11025, 16000, 22050, 24000, 32000, 44100, 48000, 88200, 96000]) {
+    for (const sampleRate of [8000, 11025, 16000, 22050, 24000, 32000, 44100, 48000, 88200, 96000, 176400, 192000]) {
       const res = await request(makeApp())
         .post(`/api/sessions/${SESSION_ID}/audio`)
         .send({ ...body, sampleRate });

@@ -32,9 +32,13 @@ const log = createLogger('sessionsRoutes');
  *  the same path, so leave headroom). */
 const PARTICIPANT_TEXT_MAX_CHARS = 10_000;
 
-/** Sample rates a browser AudioContext captures at (8 to 96 kHz); the audio route refuses others. */
+/**
+ * Sample rates a browser AudioContext captures at (8 to 192 kHz; 176.4 and
+ * 192 kHz on pro interfaces and some desktops, where recording must keep
+ * working); the audio route refuses others.
+ */
 export const CAPTURE_SAMPLE_RATES: ReadonlySet<number> = new Set([
-  8000, 11025, 16000, 22050, 24000, 32000, 44100, 48000, 88200, 96000,
+  8000, 11025, 16000, 22050, 24000, 32000, 44100, 48000, 88200, 96000, 176400, 192000,
 ]);
 
 export default function sessionsRoutes(): Router {

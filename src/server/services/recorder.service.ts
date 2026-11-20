@@ -92,8 +92,10 @@ export const MAX_GAP_FILL_MS = 60_000;
  * The caps are computed at most at this rate. The sample rate is the client's
  * own number (the first batch's `sampleRate`), so without this a bogus rate
  * scaled the caps: one batch at sampleRate 1e9 could ask for 120 GB of zeros
- * written synchronously. Browsers record at 44.1 or 48 kHz; a genuine rate
- * above this only gets shorter (capped, marked) fills.
+ * written synchronously. Browsers record at 44.1 or 48 kHz. The caps bound
+ * bytes written, so above 96 kHz (the route accepts 176.4 and 192 kHz) the
+ * per-fill cap is 30 s or less of audio time (60 s x 96000 samples), and a
+ * longer gap there is a capped, marked fill: fine.
  */
 export const MAX_FILL_SAMPLE_RATE = 96_000;
 /** Ranges kept per list in the sidecar; counts and totals always cover all of them. */
