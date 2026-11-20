@@ -47,7 +47,9 @@ Caps, so a bogus index cannot write gigabytes: one fill is at most 60 s, and
 a track's fills together at most the session's wall-clock span (first audio
 arrival to now) plus 60 s. A capped fill is listed with `capped: true` and
 `missingSamples`; the track's timeline is not intact after it
-(`timelineIntact: false`).
+(`timelineIntact: false`). The sample rate is the client's own number, so the
+caps are counted at no more than 96 kHz (a bogus rate cannot scale them), and
+a track with no usable rate gets no fills.
 
 Chunks whose index has already passed (a retry the server had in fact stored,
 or a late arrival whose place was already filled) are dropped and counted

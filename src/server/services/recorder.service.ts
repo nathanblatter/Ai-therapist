@@ -84,6 +84,14 @@ export interface ChunkMeta {
  * sidecar, and the track's timeline is no longer intact after it.
  */
 export const MAX_GAP_FILL_MS = 60_000;
+/**
+ * The caps are computed at most at this rate. The sample rate is the client's
+ * own number (the first batch's `sampleRate`), so without this a bogus rate
+ * scaled the caps: one batch at sampleRate 1e9 could ask for 120 GB of zeros
+ * written synchronously. Browsers record at 44.1 or 48 kHz; a genuine rate
+ * above this only gets shorter (capped, marked) fills.
+ */
+export const MAX_FILL_SAMPLE_RATE = 96_000;
 /** Ranges kept per list in the sidecar; counts and totals always cover all of them. */
 export const MAX_SIDECAR_RANGES = 5_000;
 /** Zero bytes are written in slices of this size. */
@@ -225,8 +233,10 @@ function fillGap(
   spanMs: number,
 ): void {
   const wanted = chunks * chunkSamples;
-  const maxSingle = Math.floor((MAX_GAP_FILL_MS * rec.sampleRate) / 1000);
-  const maxTotal = Math.floor(((Math.max(0, spanMs) + MAX_GAP_FILL_MS) * rec.sampleRate) / 1000);
+  const capRate =
+    Number.isFinite(rec.sampleRate) && rec.sampleRate > 0 ? Math.min(rec.sampleRate, MAX_FILL_SAMPLE_RATE) : 0;
+  const maxSingle = Math.floor((MAX_GAP_FILL_MS * capRate) / 1000);
+  const maxTotal = Math.floor(((Math.max(0, spanMs) + MAX_GAP_FILL_MS) * capRate) / 1000);
   const fill = Math.max(0, Math.min(wanted, maxSingle, maxTotal - rec.filledSamples));
   const start = rec.byteLength / 2;
   let bytes = fill * 2;

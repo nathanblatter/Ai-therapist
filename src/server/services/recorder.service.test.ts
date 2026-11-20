@@ -33,8 +33,16 @@ vi.mock('../db/recording.queries.js', () => ({
   flagParticipantAudioProblem: flagProblemMock,
 }));
 
-const { appendChunk, finalize, abort, hasRecording, assessParticipantTrack, pcm16RmsDbfs, pcm16SumSquares } =
-  await import('./recorder.service.js');
+const {
+  appendChunk,
+  finalize,
+  abort,
+  hasRecording,
+  assessParticipantTrack,
+  pcm16RmsDbfs,
+  pcm16SumSquares,
+  MAX_FILL_SAMPLE_RATE,
+} = await import('./recorder.service.js');
 
 // The WAV uploads only; finalize also stores the JSON sidecar (ai-therapist-384).
 const wavPuts = () => putObjectMock.mock.calls.filter((c) => c[2] === 'audio/wav');
@@ -656,6 +664,27 @@ describe('lost audio is filled with silence and described in the sidecar (ai-the
     expect(t.insertedSilenceSamples).toBe(sixty + t.gaps[1].length);
     expect(t.totalSamples).toBe(3 * N + t.insertedSilenceSamples);
     expect(pcmOf(s, 'participant').length).toBe(t.totalSamples);
+    expect(t.timelineIntact).toBe(false);
+  });
+
+  it('a bogus client sample rate does not scale the caps (review of #105)', async () => {
+    // The rate is the client's own number: at 1e9 Hz an uncapped rate let one
+    // batch ask for 60 s x 1e9 samples (120 GB) of zeros.
+    for (const rate of [1e9, 2e9]) {
+      const s = sid(`bogus-rate-${rate}`);
+      send(s, 'participant', [0], { sampleRate: rate });
+      send(s, 'participant', [1_000_000_000_000], { sampleRate: rate });
+      await finalize(s);
+      const t = sidecarOf(s).tracks.participant;
+      expect(t.gaps[0].length).toBe(60 * MAX_FILL_SAMPLE_RATE);
+      expect(t.gaps[0].capped).toBe(true);
+    }
+    const s = sid('bogus-rate-0');
+    send(s, 'participant', [0], { sampleRate: 0 });
+    send(s, 'participant', [5], { sampleRate: 0 });
+    await finalize(s);
+    const t = sidecarOf(s).tracks.participant;
+    expect(t.insertedSilenceSamples).toBe(0);
     expect(t.timelineIntact).toBe(false);
   });
 
