@@ -78,7 +78,11 @@ import {
 } from '../../../shared/openingPrompt.js';
 import { sidebandManager } from '../../services/sidebandManager.service.js';
 import { buildRecoverySpeakFirstNudge, type RecoveryCrisisContact } from '../../../shared/recoveryPrompt.js';
-import { registerLiveOpening, scheduleLiveOpeningFallback } from '../../services/liveOpening.service.js';
+import {
+  liveOpeningDelivery,
+  registerLiveOpening,
+  scheduleLiveOpeningFallback,
+} from '../../services/liveOpening.service.js';
 
 import { createLogger } from '../../utils/logger.js';
 import { classifyOpenAIError, classifyOpenAIResponse } from '../../utils/openaiErrors.js';
@@ -329,6 +333,17 @@ export default function liveSessionRoutes(): Router {
         // allow-all channel or the opening disclosure could not be spoken.
         const sidebandEnabled = process.env.SIDEBAND_ENABLED !== 'false';
 
+        // Built once: the startup input and the sideband delivery must carry
+        // the same text. Which delivery is an env setting (liveOpeningDelivery):
+        // the instructions append by default, the greeting recipe only once it
+        // has been measured on the disclosure (ai-therapist-315).
+        const openingRecipe = liveOpeningDelivery() === 'recipe';
+        const ordinaryOpening = liveOpeningInstruction(
+          userLanguage,
+          (systemConfig.crisis_contact as OpeningCrisisContact | undefined) || DEFAULT_CRISIS_CONTACT,
+          leadConversation,
+        );
+
         const sessionConfig = buildLiveSessionConfig({
           model: aiModel,
           voice: userVoice,
@@ -353,6 +368,13 @@ export default function liveSessionRoutes(): Router {
           psychoeducationCue: psychoeducationCue === true,
           leadConversation,
           allowClientSteering: !sidebandEnabled,
+          // The ordinary opening (the AI disclosure) in the startup input, the
+          // first half of the vendor's greeting recipe; the second half is the
+          // commentary the server sends at `session.started`. Same text,
+          // same builder (ai-therapist-315). Only with a sideband: without one
+          // the browser sends the opening itself and this would make it twice.
+          // Only under LIVE_OPENING_DELIVERY=recipe.
+          speakFirst: sidebandEnabled && !isRecovery && openingRecipe ? ordinaryOpening.text : undefined,
         });
 
         const apiKey = await getOpenAIKey();
@@ -563,9 +585,10 @@ export default function liveSessionRoutes(): Router {
 
           // The opening is authored here and held until the browser reports
           // `session.started` (POST /api/sessions/:id/opening). The browser's
-          // data channel can no longer append instructions, so this is the only
-          // way the disclosure preamble, or the recovery speak-first nudge, is
-          // ever spoken. See liveOpening.service.ts for why it waits.
+          // data channel can no longer append anything, so this and the startup
+          // input are the only ways the disclosure preamble, or the recovery
+          // speak-first nudge, is ever spoken. See liveOpening.service.ts for
+          // why it waits.
           // Same text the browser authored before the lock, from the same
           // builder: both opening variants (lead_conversation off and on) and
           // the crisis contact GET /api/config/crisis serves the browser.
@@ -580,11 +603,18 @@ export default function liveSessionRoutes(): Router {
                   logMessage: LIVE_RECOVERY_NUDGE_LOG,
                   via: 'commentary' as const,
                 }
-              : liveOpeningInstruction(
-                  userLanguage,
-                  (systemConfig.crisis_contact as OpeningCrisisContact | undefined) || DEFAULT_CRISIS_CONTACT,
-                  leadConversation,
-                ),
+              : {
+                  // Watched in both deliveries (liveOpening.service.ts): a
+                  // single instructions append left about one start in six
+                  // silent, and nothing noticed (ai-therapist-315). Under the
+                  // recipe it is already in the startup input (speakFirst
+                  // above) and goes again as commentary, as the recovery start
+                  // does; by default it is the instructions append, the
+                  // vendor's channel for a disclosure's exact wording.
+                  ...ordinaryOpening,
+                  via: openingRecipe ? ('commentary' as const) : ('instructions' as const),
+                  watch: true,
+                },
           );
           scheduleLiveOpeningFallback(sessionId);
 

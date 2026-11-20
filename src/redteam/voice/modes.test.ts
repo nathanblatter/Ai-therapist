@@ -49,6 +49,18 @@ describe('session.input history seam', () => {
     );
   });
 
+  it("replaces the product's opening developer message, and nothing else (ai-therapist-315)", () => {
+    const opening = { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'Say this' }] };
+    const body = withHistoryBody(JSON.stringify({ session: { input: [opening] } }), [{ role: 'user', content: 'x' }]);
+    expect(JSON.parse(body).session.input).toEqual([
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'x' }] },
+    ]);
+    const userItem = { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'earlier' }] };
+    expect(() =>
+      withHistoryBody(JSON.stringify({ session: { input: [opening, userItem] } }), [{ role: 'user', content: 'x' }]),
+    ).toThrow(/refusing/);
+  });
+
   it('wraps exactly one mint and restores fetch', async () => {
     const seen: string[] = [];
     globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {

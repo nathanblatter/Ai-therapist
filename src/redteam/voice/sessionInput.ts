@@ -41,13 +41,27 @@ export function historyItems(history: HistoryTurn[]): Array<Record<string, unkno
     }));
 }
 
+/** The product's own startup input when it carries only the opening: one
+ *  developer message (liveSessionConfig.ts `speakFirst`, ai-therapist-315). */
+function isOpeningOnly(input: unknown): boolean {
+  if (!Array.isArray(input) || input.length !== 1) return false;
+  const item = input[0] as { type?: unknown; role?: unknown } | null;
+  return item?.type === 'message' && item.role === 'developer';
+}
+
 /** Rewrite a mint request body to carry `history` (pure; unit-tested). Throws
  *  when the product already seeded history: the seam must never silently
- *  replace real context. */
+ *  replace real context. The opening's developer message is the one thing it
+ *  does replace: a seeded session resumes a conversation already under way,
+ *  has no opening (the harness also drops the sideband half, see
+ *  liveVoiceClient.ts), and with it the model would greet in the middle of
+ *  the reply under test. */
 export function withHistoryBody(body: string, history: HistoryTurn[]): string {
   const parsed = JSON.parse(body) as { session?: Record<string, unknown> };
   if (!parsed.session) throw new Error('mint body has no session object');
-  if (parsed.session.input) throw new Error('the product already seeded session.input; refusing to overwrite it');
+  if (parsed.session.input && !isOpeningOnly(parsed.session.input)) {
+    throw new Error('the product already seeded session.input; refusing to overwrite it');
+  }
   parsed.session.input = historyItems(history);
   return JSON.stringify(parsed);
 }

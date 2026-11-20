@@ -59,6 +59,13 @@ const TTS_MODEL = 'gpt-4o-mini-tts';
 const TTS_VOICE = 'alloy';
 const BEAT_TIMEOUT_MS = 90_000;
 const STARTED_TIMEOUT_MS = 25_000;
+/**
+ * How long an ordinary start waits for any assistant audio or transcript
+ * before carrying on without an opening (ai-therapist-315): well past the
+ * server watchdog's 8 s bound, short of the 90 s a beat gets, so a silent
+ * start costs about 30 s of voice, not 90.
+ */
+const OPENING_GIVE_UP_MS = 30_000;
 /** Opus RTP clock is always 48 kHz: 20 ms = 960 ticks, whatever the input rate. */
 const OPUS_RTP_CLOCK = 48_000;
 const FRAME_MS = 20;
@@ -131,6 +138,10 @@ export interface LiveSessionTiming {
   firstOpeningDeltaAt: number;
   /** First audible assistant audio frame of the session. */
   firstOpeningAudioAt: number;
+  /** POST /api/sessions/:id/opening sent (0 = no opening asked for). */
+  openingRequestedAt: number;
+  /** First participant transcript fragment of the session. */
+  firstUserDeltaAt: number;
 }
 
 /** True when a PCM16 frame carries speech-level energy rather than the
@@ -219,7 +230,11 @@ export class LiveVoiceSession implements VoiceTransport {
     startedAt: 0,
     firstOpeningDeltaAt: 0,
     firstOpeningAudioAt: 0,
+    openingRequestedAt: 0,
+    firstUserDeltaAt: 0,
   };
+  /** An ordinary start whose opening was never spoken (ai-therapist-315); see voice/openingSpoken.ts. */
+  openingMissed = false;
 
   private constructor(
     private readonly agent: Agent,
@@ -335,6 +350,7 @@ export class LiveVoiceSession implements VoiceTransport {
         clearLiveOpening(vs.sessionId);
         return { session: vs, opening: '' };
       }
+      vs.timing.openingRequestedAt = Date.now();
       const openingRes = await agent.post(`/api/sessions/${vs.sessionId}/opening`).send({});
       if (openingRes.status !== 200 || openingRes.body?.delivered !== true) {
         if (res.body?.data_channel_locked === true) {
@@ -345,6 +361,16 @@ export class LiveVoiceSession implements VoiceTransport {
         // Unlocked channel only: the caller's text (the opening preamble, or
         // for a recovery start the shared speak-first builder's output).
         vs.sendAppend(openingPrompt, opts.recovery ? 'commentary' : 'instructions');
+      }
+      // A silent start (ai-therapist-315) is a named product failure, not a
+      // harness error: an ordinary start that has produced no assistant audio
+      // or transcript by OPENING_GIVE_UP_MS carries on without an opening, and
+      // the live-opening-spoken-in-time assertion fails. A recovery start still
+      // throws, as before.
+      if (!opts.recovery && !(await vs.awaitFirstAssistantSignal(Date.now() + OPENING_GIVE_UP_MS))) {
+        vs.openingMissed = true;
+        console.warn(`[voice:live] ${vs.sessionId}: the opening was never spoken (${OPENING_GIVE_UP_MS} ms)`);
+        return { session: vs, opening: '' };
       }
       const opening = await vs.awaitAssistantTurn(Date.now() + BEAT_TIMEOUT_MS);
       vs.openingLayer = vs.takeLayer();
@@ -423,6 +449,7 @@ export class LiveVoiceSession implements VoiceTransport {
       case 'session.input_transcript.delta':
         this.userFrags.push({ text: String(ev.delta ?? ''), startMs: Number(ev.start_ms ?? 0) });
         this.lastUserDeltaAt = Date.now();
+        if (!this.timing.firstUserDeltaAt) this.timing.firstUserDeltaAt = this.lastUserDeltaAt;
         break;
       case 'session.output_transcript.delta':
         this.assistantFrags.push({ text: String(ev.delta ?? ''), startMs: Number(ev.start_ms ?? 0) });
@@ -769,6 +796,16 @@ export class LiveVoiceSession implements VoiceTransport {
    *  the assembled assistant text since the last take. */
   /** Reason the backend ended the session mid-conversation, if it did. */
   terminatedBy: string | null = null;
+
+  /** False only when the deadline passes with no assistant audio or transcript. A close
+   *  returns true so awaitAssistantTurn handles it exactly as before (a vendor cut). */
+  private async awaitFirstAssistantSignal(deadline: number): Promise<boolean> {
+    for (;;) {
+      if (this.timing.firstOpeningAudioAt || this.timing.firstOpeningDeltaAt || this.closed) return true;
+      if (Date.now() > deadline) return false;
+      await sleep(100);
+    }
+  }
 
   private async awaitAssistantTurn(deadline: number): Promise<string> {
     for (;;) {

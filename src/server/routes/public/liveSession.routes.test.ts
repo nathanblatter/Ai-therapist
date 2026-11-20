@@ -78,6 +78,8 @@ vi.mock('../../services/crisisAlert.service.js', () => ({ reportOpenAIQuotaExhau
 vi.mock('../../services/crisisPipeline.service.js', () => ({ runCheckinCrisisScreen: mocks.runCheckinCrisisScreen }));
 
 const { default: liveSessionRoutes, PROVIDER_UNAVAILABLE_BODY } = await import('./liveSession.routes.js');
+const { deliverLiveOpening } = await import('../../services/liveOpening.service.js');
+const { liveOpeningInstruction, DEFAULT_CRISIS_CONTACT } = await import('../../../shared/openingPrompt.js');
 
 function upstream(status: number, body: unknown, headers: Record<string, string> = {}): Response {
   return new Response(typeof body === 'string' ? body : JSON.stringify(body), { status, headers });
@@ -110,6 +112,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  delete process.env.LIVE_OPENING_DELIVERY;
 });
 
 describe('POST /api/live/session when the voice provider refuses the mint', () => {
@@ -308,10 +311,50 @@ describe('POST /api/live/session recovery speak-first', () => {
     expect(text).toContain('HOME to 741741');
   });
 
-  it('an ordinary start has no startup input from this path', async () => {
+  // ai-therapist-315: by default the ordinary opening is the instructions
+  // append it always was (no startup input), watched; the greeting recipe is
+  // behind LIVE_OPENING_DELIVERY=recipe until it has been measured.
+  it('by default an ordinary start has no startup input and its opening goes as an instructions append', async () => {
     mocks.upstreamFetch.mockResolvedValue(healthy());
     await start().expect(201);
     expect(mintedSession()).not.toHaveProperty('input');
+    const inject = vi.fn().mockResolvedValue(true);
+    await deliverLiveOpening('sess_live_4', inject);
+    expect(inject).toHaveBeenCalledWith(
+      liveOpeningInstruction('en', DEFAULT_CRISIS_CONTACT, false).text,
+      'instructions',
+    );
+  });
+
+  // Under the recipe its text is the opening the server delivers at
+  // `session.started`, byte for byte.
+  it('LIVE_OPENING_DELIVERY=recipe: the ordinary opening (not the recovery nudge) as one developer message', async () => {
+    process.env.LIVE_OPENING_DELIVERY = 'recipe';
+    mocks.upstreamFetch.mockResolvedValue(healthy());
+    await start().expect(201);
+    const input = mintedSession().input!;
+    expect(input).toHaveLength(1);
+    expect(input[0]).toMatchObject({ type: 'message', role: 'developer' });
+    const expected = liveOpeningInstruction('en', DEFAULT_CRISIS_CONTACT, false).text;
+    expect(input[0].content[0].text).toBe(expected);
+    expect(expected).not.toMatch(/Speak first, immediately/);
+
+    // ...and the same text is what the sideband half sends, as commentary.
+    const inject = vi.fn().mockResolvedValue(true);
+    await deliverLiveOpening('sess_live_4', inject);
+    expect(inject).toHaveBeenCalledWith(expected, 'commentary');
+  });
+
+  it('with the sideband kill switch thrown there is no startup opening (the browser sends its own)', async () => {
+    process.env.SIDEBAND_ENABLED = 'false';
+    process.env.LIVE_OPENING_DELIVERY = 'recipe';
+    try {
+      mocks.upstreamFetch.mockResolvedValue(healthy());
+      await start().expect(201);
+      expect(mintedSession()).not.toHaveProperty('input');
+    } finally {
+      delete process.env.SIDEBAND_ENABLED;
+    }
   });
 });
 
