@@ -58,14 +58,23 @@ export async function ensureBucket(): Promise<void> {
   }
 }
 
-/** Upload an object (used for finalized recordings). */
-export async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {
+/**
+ * Upload an object (used for finalized recordings). `metadata` becomes the
+ * object's user metadata (x-amz-meta-*; keys lower-case), read back by headObject.
+ */
+export async function putObject(
+  key: string,
+  body: Buffer,
+  contentType: string,
+  metadata?: Record<string, string>,
+): Promise<void> {
   await getClient().send(
     new PutObjectCommand({
       Bucket: bucket,
       Key: key,
       Body: body,
       ContentType: contentType,
+      ...(metadata ? { Metadata: metadata } : {}),
     }),
   );
 }
@@ -78,6 +87,8 @@ export async function deleteObject(key: string): Promise<void> {
 export interface ObjectMeta {
   contentLength: number;
   contentType: string;
+  /** User metadata set at upload (lower-case keys); empty when none. */
+  metadata: Record<string, string>;
 }
 
 /** Fetch object size/type without downloading the body (for Range playback). */
@@ -87,6 +98,7 @@ export async function headObject(key: string): Promise<ObjectMeta | null> {
     return {
       contentLength: res.ContentLength ?? 0,
       contentType: res.ContentType ?? 'application/octet-stream',
+      metadata: res.Metadata ?? {},
     };
   } catch {
     return null;

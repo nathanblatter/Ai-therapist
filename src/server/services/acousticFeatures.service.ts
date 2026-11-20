@@ -12,6 +12,7 @@
 import { getObjectStream } from '../config/objectStorage.js';
 import { getParticipantRecordingForSession, upsertSessionAcousticFeatures } from '../db/index.js';
 import { getSystemConfig } from '../utils/sessionHelpers.js';
+import { excludedRanges, readRecordingSidecar, type SampleRange } from './recordingSidecar.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('acoustic');
@@ -25,7 +26,10 @@ const F0_MIN_HZ = 60;
 const F0_MAX_HZ = 400;
 
 export interface AcousticFeatures {
+  /** Analysed audio: the track minus excluded_ms. */
   duration_ms: number;
+  /** Inserted silence and muted audio left out (ai-therapist-384); 0 without a sidecar. */
+  excluded_ms: number;
   sample_rate: number;
   frames: number;
   rms_mean: number;
@@ -86,10 +90,22 @@ function frameF0(frame: Float32Array, sampleRate: number): number | null {
  * Compute derived acoustic measures from mono PCM samples. Pure function —
  * exported for unit tests.
  */
-export function computeAcousticFeatures(samples: Int16Array, sampleRate: number): AcousticFeatures {
+export function computeAcousticFeatures(
+  samples: Int16Array,
+  sampleRate: number,
+  // Sorted, merged sample ranges to skip (ai-therapist-384): silence the
+  // server inserted for lost audio and audio recorded while muted, from the
+  // recording sidecar. A frame touching one is left out of every measure, and
+  // a silent run cut by one is not a pause (its true length is unknown).
+  excluded: SampleRange[] = [],
+): AcousticFeatures {
   const frameLen = Math.max(1, Math.round((FRAME_MS / 1000) * sampleRate));
   const hopLen = Math.max(1, Math.round((HOP_MS / 1000) * sampleRate));
-  const durationMs = Math.round((samples.length / sampleRate) * 1000);
+  const excludedSamples = excluded.reduce(
+    (sum, r) => sum + Math.max(0, Math.min(samples.length, r.start + r.length) - Math.max(0, r.start)),
+    0,
+  );
+  const durationMs = Math.round(((samples.length - excludedSamples) / sampleRate) * 1000);
 
   const floats = new Float32Array(samples.length);
   for (let i = 0; i < samples.length; i++) floats[i] = samples[i] / 32768;
@@ -97,7 +113,15 @@ export function computeAcousticFeatures(samples: Int16Array, sampleRate: number)
   const rmsPerFrame: number[] = [];
   const zcrPerFrame: number[] = [];
   const frameStarts: number[] = [];
+  // Frame index after which an excluded stretch was skipped.
+  const breaksBefore = new Set<number>();
+  let ex = 0;
   for (let start = 0; start + frameLen <= floats.length; start += hopLen) {
+    while (ex < excluded.length && excluded[ex].start + excluded[ex].length <= start) ex++;
+    if (ex < excluded.length && excluded[ex].start < start + frameLen) {
+      breaksBefore.add(rmsPerFrame.length);
+      continue;
+    }
     let sumSq = 0;
     let crossings = 0;
     for (let i = start; i < start + frameLen; i++) {
@@ -122,7 +146,14 @@ export function computeAcousticFeatures(samples: Int16Array, sampleRate: number)
   let run = 0;
   let inSpeechYet = false;
   let prevSpeech = false;
-  for (const isSpeech of speechFlags) {
+  for (const [f, isSpeech] of speechFlags.entries()) {
+    if (breaksBefore.has(f)) {
+      // Excluded audio sat here: what follows starts afresh, like the
+      // leading silence of a recording.
+      inSpeechYet = false;
+      prevSpeech = false;
+      run = 0;
+    }
     if (isSpeech) {
       if (!prevSpeech) speechSegments++;
       // Leading silence before any speech is not a pause.
@@ -155,6 +186,7 @@ export function computeAcousticFeatures(samples: Int16Array, sampleRate: number)
 
   return {
     duration_ms: durationMs,
+    excluded_ms: Math.round((excludedSamples / sampleRate) * 1000),
     sample_rate: sampleRate,
     frames: rmsPerFrame.length,
     rms_mean: mean(rmsPerFrame),
@@ -235,7 +267,11 @@ export async function generateAcousticFeaturesAsync(sessionId: string): Promise<
 
     const { body } = await getObjectStream(recording.objectKey);
     const wav = parseWav(await streamToBuffer(body));
-    const computed = computeAcousticFeatures(wav.samples, wav.sampleRate);
+    // Skip inserted silence and muted audio (ai-therapist-384). Recordings
+    // made before the sidecar existed have none and are measured whole.
+    const sidecar = await readRecordingSidecar(sessionId);
+    const track = sidecar?.tracks.participant;
+    const computed = computeAcousticFeatures(wav.samples, wav.sampleRate, track ? excludedRanges(track) : []);
     await upsertSessionAcousticFeatures(sessionId, 'complete', computed as unknown as Record<string, unknown>);
     log.info(`Acoustic features stored for ${sessionId} (${computed.frames} frames)`);
   } catch (err) {

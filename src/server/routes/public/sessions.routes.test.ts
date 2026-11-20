@@ -22,6 +22,7 @@ const dbMocks = vi.hoisted(() => ({
 const recorderMocks = vi.hoisted(() => ({
   appendChunk: vi.fn(),
   isFinalized: vi.fn(),
+  trackSampleRate: vi.fn(),
 }));
 const helperMocks = vi.hoisted(() => ({
   getSystemConfig: vi.fn(),
@@ -76,6 +77,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   helperMocks.getSystemConfig.mockResolvedValue({ features: { session_recording_enabled: true } });
   recorderMocks.isFinalized.mockReturnValue(false);
+  recorderMocks.trackSampleRate.mockReturnValue(null);
   dbMocks.getSessionAccessInfo.mockResolvedValue({ status: 'active', user_id: 42, session_type: 'realtime' });
   dbMocks.insertScaleResponse.mockResolvedValue(undefined);
   dbMocks.getUserLatestScaleScore.mockResolvedValue(null);
@@ -108,8 +110,74 @@ describe('POST /api/sessions/:id/audio recording-consent gate (039/086)', () => 
     ]);
   });
 
-  it('refuses a malformed seq or muted list', async () => {
-    for (const extra of [{ seq: -1 }, { seq: 1.5 }, { seq: '3' }, { muted: [5] }, { muted: 'all' }, { muted: [0.5] }]) {
+  it('passes the client count of captured chunks to every chunk (ai-therapist-384)', async () => {
+    const res = await request(makeApp())
+      .post(`/api/sessions/${SESSION_ID}/audio`)
+      .send({ chunks: ['AAAA', 'BBBB'], sampleRate: 48000, track: 'participant', seq: 3, pushed: 9 });
+    expect(res.status).toBe(204);
+    expect(recorderMocks.appendChunk.mock.calls.map((c) => c[4])).toEqual([
+      { seq: 3, muted: false, pushed: 9 },
+      { seq: 4, muted: false, pushed: 9 },
+    ]);
+  });
+
+  it('refuses a sample rate that is not a browser capture rate (review of #105)', async () => {
+    for (const sampleRate of [0, -48000, 1e9, 1e300, 47999, 48000.5, 7999, 191999, 384000, 4000]) {
+      const res = await request(makeApp())
+        .post(`/api/sessions/${SESSION_ID}/audio`)
+        .send({ ...body, sampleRate });
+      expect(res.status, String(sampleRate)).toBe(400);
+      expect(res.body.error).toBe('invalid sampleRate');
+    }
+    for (const sampleRate of ['48000', null]) {
+      const res = await request(makeApp())
+        .post(`/api/sessions/${SESSION_ID}/audio`)
+        .send({ ...body, sampleRate });
+      expect(res.status).toBe(400);
+    }
+    expect(recorderMocks.appendChunk).not.toHaveBeenCalled();
+    // Every rate a browser records at still works (old clients send the device rate).
+    for (const sampleRate of [8000, 11025, 16000, 22050, 24000, 32000, 44100, 48000, 88200, 96000, 176400, 192000]) {
+      const res = await request(makeApp())
+        .post(`/api/sessions/${SESSION_ID}/audio`)
+        .send({ ...body, sampleRate });
+      expect(res.status, String(sampleRate)).toBe(204);
+    }
+  });
+
+  it("refuses a batch whose rate differs from the track's first batch (review of #105)", async () => {
+    recorderMocks.trackSampleRate.mockImplementation((_id: string, track: string) =>
+      track === 'participant' ? 48000 : null,
+    );
+    const other = await request(makeApp())
+      .post(`/api/sessions/${SESSION_ID}/audio`)
+      .send({ ...body, sampleRate: 44100, track: 'participant' });
+    expect(other.status).toBe(400);
+    expect(other.body.error).toBe('sampleRate differs from this track');
+    expect(recorderMocks.appendChunk).not.toHaveBeenCalled();
+    const same = await request(makeApp())
+      .post(`/api/sessions/${SESSION_ID}/audio`)
+      .send({ ...body, sampleRate: 48000, track: 'participant' });
+    expect(same.status).toBe(204);
+    // The other track has its own rate (none open yet here).
+    const mix = await request(makeApp())
+      .post(`/api/sessions/${SESSION_ID}/audio`)
+      .send({ ...body, sampleRate: 44100, track: 'mixed' });
+    expect(mix.status).toBe(204);
+  });
+
+  it('refuses a malformed seq, muted list or pushed count', async () => {
+    for (const extra of [
+      { seq: -1 },
+      { seq: 1.5 },
+      { seq: '3' },
+      { muted: [5] },
+      { muted: 'all' },
+      { muted: [0.5] },
+      { pushed: -1 },
+      { pushed: '9' },
+      { pushed: 2.5 },
+    ]) {
       const res = await request(makeApp())
         .post(`/api/sessions/${SESSION_ID}/audio`)
         .send({ ...body, ...extra });

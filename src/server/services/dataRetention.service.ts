@@ -17,7 +17,8 @@
 // success=false and leaves the columns intact for retry next run.
 import { randomUUID } from 'node:crypto';
 import { pool } from '../config/db.js';
-import { deleteObject } from '../config/objectStorage.js';
+import { deleteObject, headObject } from '../config/objectStorage.js';
+import { recordingSidecarKey } from './recordingSidecar.js';
 import {
   getRecordingsToAgeOut,
   getOrphanedRecordingsPastGrace,
@@ -98,6 +99,11 @@ async function deleteRecording(
   triggeredByUser: string | null,
 ): Promise<boolean> {
   const keys = [row.recording_object_key, row.participant_recording_object_key].filter((k): k is string => Boolean(k));
+  // The recording sidecar (ai-therapist-384, numbers only) goes with the WAVs
+  // it describes. Recordings made before it existed have none, so it is
+  // deleted (and logged) only when it is there.
+  const sidecarKey = recordingSidecarKey(row.session_id);
+  if (await headObject(sidecarKey)) keys.push(sidecarKey);
   let allDeleted = true;
   for (const key of keys) {
     try {

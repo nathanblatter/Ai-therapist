@@ -79,6 +79,29 @@ describe('computeAcousticFeatures', () => {
     expect(f.rms_mean).toBe(0);
   });
 
+  it('leaves inserted silence and muted audio out of the pause measures (ai-therapist-384)', () => {
+    // speech 1 s, inserted silence 2 s, speech 1 s: unexcluded, the fill reads as a 2 s pause.
+    const signal = concat(tone(1, 150), tone(2, 0), tone(1, 150));
+    const raw = computeAcousticFeatures(signal, SR);
+    expect(raw.pause_count).toBe(1);
+    const f = computeAcousticFeatures(signal, SR, [{ start: SR, length: 2 * SR }]);
+    expect(f.pause_count).toBe(0);
+    expect(f.silence_ratio).toBeLessThan(0.1);
+    expect(f.excluded_ms).toBe(2000);
+    expect(f.duration_ms).toBe(2000);
+    expect(raw.excluded_ms).toBe(0);
+  });
+
+  it('a silent run cut by an excluded stretch is not a pause, a real pause elsewhere still is', () => {
+    // speech, 0.6 s real pause, speech, 0.2 s silence + 1 s muted + 0.5 s silence, speech
+    const signal = concat(tone(1, 150), tone(0.6, 0), tone(1, 150), tone(1.7, 0), tone(1, 150));
+    const mutedStart = Math.round(2.8 * SR);
+    const f = computeAcousticFeatures(signal, SR, [{ start: mutedStart, length: SR }]);
+    expect(f.pause_count).toBe(1);
+    expect(f.pause_mean_ms).toBeGreaterThan(400);
+    expect(f.pause_mean_ms).toBeLessThan(800);
+  });
+
   it('handles an empty buffer without dividing by zero', () => {
     const f = computeAcousticFeatures(new Int16Array(0), SR);
     expect(f.frames).toBe(0);

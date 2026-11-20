@@ -27,7 +27,11 @@
 //   is aborted and counts as a network error, so one dead connection cannot
 //   hold the track for the rest of the session.
 // - Every batch carries `seq`, the per-track index of its first chunk, so the
-//   server can see gaps and stale (duplicate or out-of-order) batches.
+//   server can see gaps and stale (duplicate or out-of-order) batches, and
+//   `pushed`, the chunks captured so far (ai-therapist-384). The server fills
+//   each gap, and a tail lost at the end, with silence of the missing length,
+//   so participant.wav keeps this uploader's timeline (recordingSidecar.ts).
+//   A body's chunks are always contiguous indexes from its `seq`.
 // - The end of a session drains: drain() sends what is left and resolves when
 //   everything is answered or DRAIN_TIMEOUT_MS has passed, and the caller
 //   ends the session on the server only after that, so the final batches are
@@ -83,7 +87,11 @@ export interface UploaderStats {
 }
 
 export interface MicTimeline {
-  /** [offset in this track's audio, ms; 1 = mic on, 0 = muted], first entry at 0. */
+  /**
+   * [offset in ms of the audio this uploader was given (chunk-index time; with
+   * the server's gap fill this is also the position in participant.wav);
+   * 1 = mic on, 0 = muted], first entry at 0.
+   */
   toggles: Array<[number, 0 | 1]>;
   truncated: boolean;
   mutedMs: number;
@@ -184,6 +192,9 @@ export function createAudioUploader(
       sampleRate,
       track,
       seq: items[0].index,
+      // Chunks captured so far on this track (ai-therapist-384): lets the
+      // server fill a tail lost at the end with silence of the right length.
+      pushed: nextIndex,
       ...(muted.length > 0 ? { muted } : {}),
     });
   };
@@ -369,21 +380,39 @@ export function createAudioUploader(
         stats.chunksUndelivered += inFlightCount;
         return 0;
       }
-      // Oldest first, so the server's sequence stays contiguous.
-      const take: Pending[] = [];
+      // A batch waiting for its retry and the chunks behind it are not always
+      // contiguous: while it waited, a full buffer may have dropped the oldest
+      // chunks queued after it. The server numbers a body's chunks from its
+      // `seq`, so one body across that hole would put every later chunk at the
+      // wrong index with no gap seen (ai-therapist-384). So each contiguous run
+      // goes in its own beacon, oldest first, each with its own `seq`; if the
+      // beacons arrive out of order the server drops the late one as stale,
+      // but never misplaces audio.
+      const runs: Pending[][] = [];
       for (const item of waiting) {
-        if (bodyFor([...take, item]).length > budgetBytes) break;
-        take.push(item);
+        const run = runs[runs.length - 1];
+        if (run && item.index === run[run.length - 1].index + 1) run.push(item);
+        else runs.push([item]);
       }
       let used = 0;
-      if (take.length > 0 && typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
-        const body = bodyFor(take);
-        if (navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }))) {
-          used = body.length;
-          stats.chunksBeaconed += take.length;
+      let beaconed = 0;
+      const canBeacon = typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function';
+      for (const run of runs) {
+        if (!canBeacon) break;
+        const take: Pending[] = [];
+        for (const item of run) {
+          if (bodyFor([...take, item]).length > budgetBytes - used) break;
+          take.push(item);
         }
+        if (take.length === 0) break;
+        const body = bodyFor(take);
+        if (!navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }))) break;
+        used += body.length;
+        beaconed += take.length;
+        if (take.length < run.length) break; // the budget is spent
       }
-      stats.chunksUndelivered += waiting.length - (used > 0 ? take.length : 0) + inFlightCount;
+      stats.chunksBeaconed += beaconed;
+      stats.chunksUndelivered += waiting.length - beaconed + inFlightCount;
       return used;
     },
     stats: () => ({ ...stats }),

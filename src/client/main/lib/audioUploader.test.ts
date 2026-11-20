@@ -40,6 +40,7 @@ interface Body {
   sampleRate: number;
   track: string;
   seq: number;
+  pushed?: number;
   muted?: number[];
 }
 
@@ -380,6 +381,62 @@ describe('session audio upload (ai-therapist-372)', () => {
     expect(mixed.stats().chunksUndelivered).toBe(2);
     expect(used).toBe(accepted.reduce((n, a) => n + a.size, 0));
     expect(used).toBeLessThanOrEqual(4 * CHUNK_LEN + 200);
+  });
+
+  it('every batch reports the chunks captured so far, so the server can fill a lost tail (ai-therapist-384)', async () => {
+    const server = installServer();
+    const up = createAudioUploader('s', 'participant');
+    await feed([up], 0, 20);
+    await run(up.drain());
+    for (const body of server.bodies) {
+      expect(body.pushed).toBeGreaterThanOrEqual(body.seq + body.chunks.length);
+    }
+    // Once draining, nothing more is captured: the last batch carries the final count.
+    expect(server.bodies.at(-1)?.pushed).toBe(20);
+  });
+
+  it('page hide never sends a body across a hole: each contiguous run gets its own seq (ai-therapist-384)', async () => {
+    // Batch [0, 1] fails and waits for its retry; meanwhile a full buffer
+    // drops the oldest chunks queued behind it. One body [0, 1, 10, ...]
+    // under seq 0 would put chunk 10 at index 2 with no gap seen.
+    const server = installServer({ outcome: () => 'network' });
+    const sent: Array<Promise<string>> = [];
+    server.sendBeacon.mockImplementation(((_url: string, blob: Blob) => {
+      sent.push(blob.text());
+      return true;
+    }) as never);
+    const up = createAudioUploader('s', 'participant', { maxPendingBytes: 4 * CHUNK_LEN });
+    up.push(chunk(0), 48000);
+    up.push(chunk(1), 48000);
+    await vi.advanceTimersByTimeAsync(400 + 50 + 10); // sent at the first tick, failed, retry pending
+    expect(server.bodies).toHaveLength(1);
+    for (let i = 2; i < 14; i++) up.push(chunk(i), 48000);
+    expect(up.stats().chunksDropped).toBe(8); // 2..9
+
+    up.beaconFinal(1_000_000);
+    const beacons = (await Promise.all(sent)).map((t) => JSON.parse(t) as Body);
+    expect(beacons.map((b) => b.seq)).toEqual([0, 10]);
+    for (const b of beacons) {
+      b.chunks.forEach((c, i) => expect(indexOf(c)).toBe(b.seq + i));
+      expect(b.pushed).toBe(14);
+    }
+    expect(up.stats().chunksBeaconed).toBe(6);
+    expect(up.stats().chunksUndelivered).toBe(0);
+  });
+
+  it('page hide stops at the budget across runs and counts the rest undelivered', async () => {
+    const server = installServer({ outcome: () => 'network' });
+    server.sendBeacon.mockImplementation((() => true) as never);
+    const up = createAudioUploader('s', 'participant', { maxPendingBytes: 4 * CHUNK_LEN });
+    up.push(chunk(0), 48000);
+    up.push(chunk(1), 48000);
+    await vi.advanceTimersByTimeAsync(400 + 50 + 10);
+    for (let i = 2; i < 14; i++) up.push(chunk(i), 48000);
+    // Room for the first run and one more chunk.
+    up.beaconFinal(3 * CHUNK_LEN + 400);
+    expect(server.sendBeacon).toHaveBeenCalledTimes(2);
+    expect(up.stats().chunksBeaconed).toBe(3);
+    expect(up.stats().chunksUndelivered).toBe(3);
   });
 
   it('reports the counts (numbers only) and the mic timeline once at the end', async () => {

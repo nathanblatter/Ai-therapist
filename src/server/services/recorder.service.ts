@@ -8,6 +8,15 @@ import {
   setSessionParticipantRecording,
   flagParticipantAudioProblem,
 } from '../db/recording.queries.js';
+import {
+  buildSidecar,
+  recordingSidecarKey,
+  TRACK_DATA_METADATA_KEY,
+  type GapRange,
+  type RecordingSidecar,
+  type SampleRange,
+  type TrackSidecar,
+} from './recordingSidecar.js';
 
 const log = createLogger('recorder');
 
@@ -42,15 +51,57 @@ interface ActiveRecording {
   unmutedSamples: number;
   unmutedSumSquares: number;
   mutedSamples: number;
+  // Sidecar bookkeeping (ai-therapist-384), in samples of this track's file.
+  sequenced: boolean;
+  // A batch without `seq` arrived (an older client); with `sequenced` too, the
+  // app was updated mid-session and the timeline cannot be trusted.
+  unsequenced: boolean;
+  chunkSamples: number | null;
+  chunksReceived: number;
+  clientPushed: number | null;
+  filledSamples: number;
+  gapCount: number;
+  gaps: GapRange[];
+  gapsTruncated: boolean;
+  timelineIntact: boolean;
+  muted: SampleRange[];
+  mutedTruncated: boolean;
 }
 
-/** Per-chunk metadata from the client (ai-therapist-372); both optional. */
+/** Per-chunk metadata from the client (ai-therapist-372, -384); all optional. */
 export interface ChunkMeta {
   /** Per-track index of this chunk. */
   seq?: number;
   /** The participant's mic was muted for this chunk. */
   muted?: boolean;
+  /** Chunks the client had captured on this track when it sent the batch (ai-therapist-384). */
+  pushed?: number;
 }
+
+/**
+ * Lost audio is replaced by digital silence of exactly the missing length
+ * (ai-therapist-384), so the track keeps the client's timeline. Caps keep a
+ * bogus index from writing gigabytes: one fill is at most MAX_GAP_FILL_MS, and
+ * a track's fills together at most the session's wall-clock span so far (first
+ * audio arrival on either track to now) plus MAX_GAP_FILL_MS, the allowance
+ * that lets a gap at the very start be filled. A capped fill is marked in the
+ * sidecar, and the track's timeline is no longer intact after it.
+ */
+export const MAX_GAP_FILL_MS = 60_000;
+/**
+ * The caps are computed at most at this rate. The sample rate is the client's
+ * own number (the first batch's `sampleRate`), so without this a bogus rate
+ * scaled the caps: one batch at sampleRate 1e9 could ask for 120 GB of zeros
+ * written synchronously. Browsers record at 44.1 or 48 kHz. The caps bound
+ * bytes written, so above 96 kHz (the route accepts 176.4 and 192 kHz) the
+ * per-fill cap is 30 s or less of audio time (60 s x 96000 samples), and a
+ * longer gap there is a capped, marked fill: fine.
+ */
+export const MAX_FILL_SAMPLE_RATE = 96_000;
+/** Ranges kept per list in the sidecar; counts and totals always cover all of them. */
+export const MAX_SIDECAR_RANGES = 5_000;
+/** Zero bytes are written in slices of this size. */
+const ZERO_SLICE = Buffer.alloc(64 * 1024);
 
 // First and last audio arrival per session, either track: the wall-clock
 // stretch the browser was capturing, to judge a track against when both
@@ -121,6 +172,18 @@ export function appendChunk(
       unmutedSamples: 0,
       unmutedSumSquares: 0,
       mutedSamples: 0,
+      sequenced: false,
+      unsequenced: false,
+      chunkSamples: null,
+      chunksReceived: 0,
+      clientPushed: null,
+      filledSamples: 0,
+      gapCount: 0,
+      gaps: [],
+      gapsTruncated: false,
+      timelineIntact: true,
+      muted: [],
+      mutedTruncated: false,
     };
     // A WriteStream with no 'error' listener throws (and can crash the process)
     // on a write failure. Capture it instead so we stop counting bytes that
@@ -133,24 +196,83 @@ export function appendChunk(
     recordings.set(key, rec);
     log.info(`[rec] started ${track} recording for ${sessionId} @ ${sampleRate}Hz`);
   }
-  if (!acceptSeq(sessionId, track, rec, meta.seq)) return;
+  if (meta.pushed !== undefined && (rec.clientPushed === null || meta.pushed > rec.clientPushed)) {
+    rec.clientPushed = meta.pushed;
+  }
+  const missing = acceptSeq(sessionId, track, rec, meta.seq);
+  if (missing === null) return;
   if (rec.errored) return; // stream is dead; don't count bytes we can't persist
   const buf = Buffer.from(base64Pcm16, 'base64');
-  rec.stream.write(buf);
-  rec.byteLength += buf.length;
-
+  const samples = Math.floor(buf.length / 2);
   const now = Date.now();
   const window = arrivals.get(sessionId);
+  if (missing > 0) {
+    // Chunks are all one size from the browser (4096 samples); a gap at the
+    // very start is sized by the first chunk that does arrive.
+    fillGap(rec, missing, rec.chunkSamples ?? samples, 'sequence_gap', window ? now - window.first : 0);
+  }
+  if (meta.muted) noteMuted(rec, rec.byteLength / 2, samples);
+  rec.stream.write(buf);
+  rec.byteLength += buf.length;
+  rec.chunksReceived += 1;
+  if (samples > 0) rec.chunkSamples = samples;
+
   if (window) window.last = now;
   else arrivals.set(sessionId, { first: now, last: now });
 
-  if (track === 'participant') {
-    const samples = Math.floor(buf.length / 2);
-    if (meta.muted) rec.mutedSamples += samples;
-    else {
-      rec.unmutedSamples += samples;
-      rec.unmutedSumSquares += pcm16SumSquares(buf);
-    }
+  if (meta.muted) rec.mutedSamples += samples;
+  else if (track === 'participant') {
+    rec.unmutedSamples += samples;
+    rec.unmutedSumSquares += pcm16SumSquares(buf);
+  }
+}
+
+/**
+ * Write digital silence for `chunks` missing chunks of `chunkSamples` each,
+ * within the caps (MAX_GAP_FILL_MS), and record the range for the sidecar.
+ * `spanMs` is the session's wall-clock span so far.
+ */
+function fillGap(
+  rec: ActiveRecording,
+  chunks: number,
+  chunkSamples: number,
+  reason: GapRange['reason'],
+  spanMs: number,
+): void {
+  const wanted = chunks * chunkSamples;
+  const capRate =
+    Number.isFinite(rec.sampleRate) && rec.sampleRate > 0 ? Math.min(rec.sampleRate, MAX_FILL_SAMPLE_RATE) : 0;
+  const maxSingle = Math.floor((MAX_GAP_FILL_MS * capRate) / 1000);
+  const maxTotal = Math.floor(((Math.max(0, spanMs) + MAX_GAP_FILL_MS) * capRate) / 1000);
+  const fill = Math.max(0, Math.min(wanted, maxSingle, maxTotal - rec.filledSamples));
+  const start = rec.byteLength / 2;
+  let bytes = fill * 2;
+  while (bytes > 0) {
+    const n = Math.min(bytes, ZERO_SLICE.length);
+    rec.stream.write(ZERO_SLICE.subarray(0, n));
+    bytes -= n;
+  }
+  rec.byteLength += fill * 2;
+  rec.filledSamples += fill;
+  rec.gapCount += 1;
+  const capped = fill < wanted;
+  if (capped) rec.timelineIntact = false;
+  if (rec.gaps.length < MAX_SIDECAR_RANGES) {
+    rec.gaps.push({ start, length: fill, chunks, reason, ...(capped ? { capped: true, missingSamples: wanted } : {}) });
+  } else {
+    rec.gapsTruncated = true;
+  }
+}
+
+/** Extend the open muted range or start a new one at `start` (samples). */
+function noteMuted(rec: ActiveRecording, start: number, samples: number): void {
+  const last = rec.muted[rec.muted.length - 1];
+  if (last && last.start + last.length === start) {
+    last.length += samples;
+  } else if (rec.muted.length < MAX_SIDECAR_RANGES) {
+    rec.muted.push({ start, length: samples });
+  } else {
+    rec.mutedTruncated = true;
   }
 }
 
@@ -162,10 +284,21 @@ export function appendChunk(
  * (an index already passed: a retry of a batch the server had in fact stored,
  * or an out-of-order arrival) is logged and NOT appended: appending it would
  * put audio in the wrong place, and the server never reorders. One log line
- * per gap and per run of stale chunks. Returns whether to append.
+ * per gap and per run of stale chunks. Returns null to drop the chunk, else
+ * the number of chunks missing before it (filled with silence by the caller,
+ * ai-therapist-384). A gap at the very start (first index above 0) counts too.
  */
-function acceptSeq(sessionId: string, track: RecordingTrack, rec: ActiveRecording, seq: number | undefined): boolean {
-  if (seq === undefined) return true;
+function acceptSeq(
+  sessionId: string,
+  track: RecordingTrack,
+  rec: ActiveRecording,
+  seq: number | undefined,
+): number | null {
+  if (seq === undefined) {
+    rec.unsequenced = true;
+    return 0;
+  }
+  rec.sequenced = true;
   if (rec.nextSeq !== null && seq < rec.nextSeq) {
     rec.staleChunks += 1;
     if (!rec.inStaleRun) {
@@ -175,20 +308,28 @@ function acceptSeq(sessionId: string, track: RecordingTrack, rec: ActiveRecordin
         `[rec] ${sessionId} ${track} out-of-order or duplicate audio chunk dropped`,
       );
     }
-    return false;
+    return null;
   }
   rec.inStaleRun = false;
   const expected = rec.nextSeq ?? 0;
+  let missing = 0;
   if (seq > expected) {
-    rec.gapChunks += seq - expected;
+    missing = seq - expected;
+    rec.gapChunks += missing;
     rec.gapEvents += 1;
-    log.warn(
-      { sessionId, track, seq, expected, missing: seq - expected },
-      `[rec] ${sessionId} ${track} audio sequence gap`,
-    );
+    log.warn({ sessionId, track, seq, expected, missing }, `[rec] ${sessionId} ${track} audio sequence gap`);
   }
   rec.nextSeq = seq + 1;
-  return true;
+  return missing;
+}
+
+/**
+ * The sample rate a track's recording was opened at (its first batch), or null
+ * when the track has no open recording. The audio route refuses a batch at
+ * another rate: appending it would play at the wrong speed.
+ */
+export function trackSampleRate(sessionId: string, track: RecordingTrack): number | null {
+  return recordings.get(recKey(sessionId, track))?.sampleRate ?? null;
 }
 
 /** Whether a session currently has buffered audio on any track. */
@@ -219,22 +360,125 @@ export async function finalize(sessionId: string): Promise<void> {
   arrivals.delete(sessionId);
   const wallMs = window ? window.last - window.first : 0;
 
-  const results: Partial<Record<RecordingTrack, StoredTrack | null>> = {};
+  const ended: Array<{ track: RecordingTrack; rec: ActiveRecording; endError: unknown; totalSamples: number }> = [];
   for (const { track, rec } of tracks) {
+    // A tail lost at the end (the drain timed out, the page went away): the
+    // client reported more chunks captured than the server received after
+    // the last one. Filled like any gap so the track keeps its full length.
+    const tail = rec.nextSeq !== null && rec.clientPushed !== null ? rec.clientPushed - rec.nextSeq : 0;
+    if (tail > 0 && !rec.errored && rec.chunkSamples) {
+      rec.gapChunks += tail;
+      rec.gapEvents += 1;
+      log.warn({ sessionId, track, missing: tail }, `[rec] ${sessionId} ${track} audio tail missing`);
+      fillGap(rec, tail, rec.chunkSamples, 'lost_tail', wallMs);
+      rec.nextSeq = rec.clientPushed;
+    }
     if (rec.gapChunks > 0 || rec.staleChunks > 0) {
       log.warn(
         { sessionId, track, gapChunks: rec.gapChunks, gapEvents: rec.gapEvents, staleChunks: rec.staleChunks },
         `[rec] ${sessionId} ${track} audio arrived with sequence problems`,
       );
     }
-    results[track] = await finalizeTrack(sessionId, track, rec);
+    // Close the buffer and measure it, so the sidecar can be stored BEFORE
+    // the WAVs it describes (review of #105).
+    let endError: unknown = null;
+    let totalSamples = 0;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        rec.stream.end((err?: unknown) => (err ? reject(err) : resolve()));
+      });
+      totalSamples = Math.floor((await fs.promises.stat(rec.filePath)).size / 2);
+    } catch (err) {
+      endError = err ?? new Error('write stream failed');
+    }
+    ended.push({ track, rec, endError, totalSamples });
+  }
+
+  // The sidecar first, then the WAVs: inserted zeros look exactly like a muted
+  // mic, so a WAV must never sit there without a record of which it is. Each
+  // WAV carries in its object metadata whether the sidecar was stored, so a
+  // failed sidecar is told apart from a recording made before sidecars
+  // existed (TRACK_DATA_METADATA_KEY; read by the admin recording-info route).
+  const sidecarTracks: RecordingSidecar['tracks'] = {};
+  for (const { track, rec, endError, totalSamples } of ended) {
+    if (!endError && totalSamples > 0) sidecarTracks[track] = trackSidecar(track, rec, totalSamples);
+  }
+  const trackData = (await storeSidecar(sessionId, sidecarTracks)) ? 'stored' : 'missing';
+
+  const results: Partial<Record<RecordingTrack, StoredTrack | null>> = {};
+  for (const { track, rec, endError } of ended) {
+    results[track] = await finalizeTrack(sessionId, track, rec, endError, trackData);
   }
   await checkParticipantTrack(sessionId, results, wallMs);
 }
 
+/** Sidecar upload attempts, and the backoff step between them. */
+export const SIDECAR_ATTEMPTS = 3;
+const SIDECAR_RETRY_STEP_MS = 200;
+
+/**
+ * Upload the sidecar (recordingSidecar.ts), describing the tracks about to be
+ * stored, with a bounded retry. Returns whether it was stored. A failure never
+ * marks a track failed (the audio is kept), but it is logged as an error and
+ * recorded on each WAV (TRACK_DATA_METADATA_KEY = 'missing').
+ */
+async function storeSidecar(sessionId: string, tracks: RecordingSidecar['tracks']): Promise<boolean> {
+  if (!tracks.mixed && !tracks.participant) return false;
+  const body = Buffer.from(JSON.stringify(buildSidecar(tracks)));
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= SIDECAR_ATTEMPTS; attempt++) {
+    try {
+      await ensureBucket();
+      await putObject(recordingSidecarKey(sessionId), body, 'application/json');
+      return true;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < SIDECAR_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, SIDECAR_RETRY_STEP_MS * attempt));
+      }
+    }
+  }
+  log.error(
+    { err: lastErr, sessionId, attempts: SIDECAR_ATTEMPTS },
+    `[rec] recording sidecar NOT stored for ${sessionId}: inserted silence in its WAVs cannot be told ` +
+      `from a muted microphone; the WAVs are marked ${TRACK_DATA_METADATA_KEY}=missing`,
+  );
+  return false;
+}
+
+function trackSidecar(track: RecordingTrack, rec: ActiveRecording, totalSamples: number): TrackSidecar {
+  const missing = rec.gapChunks;
+  return {
+    object: track === 'mixed' ? 'recording.wav' : 'participant.wav',
+    sampleRate: rec.sampleRate,
+    totalSamples,
+    sequenced: rec.sequenced && rec.unsequenced ? 'partial' : rec.sequenced,
+    chunkSamples: rec.chunkSamples,
+    chunksReceived: rec.chunksReceived,
+    chunksStale: rec.staleChunks,
+    chunksMissing: missing,
+    clientChunksPushed: rec.clientPushed,
+    insertedSilenceSamples: rec.filledSamples,
+    gapCount: rec.gapCount,
+    gaps: rec.gaps,
+    gapsTruncated: rec.gapsTruncated,
+    muted: rec.muted,
+    mutedSamples: rec.mutedSamples,
+    mutedTruncated: rec.mutedTruncated,
+    timelineIntact: rec.sequenced && !rec.unsequenced && rec.timelineIntact,
+    // Stale chunks are not a loss: a duplicate was already stored, and a late
+    // chunk's place was already filled and counted as missing. Unknown when
+    // any batch came without `seq` (its losses cannot be seen).
+    complete: rec.sequenced && !rec.unsequenced ? missing === 0 && !rec.errored : null,
+  };
+}
+
 /** What finalizeTrack stored for one track; null when nothing was stored. */
 export interface StoredTrack {
+  /** Length of the stored WAV, inserted silence included. */
   durationMs: number;
+  /** Silence inserted for lost audio (ai-therapist-384). */
+  insertedSilenceMs: number;
   /** Audio the participant had NOT muted (all of it for the mix and for legacy clients). */
   unmutedMs: number;
   /** Level of that unmuted audio. */
@@ -258,6 +502,9 @@ export interface StoredTrack {
  *   A muted mic yields exact zeros, which is a choice, not a failure: the
  *   client marks muted chunks, and only audio recorded while the mic was on
  *   is judged for silence, and only once there is enough of it.
+ * - Silence inserted for lost audio (ai-therapist-384) keeps the track's
+ *   timeline but is not participant audio, so the length judged is the
+ *   track's length without it.
  */
 export const PARTICIPANT_CHECK_MIN_MIX_MS = 10_000;
 export const PARTICIPANT_MIN_LENGTH_RATIO = 0.8;
@@ -268,13 +515,18 @@ export type ParticipantAudioProblem = 'missing' | 'short' | 'silent';
 
 export function assessParticipantTrack(
   mixed: Pick<StoredTrack, 'durationMs'> | null | undefined,
-  participant: Pick<StoredTrack, 'durationMs' | 'unmutedMs' | 'unmutedRmsDbfs'> | null | undefined,
+  participant:
+    | (Pick<StoredTrack, 'durationMs' | 'unmutedMs' | 'unmutedRmsDbfs'> &
+        Partial<Pick<StoredTrack, 'insertedSilenceMs'>>)
+    | null
+    | undefined,
   wallMs = 0,
 ): ParticipantAudioProblem | null {
   const expectedMs = Math.max(mixed?.durationMs ?? 0, wallMs);
   if (!mixed || expectedMs < PARTICIPANT_CHECK_MIN_MIX_MS) return null;
   if (!participant) return 'missing';
-  if (participant.durationMs < expectedMs * PARTICIPANT_MIN_LENGTH_RATIO) return 'short';
+  const receivedMs = participant.durationMs - (participant.insertedSilenceMs ?? 0);
+  if (receivedMs < expectedMs * PARTICIPANT_MIN_LENGTH_RATIO) return 'short';
   if (participant.unmutedMs >= PARTICIPANT_MIN_UNMUTED_MS && participant.unmutedRmsDbfs < PARTICIPANT_SILENT_DBFS) {
     return 'silent';
   }
@@ -316,6 +568,7 @@ async function checkParticipantTrack(
     participantUnmutedMs: participant?.unmutedMs ?? 0,
     participantRmsDbfs: participant ? round1(participant.unmutedRmsDbfs) : null,
     participantGapChunks: participant?.gapChunks ?? 0,
+    participantInsertedSilenceMs: participant?.insertedSilenceMs ?? 0,
   };
   log.warn(details, `[rec] ${sessionId} ended without usable participant audio (${problem})`);
   if (!(await autoDeviationEnabled())) return;
@@ -352,13 +605,14 @@ async function finalizeTrack(
   sessionId: string,
   track: RecordingTrack,
   rec: ActiveRecording,
+  endError: unknown,
+  trackData: 'stored' | 'missing',
 ): Promise<StoredTrack | null> {
   const persist = track === 'mixed' ? setSessionRecording : setSessionParticipantRecording;
   const objectName = track === 'mixed' ? 'recording.wav' : 'participant.wav';
   try {
-    await new Promise<void>((resolve, reject) => {
-      rec.stream.end((err?: unknown) => (err ? reject(err) : resolve()));
-    });
+    // The buffer was closed by finalize() (before the sidecar was stored).
+    if (endError) throw endError;
 
     if (rec.byteLength === 0) {
       log.info(`[rec] ${sessionId} ${track} had no audio; skipping upload`);
@@ -371,7 +625,7 @@ async function finalizeTrack(
     const key = `sessions/${sessionId}/${objectName}`;
 
     await ensureBucket();
-    await putObject(key, wav, 'audio/wav');
+    await putObject(key, wav, 'audio/wav', { [TRACK_DATA_METADATA_KEY]: trackData });
 
     // Derive duration from the bytes actually on disk, not the in-memory
     // counter — if any write was dropped the two diverge, and the stored
@@ -399,7 +653,15 @@ async function finalizeTrack(
     // scan of the whole track here). The mix is not judged for level.
     const unmutedMs = track === 'participant' ? Math.round((rec.unmutedSamples / rec.sampleRate) * 1000) : durationMs;
     const unmutedRmsDbfs = track === 'participant' ? rmsDbfs(rec.unmutedSumSquares, rec.unmutedSamples) : 0;
-    return { durationMs, unmutedMs, unmutedRmsDbfs, gapChunks: rec.gapChunks, staleChunks: rec.staleChunks };
+    const insertedSilenceMs = Math.round((rec.filledSamples / rec.sampleRate) * 1000);
+    return {
+      durationMs,
+      insertedSilenceMs,
+      unmutedMs,
+      unmutedRmsDbfs,
+      gapChunks: rec.gapChunks,
+      staleChunks: rec.staleChunks,
+    };
   } catch (err) {
     log.error({ err }, `[rec] failed to finalize ${track} recording for ${sessionId}`);
     try {

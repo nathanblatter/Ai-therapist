@@ -28,6 +28,12 @@ import { generateSessionNameAsync } from '../../services/sessionName.service.js'
 import { getSessionRecording } from '../../db/recording.queries.js';
 import { getParticipantRecordingForSession } from '../../db/acousticFeatures.queries.js';
 import { getObjectStream, headObject } from '../../config/objectStorage.js';
+import {
+  readRecordingSidecar,
+  summarizeTrack,
+  TRACK_DATA_METADATA_KEY,
+  type TrackSummary,
+} from '../../services/recordingSidecar.js';
 
 import { createLogger } from '../../utils/logger.js';
 
@@ -279,6 +285,35 @@ export default function adminSessionsRoutes(): Router {
         } catch (err) {
           log.warn({ err }, 'participant track lookup failed');
         }
+        // What each WAV contains (ai-therapist-384): inserted silence for lost
+        // audio and muted time, from the sidecar stored next to the WAVs.
+        // Absent for recordings made before it existed.
+        const sidecar = await readRecordingSidecar(sessionId);
+        let trackData: {
+          url: string;
+          mixed: TrackSummary | null;
+          participant: TrackSummary | null;
+          tracksAligned: boolean;
+        } | null = null;
+        // Why there is none, when there is none (review of #105): each WAV
+        // stored since the sidecar existed says in its object metadata whether
+        // the sidecar was stored. 'failed': it was not, so inserted silence
+        // cannot be told from a muted mic; 'predates': a recording from before
+        // sidecars; 'unknown': the WAV says stored (or cannot be checked) but
+        // the sidecar cannot be read now.
+        let trackDataStatus: 'stored' | 'failed' | 'predates' | 'unknown' = 'stored';
+        if (sidecar) {
+          trackData = {
+            url: `/admin/api/sessions/${sessionId}/recording-tracks`,
+            mixed: sidecar.tracks.mixed ? summarizeTrack(sidecar.tracks.mixed) : null,
+            participant: sidecar.tracks.participant ? summarizeTrack(sidecar.tracks.participant) : null,
+            tracksAligned: sidecar.tracksAligned,
+          };
+        } else {
+          const meta = await headObject(rec.objectKey);
+          const flag = meta?.metadata?.[TRACK_DATA_METADATA_KEY];
+          trackDataStatus = !meta ? 'unknown' : flag === 'missing' ? 'failed' : flag ? 'unknown' : 'predates';
+        }
         res.json({
           available: true,
           status: rec.status,
@@ -286,11 +321,36 @@ export default function adminSessionsRoutes(): Router {
           sizeBytes: rec.sizeBytes,
           url: `/admin/api/sessions/${sessionId}/recording`,
           participantTrack,
+          trackData,
+          trackDataStatus,
         });
       } catch (err) {
         log.error({ err }, 'Failed to fetch recording info');
         res.status(500).json({ error: 'Failed to fetch recording info' });
       }
+    },
+  );
+
+  // GET /admin/api/sessions/:sessionId/recording-tracks - the recording
+  // sidecar (ai-therapist-384, services/recordingSidecar.ts): per track the
+  // sample rate, length, inserted-silence ranges and muted ranges, so pause
+  // and timing analysis can exclude them. Numbers only. `?download=1` serves
+  // it as a file.
+  router.get(
+    '/admin/api/sessions/:sessionId/recording-tracks',
+    requireFullContent,
+    requireSessionClientAccess(),
+    async (req, res) => {
+      const { sessionId } = req.params;
+      const sidecar = await readRecordingSidecar(sessionId);
+      if (!sidecar) return res.status(404).json({ error: 'No track data for this recording' });
+      if (req.query.download === '1' || req.query.download === 'true') {
+        res.setHeader(
+          'Content-Disposition',
+          `attachment; filename="session-${sessionId.replace(/[^A-Za-z0-9_-]/g, '')}-recording-tracks.json"`,
+        );
+      }
+      res.json(sidecar);
     },
   );
 

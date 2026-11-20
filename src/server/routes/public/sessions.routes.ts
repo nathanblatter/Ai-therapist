@@ -8,7 +8,7 @@
 // nothing for the client to register. See that route for the full rationale.
 import { Router, json } from 'express';
 import { requireAuth } from '../../middleware/auth.js';
-import { appendChunk, isFinalized } from '../../services/recorder.service.js';
+import { appendChunk, isFinalized, trackSampleRate } from '../../services/recorder.service.js';
 import { noteSessionActivity } from '../../services/sessionLifecycle.service.js';
 import {
   getSession,
@@ -32,6 +32,15 @@ const log = createLogger('sessionsRoutes');
  *  the same path, so leave headroom). */
 const PARTICIPANT_TEXT_MAX_CHARS = 10_000;
 
+/**
+ * Sample rates a browser AudioContext captures at (8 to 192 kHz; 176.4 and
+ * 192 kHz on pro interfaces and some desktops, where recording must keep
+ * working); the audio route refuses others.
+ */
+export const CAPTURE_SAMPLE_RATES: ReadonlySet<number> = new Set([
+  8000, 11025, 16000, 22050, 24000, 32000, 44100, 48000, 88200, 96000, 176400, 192000,
+]);
+
 export default function sessionsRoutes(): Router {
   const router = Router();
 
@@ -45,22 +54,35 @@ export default function sessionsRoutes(): Router {
   // uploader already treats as "recording off" (ai-therapist-322).
   router.post('/api/sessions/:sessionId/audio', json({ limit: '8mb' }), dropIfWithdrawn, async (req, res) => {
     const { sessionId } = req.params;
-    const { chunks, sampleRate, track, seq, muted } = req.body as {
+    const { chunks, sampleRate, track, seq, muted, pushed } = req.body as {
       chunks?: string[];
       sampleRate?: number;
       track?: string;
       seq?: unknown;
       muted?: unknown;
+      pushed?: unknown;
     };
     if (!sessionId || !Array.isArray(chunks) || typeof sampleRate !== 'number') {
       return res.status(400).json({ error: 'chunks[] and sampleRate required' });
+    }
+    // The browser sends its AudioContext's rate, always one of the standard
+    // capture rates (review of #105): the recorder sizes inserted silence and
+    // the WAV header from it, so anything else is refused.
+    if (!CAPTURE_SAMPLE_RATES.has(sampleRate)) {
+      return res.status(400).json({ error: 'invalid sampleRate' });
     }
     // Optional (ai-therapist-372): `seq` is the per-track index of the batch's
     // first chunk, so the recorder can log gaps and drop stale (duplicate or
     // out-of-order) chunks; `muted` lists the batch positions recorded while
     // the participant's mic was muted. Older clients send neither.
+    // `pushed` (ai-therapist-384, optional too): how many chunks the client
+    // had captured on this track when it sent the batch, so a tail lost at
+    // the end can be filled with silence of the right length.
     if (seq !== undefined && !(Number.isSafeInteger(seq) && (seq as number) >= 0)) {
       return res.status(400).json({ error: 'invalid seq' });
+    }
+    if (pushed !== undefined && !(Number.isSafeInteger(pushed) && (pushed as number) >= 0)) {
+      return res.status(400).json({ error: 'invalid pushed' });
     }
     if (
       muted !== undefined &&
@@ -92,6 +114,12 @@ export default function sessionsRoutes(): Router {
     // Recording already closed (session ended / auto-terminated): tell the
     // client to stop its uploader instead of silently discarding forever.
     if (isFinalized(sessionId)) return res.sendStatus(410);
+    // A track is one rate from its first batch: audio at another rate appended
+    // to it would play at the wrong speed and misplace every later chunk.
+    const openRate = trackSampleRate(sessionId, recordingTrack);
+    if (openRate !== null && openRate !== sampleRate) {
+      return res.status(400).json({ error: 'sampleRate differs from this track' });
+    }
 
     // A batch landing at all means the participant is still here — cancels
     // any pending abandon-check scheduled from an earlier socket disconnect.
@@ -119,6 +147,7 @@ export default function sessionsRoutes(): Router {
         appendChunk(sessionId, pcm, sampleRate, recordingTrack, {
           seq: firstSeq === undefined ? undefined : firstSeq + i,
           muted: mutedSet.has(i),
+          ...(pushed === undefined ? {} : { pushed: pushed as number }),
         });
       } catch {
         /* best-effort recording */

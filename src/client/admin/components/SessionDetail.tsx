@@ -1,5 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, AlertTriangle, Eye, FileText, Link2, Check, Clock, Download } from 'react-feather';
+import { X, AlertTriangle, Eye, FileText, Link2, Check, Clock, Download, Info } from 'react-feather';
+import {
+  describeTrack,
+  trackDataMissingNotice,
+  type TrackData,
+  type TrackDataStatus,
+  type TrackSummary,
+} from '../utils/recordingTrackData';
 import ConversationBubble from './ConversationBubble';
 import SessionInsightsPanel from './SessionInsightsPanel';
 import SessionEvalPanel from './SessionEvalPanel';
@@ -66,6 +73,19 @@ interface Session {
 // "summary view" notice (session detail is transcript-tier, so caseworkers
 // see profile-side summaries instead) and the sandbox empty-transcript state
 // (only showcase sessions are seeded with transcripts).
+/** One line of numbers under a recording track (ai-therapist-384). */
+function TrackDataLine({ summary, showMuted }: { summary: TrackSummary; showMuted: boolean }) {
+  const { text, tone } = describeTrack(summary, { showMuted });
+  const Icon = tone === 'ok' ? Check : tone === 'gaps' ? AlertTriangle : Info;
+  const color = tone === 'gaps' ? 'text-amber-700' : 'text-gray-500';
+  return (
+    <p className={`mt-1 flex items-center gap-1 text-xs ${color}`}>
+      <Icon size={12} aria-hidden="true" className="shrink-0" />
+      <span>{text}</span>
+    </p>
+  );
+}
+
 function TranscriptNoticeCard({ variant }: { variant: 'caseworker-summary' | 'sandbox-empty' }) {
   const isCaseworker = variant === 'caseworker-summary';
   const Icon = isCaseworker ? Eye : FileText;
@@ -162,6 +182,8 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     url: string;
     durationMs: number | null;
     participantTrack: { url: string } | null;
+    trackData: TrackData | null;
+    trackDataStatus?: TrackDataStatus;
   } | null>(null);
   const [redactionStatus, setRedactionStatus] = useState<RedactionStatus | null>(null);
   const [feedback, setFeedback] = useState<SessionFeedback | null>(null);
@@ -223,11 +245,19 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
           url: string;
           durationMs: number | null;
           participantTrack?: { url: string } | null;
+          trackData?: TrackData | null;
+          trackDataStatus?: TrackDataStatus;
         }>(`/admin/api/sessions/${sessionId}/recording-info`);
         if (!cancelled) {
           setRecording(
             info.available
-              ? { url: info.url, durationMs: info.durationMs, participantTrack: info.participantTrack ?? null }
+              ? {
+                  url: info.url,
+                  durationMs: info.durationMs,
+                  participantTrack: info.participantTrack ?? null,
+                  trackData: info.trackData ?? null,
+                  trackDataStatus: info.trackDataStatus,
+                }
               : null,
           );
         }
@@ -909,6 +939,13 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
               <audio controls preload="metadata" src={recording.url} className="w-full">
                 Your browser does not support audio playback.
               </audio>
+              {recording.trackData?.mixed && <TrackDataLine summary={recording.trackData.mixed} showMuted={false} />}
+              {!recording.trackData && trackDataMissingNotice(recording.trackDataStatus) && (
+                <p className="mt-1 flex items-center gap-1 text-xs text-amber-700">
+                  <AlertTriangle size={12} aria-hidden="true" className="shrink-0" />
+                  <span>{trackDataMissingNotice(recording.trackDataStatus)}</span>
+                </p>
+              )}
               <div className="mt-2 flex items-center justify-between">
                 <span className="text-xs text-gray-500">Downloads are recorded in the data access log.</span>
                 <a
@@ -927,6 +964,22 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
                   <audio controls preload="metadata" src={recording.participantTrack.url} className="w-full">
                     Your browser does not support audio playback.
                   </audio>
+                  {recording.trackData?.participant && (
+                    <TrackDataLine summary={recording.trackData.participant} showMuted />
+                  )}
+                </div>
+              )}
+              {recording.trackData && (
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="text-xs text-gray-500">
+                    Inserted silence and muted stretches, for excluding them from pause and timing analysis.
+                  </span>
+                  <a
+                    href={`${recording.trackData.url}?download=1`}
+                    className="inline-flex shrink-0 items-center gap-1 rounded bg-gray-200 px-3 py-1 text-sm font-medium text-gray-700 transition hover:bg-gray-300 min-h-[44px]"
+                  >
+                    <Download size={14} /> Track data (JSON)
+                  </a>
                 </div>
               )}
             </div>
