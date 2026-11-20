@@ -11,6 +11,7 @@ import {
 import {
   buildSidecar,
   recordingSidecarKey,
+  TRACK_DATA_METADATA_KEY,
   type GapRange,
   type RecordingSidecar,
   type SampleRange,
@@ -52,6 +53,9 @@ interface ActiveRecording {
   mutedSamples: number;
   // Sidecar bookkeeping (ai-therapist-384), in samples of this track's file.
   sequenced: boolean;
+  // A batch without `seq` arrived (an older client); with `sequenced` too, the
+  // app was updated mid-session and the timeline cannot be trusted.
+  unsequenced: boolean;
   chunkSamples: number | null;
   chunksReceived: number;
   clientPushed: number | null;
@@ -167,6 +171,7 @@ export function appendChunk(
       unmutedSumSquares: 0,
       mutedSamples: 0,
       sequenced: false,
+      unsequenced: false,
       chunkSamples: null,
       chunksReceived: 0,
       clientPushed: null,
@@ -287,7 +292,10 @@ function acceptSeq(
   rec: ActiveRecording,
   seq: number | undefined,
 ): number | null {
-  if (seq === undefined) return 0;
+  if (seq === undefined) {
+    rec.unsequenced = true;
+    return 0;
+  }
   rec.sequenced = true;
   if (rec.nextSeq !== null && seq < rec.nextSeq) {
     rec.staleChunks += 1;
@@ -311,6 +319,15 @@ function acceptSeq(
   }
   rec.nextSeq = seq + 1;
   return missing;
+}
+
+/**
+ * The sample rate a track's recording was opened at (its first batch), or null
+ * when the track has no open recording. The audio route refuses a batch at
+ * another rate: appending it would play at the wrong speed.
+ */
+export function trackSampleRate(sessionId: string, track: RecordingTrack): number | null {
+  return recordings.get(recKey(sessionId, track))?.sampleRate ?? null;
 }
 
 /** Whether a session currently has buffered audio on any track. */
@@ -341,7 +358,7 @@ export async function finalize(sessionId: string): Promise<void> {
   arrivals.delete(sessionId);
   const wallMs = window ? window.last - window.first : 0;
 
-  const results: Partial<Record<RecordingTrack, StoredTrack | null>> = {};
+  const ended: Array<{ track: RecordingTrack; rec: ActiveRecording; endError: unknown; totalSamples: number }> = [];
   for (const { track, rec } of tracks) {
     // A tail lost at the end (the drain timed out, the page went away): the
     // client reported more chunks captured than the server received after
@@ -360,34 +377,71 @@ export async function finalize(sessionId: string): Promise<void> {
         `[rec] ${sessionId} ${track} audio arrived with sequence problems`,
       );
     }
-    results[track] = await finalizeTrack(sessionId, track, rec);
+    // Close the buffer and measure it, so the sidecar can be stored BEFORE
+    // the WAVs it describes (review of #105).
+    let endError: unknown = null;
+    let totalSamples = 0;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        rec.stream.end((err?: unknown) => (err ? reject(err) : resolve()));
+      });
+      totalSamples = Math.floor((await fs.promises.stat(rec.filePath)).size / 2);
+    } catch (err) {
+      endError = err ?? new Error('write stream failed');
+    }
+    ended.push({ track, rec, endError, totalSamples });
   }
-  await storeSidecar(sessionId, results);
+
+  // The sidecar first, then the WAVs: inserted zeros look exactly like a muted
+  // mic, so a WAV must never sit there without a record of which it is. Each
+  // WAV carries in its object metadata whether the sidecar was stored, so a
+  // failed sidecar is told apart from a recording made before sidecars
+  // existed (TRACK_DATA_METADATA_KEY; read by the admin recording-info route).
+  const sidecarTracks: RecordingSidecar['tracks'] = {};
+  for (const { track, rec, endError, totalSamples } of ended) {
+    if (!endError && totalSamples > 0) sidecarTracks[track] = trackSidecar(track, rec, totalSamples);
+  }
+  const trackData = (await storeSidecar(sessionId, sidecarTracks)) ? 'stored' : 'missing';
+
+  const results: Partial<Record<RecordingTrack, StoredTrack | null>> = {};
+  for (const { track, rec, endError } of ended) {
+    results[track] = await finalizeTrack(sessionId, track, rec, endError, trackData);
+  }
   await checkParticipantTrack(sessionId, results, wallMs);
 }
 
+/** Sidecar upload attempts, and the backoff step between them. */
+export const SIDECAR_ATTEMPTS = 3;
+const SIDECAR_RETRY_STEP_MS = 200;
+
 /**
- * Upload the sidecar (recordingSidecar.ts) next to the WAVs, describing the
- * tracks that were stored. Best-effort: a failure is logged and never marks a
- * track failed.
+ * Upload the sidecar (recordingSidecar.ts), describing the tracks about to be
+ * stored, with a bounded retry. Returns whether it was stored. A failure never
+ * marks a track failed (the audio is kept), but it is logged as an error and
+ * recorded on each WAV (TRACK_DATA_METADATA_KEY = 'missing').
  */
-async function storeSidecar(
-  sessionId: string,
-  results: Partial<Record<RecordingTrack, StoredTrack | null>>,
-): Promise<RecordingSidecar | null> {
-  const tracks: RecordingSidecar['tracks'] = {};
-  for (const track of TRACKS) {
-    const stored = results[track];
-    if (stored) tracks[track] = stored.sidecar;
+async function storeSidecar(sessionId: string, tracks: RecordingSidecar['tracks']): Promise<boolean> {
+  if (!tracks.mixed && !tracks.participant) return false;
+  const body = Buffer.from(JSON.stringify(buildSidecar(tracks)));
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= SIDECAR_ATTEMPTS; attempt++) {
+    try {
+      await ensureBucket();
+      await putObject(recordingSidecarKey(sessionId), body, 'application/json');
+      return true;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < SIDECAR_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, SIDECAR_RETRY_STEP_MS * attempt));
+      }
+    }
   }
-  if (!tracks.mixed && !tracks.participant) return null;
-  const sidecar = buildSidecar(tracks);
-  try {
-    await putObject(recordingSidecarKey(sessionId), Buffer.from(JSON.stringify(sidecar)), 'application/json');
-  } catch (err) {
-    log.error({ err }, `[rec] could not store the recording sidecar for ${sessionId}`);
-  }
-  return sidecar;
+  log.error(
+    { err: lastErr, sessionId, attempts: SIDECAR_ATTEMPTS },
+    `[rec] recording sidecar NOT stored for ${sessionId}: inserted silence in its WAVs cannot be told ` +
+      `from a muted microphone; the WAVs are marked ${TRACK_DATA_METADATA_KEY}=missing`,
+  );
+  return false;
 }
 
 function trackSidecar(track: RecordingTrack, rec: ActiveRecording, totalSamples: number): TrackSidecar {
@@ -396,7 +450,7 @@ function trackSidecar(track: RecordingTrack, rec: ActiveRecording, totalSamples:
     object: track === 'mixed' ? 'recording.wav' : 'participant.wav',
     sampleRate: rec.sampleRate,
     totalSamples,
-    sequenced: rec.sequenced,
+    sequenced: rec.sequenced && rec.unsequenced ? 'partial' : rec.sequenced,
     chunkSamples: rec.chunkSamples,
     chunksReceived: rec.chunksReceived,
     chunksStale: rec.staleChunks,
@@ -409,10 +463,11 @@ function trackSidecar(track: RecordingTrack, rec: ActiveRecording, totalSamples:
     muted: rec.muted,
     mutedSamples: rec.mutedSamples,
     mutedTruncated: rec.mutedTruncated,
-    timelineIntact: rec.sequenced && rec.timelineIntact,
+    timelineIntact: rec.sequenced && !rec.unsequenced && rec.timelineIntact,
     // Stale chunks are not a loss: a duplicate was already stored, and a late
-    // chunk's place was already filled and counted as missing.
-    complete: rec.sequenced ? missing === 0 && !rec.errored : null,
+    // chunk's place was already filled and counted as missing. Unknown when
+    // any batch came without `seq` (its losses cannot be seen).
+    complete: rec.sequenced && !rec.unsequenced ? missing === 0 && !rec.errored : null,
   };
 }
 
@@ -422,7 +477,6 @@ export interface StoredTrack {
   durationMs: number;
   /** Silence inserted for lost audio (ai-therapist-384). */
   insertedSilenceMs: number;
-  sidecar: TrackSidecar;
   /** Audio the participant had NOT muted (all of it for the mix and for legacy clients). */
   unmutedMs: number;
   /** Level of that unmuted audio. */
@@ -549,13 +603,14 @@ async function finalizeTrack(
   sessionId: string,
   track: RecordingTrack,
   rec: ActiveRecording,
+  endError: unknown,
+  trackData: 'stored' | 'missing',
 ): Promise<StoredTrack | null> {
   const persist = track === 'mixed' ? setSessionRecording : setSessionParticipantRecording;
   const objectName = track === 'mixed' ? 'recording.wav' : 'participant.wav';
   try {
-    await new Promise<void>((resolve, reject) => {
-      rec.stream.end((err?: unknown) => (err ? reject(err) : resolve()));
-    });
+    // The buffer was closed by finalize() (before the sidecar was stored).
+    if (endError) throw endError;
 
     if (rec.byteLength === 0) {
       log.info(`[rec] ${sessionId} ${track} had no audio; skipping upload`);
@@ -568,7 +623,7 @@ async function finalizeTrack(
     const key = `sessions/${sessionId}/${objectName}`;
 
     await ensureBucket();
-    await putObject(key, wav, 'audio/wav');
+    await putObject(key, wav, 'audio/wav', { [TRACK_DATA_METADATA_KEY]: trackData });
 
     // Derive duration from the bytes actually on disk, not the in-memory
     // counter — if any write was dropped the two diverge, and the stored
@@ -600,7 +655,6 @@ async function finalizeTrack(
     return {
       durationMs,
       insertedSilenceMs,
-      sidecar: trackSidecar(track, rec, Math.floor(pcm.length / 2)),
       unmutedMs,
       unmutedRmsDbfs,
       gapChunks: rec.gapChunks,

@@ -9,7 +9,7 @@ export interface TrackSummary {
   insertedSilenceMs: number;
   gapCount: number;
   mutedMs: number;
-  sequenced: boolean;
+  sequenced: boolean | 'partial';
   complete: boolean | null;
   timelineIntact: boolean;
 }
@@ -19,6 +19,20 @@ export interface TrackData {
   mixed: TrackSummary | null;
   participant: TrackSummary | null;
   tracksAligned: boolean;
+}
+
+/** Mirrors trackDataStatus in the recording-info response (review of #105). */
+export type TrackDataStatus = 'stored' | 'failed' | 'predates' | 'unknown';
+
+/**
+ * The line shown when a recording has no track data, or null when nothing
+ * needs saying (stored, or a recording from before track data existed).
+ */
+export function trackDataMissingNotice(status: TrackDataStatus | undefined): string | null {
+  if (status === 'failed') return 'Track data missing: inserted silence cannot be told from a muted microphone';
+  if (status === 'unknown')
+    return 'Track data could not be read: inserted silence cannot be told from a muted microphone';
+  return null;
 }
 
 export function formatClock(ms: number): string {
@@ -37,6 +51,9 @@ export function describeTrack(t: TrackSummary, opts: { showMuted: boolean }): { 
   if (!t.sequenced) {
     parts.push('lost audio not tracked (older app version)');
     tone = 'unknown';
+  } else if (t.sequenced === 'partial') {
+    parts.push('app updated mid-session: lost audio only partly tracked, timeline not intact');
+    tone = 'gaps';
   } else if (t.gapCount > 0) {
     parts.push(
       `${seconds(t.insertedSilenceMs)} of silence inserted for lost audio in ${t.gapCount} ${t.gapCount === 1 ? 'gap' : 'gaps'}`,

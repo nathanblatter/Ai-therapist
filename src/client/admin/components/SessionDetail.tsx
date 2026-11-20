@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, AlertTriangle, Eye, FileText, Link2, Check, Clock, Download, Info } from 'react-feather';
-import { describeTrack, type TrackData, type TrackSummary } from '../utils/recordingTrackData';
+import {
+  describeTrack,
+  trackDataMissingNotice,
+  type TrackData,
+  type TrackDataStatus,
+  type TrackSummary,
+} from '../utils/recordingTrackData';
 import ConversationBubble from './ConversationBubble';
 import SessionInsightsPanel from './SessionInsightsPanel';
 import SessionEvalPanel from './SessionEvalPanel';
@@ -177,6 +183,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     durationMs: number | null;
     participantTrack: { url: string } | null;
     trackData: TrackData | null;
+    trackDataStatus?: TrackDataStatus;
   } | null>(null);
   const [redactionStatus, setRedactionStatus] = useState<RedactionStatus | null>(null);
   const [feedback, setFeedback] = useState<SessionFeedback | null>(null);
@@ -239,6 +246,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
           durationMs: number | null;
           participantTrack?: { url: string } | null;
           trackData?: TrackData | null;
+          trackDataStatus?: TrackDataStatus;
         }>(`/admin/api/sessions/${sessionId}/recording-info`);
         if (!cancelled) {
           setRecording(
@@ -248,6 +256,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
                   durationMs: info.durationMs,
                   participantTrack: info.participantTrack ?? null,
                   trackData: info.trackData ?? null,
+                  trackDataStatus: info.trackDataStatus,
                 }
               : null,
           );
@@ -931,6 +940,12 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
                 Your browser does not support audio playback.
               </audio>
               {recording.trackData?.mixed && <TrackDataLine summary={recording.trackData.mixed} showMuted={false} />}
+              {!recording.trackData && trackDataMissingNotice(recording.trackDataStatus) && (
+                <p className="mt-1 flex items-center gap-1 text-xs text-amber-700">
+                  <AlertTriangle size={12} aria-hidden="true" className="shrink-0" />
+                  <span>{trackDataMissingNotice(recording.trackDataStatus)}</span>
+                </p>
+              )}
               <div className="mt-2 flex items-center justify-between">
                 <span className="text-xs text-gray-500">Downloads are recorded in the data access log.</span>
                 <a

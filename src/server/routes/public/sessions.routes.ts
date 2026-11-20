@@ -8,7 +8,7 @@
 // nothing for the client to register. See that route for the full rationale.
 import { Router, json } from 'express';
 import { requireAuth } from '../../middleware/auth.js';
-import { appendChunk, isFinalized } from '../../services/recorder.service.js';
+import { appendChunk, isFinalized, trackSampleRate } from '../../services/recorder.service.js';
 import { noteSessionActivity } from '../../services/sessionLifecycle.service.js';
 import {
   getSession,
@@ -31,6 +31,11 @@ const log = createLogger('sessionsRoutes');
 /** Typed-text relay cap (the composer allows 4000; a shared journal entry rides
  *  the same path, so leave headroom). */
 const PARTICIPANT_TEXT_MAX_CHARS = 10_000;
+
+/** Sample rates a browser AudioContext captures at (8 to 96 kHz); the audio route refuses others. */
+export const CAPTURE_SAMPLE_RATES: ReadonlySet<number> = new Set([
+  8000, 11025, 16000, 22050, 24000, 32000, 44100, 48000, 88200, 96000,
+]);
 
 export default function sessionsRoutes(): Router {
   const router = Router();
@@ -55,6 +60,12 @@ export default function sessionsRoutes(): Router {
     };
     if (!sessionId || !Array.isArray(chunks) || typeof sampleRate !== 'number') {
       return res.status(400).json({ error: 'chunks[] and sampleRate required' });
+    }
+    // The browser sends its AudioContext's rate, always one of the standard
+    // capture rates (review of #105): the recorder sizes inserted silence and
+    // the WAV header from it, so anything else is refused.
+    if (!CAPTURE_SAMPLE_RATES.has(sampleRate)) {
+      return res.status(400).json({ error: 'invalid sampleRate' });
     }
     // Optional (ai-therapist-372): `seq` is the per-track index of the batch's
     // first chunk, so the recorder can log gaps and drop stale (duplicate or
@@ -99,6 +110,12 @@ export default function sessionsRoutes(): Router {
     // Recording already closed (session ended / auto-terminated): tell the
     // client to stop its uploader instead of silently discarding forever.
     if (isFinalized(sessionId)) return res.sendStatus(410);
+    // A track is one rate from its first batch: audio at another rate appended
+    // to it would play at the wrong speed and misplace every later chunk.
+    const openRate = trackSampleRate(sessionId, recordingTrack);
+    if (openRate !== null && openRate !== sampleRate) {
+      return res.status(400).json({ error: 'sampleRate differs from this track' });
+    }
 
     // A batch landing at all means the participant is still here — cancels
     // any pending abandon-check scheduled from an earlier socket disconnect.

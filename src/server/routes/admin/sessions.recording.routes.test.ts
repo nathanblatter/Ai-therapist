@@ -200,6 +200,22 @@ describe('GET /admin/api/sessions/:sessionId/recording', () => {
     expect((await request(makeApp()).get('/admin/api/sessions/s1/recording-tracks')).status).toBe(404);
   });
 
+  it('recording-info tells a failed sidecar from a recording made before sidecars (review of #105)', async () => {
+    getObjectStreamMock.mockRejectedValue(Object.assign(new Error('NoSuchKey'), { name: 'NoSuchKey' }));
+    const status = async (head: unknown) => {
+      headObjectMock.mockResolvedValueOnce(head);
+      const res = await request(makeApp()).get('/admin/api/sessions/s1/recording-info');
+      expect(res.body.trackData).toBeNull();
+      return res.body.trackDataStatus;
+    };
+    const wav = { contentLength: WAV.length, contentType: 'audio/wav' };
+    expect(await status({ ...wav, metadata: { 'track-data': 'missing' } })).toBe('failed');
+    expect(await status({ ...wav, metadata: {} })).toBe('predates');
+    expect(await status(wav)).toBe('predates');
+    expect(await status({ ...wav, metadata: { 'track-data': 'stored' } })).toBe('unknown');
+    expect(await status(null)).toBe('unknown');
+  });
+
   it('404s when no recording is ready, without an audit row', async () => {
     getSessionRecordingMock.mockResolvedValueOnce({ status: 'pending', objectKey: null });
     const res = await request(makeApp()).get('/admin/api/sessions/s1/recording?download=1');

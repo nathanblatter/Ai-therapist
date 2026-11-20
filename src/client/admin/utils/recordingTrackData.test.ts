@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { describeTrack, formatClock, type TrackSummary } from './recordingTrackData';
+import { describeTrack, formatClock, trackDataMissingNotice, type TrackSummary } from './recordingTrackData';
 
 const base: TrackSummary = {
   durationMs: 140_000,
@@ -42,5 +42,25 @@ describe('recording track line in the admin session view (ai-therapist-384)', ()
       text: '2:20 long • lost audio not tracked (older app version) • 30.0 s muted',
       tone: 'unknown',
     });
+  });
+
+  it('a track whose app was updated mid-session is not shown as intact (review of #105)', () => {
+    const t = { ...base, sequenced: 'partial' as const, complete: null, timelineIntact: false };
+    expect(describeTrack(t, { showMuted: false })).toEqual({
+      text: '2:20 long • app updated mid-session: lost audio only partly tracked, timeline not intact',
+      tone: 'gaps',
+    });
+  });
+
+  it('says when track data failed to store, and nothing for a recording from before it existed (review of #105)', () => {
+    expect(trackDataMissingNotice('failed')).toBe(
+      'Track data missing: inserted silence cannot be told from a muted microphone',
+    );
+    expect(trackDataMissingNotice('unknown')).toBe(
+      'Track data could not be read: inserted silence cannot be told from a muted microphone',
+    );
+    expect(trackDataMissingNotice('predates')).toBeNull();
+    expect(trackDataMissingNotice('stored')).toBeNull();
+    expect(trackDataMissingNotice(undefined)).toBeNull();
   });
 });

@@ -49,7 +49,10 @@ arrival to now) plus 60 s. A capped fill is listed with `capped: true` and
 `missingSamples`; the track's timeline is not intact after it
 (`timelineIntact: false`). The sample rate is the client's own number, so the
 caps are counted at no more than 96 kHz (a bogus rate cannot scale them), and
-a track with no usable rate gets no fills.
+a track with no usable rate gets no fills. The audio route also refuses (400)
+a `sampleRate` that is not a browser capture rate (8000, 11025, 16000, 22050,
+24000, 32000, 44100, 48000, 88200 or 96000 Hz) and a batch whose rate differs
+from its track's first batch (it would play at the wrong speed).
 
 Chunks whose index has already passed (a retry the server had in fact stored,
 or a late arrival whose place was already filled) are dropped and counted
@@ -61,8 +64,16 @@ sidecar is for.
 
 ## The sidecar: `recording-tracks.json`
 
-Written at finalisation next to the WAVs, deleted with them by the retention
-job. Numbers only: no transcript, no audio, no identifier beyond the session
+Written at finalisation **before** the WAVs it describes (retried up to 3
+times), deleted with them by the retention job. Each WAV stored since then
+carries object metadata `track-data`: `stored`, or `missing` when the sidecar
+could not be stored (an error is logged: inserted silence in those WAVs cannot
+be told from a muted microphone). The admin recording-info response reports
+`trackDataStatus`: `stored`; `failed` (the WAV says `missing`); `predates` (a
+WAV without the metadata: recorded before the sidecar existed); `unknown` (the
+WAV says `stored` or cannot be checked, but the sidecar cannot be read now).
+Because the sidecar goes first, it can list a track whose WAV upload then
+failed: that track's status on the session row is `failed`. Numbers only: no transcript, no audio, no identifier beyond the session
 the path already names. Positions and lengths are in **samples of that
 track's WAV** (divide by `sampleRate` for seconds); ranges are half-open,
 `[start, start + length)`. Defined in
@@ -104,28 +115,51 @@ track's WAV** (divide by `sampleRate` for seconds); ranges are half-open,
 | Field | Meaning |
 | --- | --- |
 | `sampleRate`, `totalSamples` | Of the WAV, inserted silence included. |
-| `sequenced` | The client numbered its chunks (every client since PR #95). `false`: an older client; nothing was filled and losses are unknown. |
+| `sequenced` | The client numbered its chunks (every client since PR #95). `false`: an older client; nothing was filled and losses are unknown. `"partial"`: some batches came numbered and some not (the participant reloaded into a new app version mid-session); `timelineIntact` is then false and `complete` null. |
 | `chunkSamples` | Chunk size used to size the fills. |
 | `chunksReceived` / `chunksStale` / `chunksMissing` | Chunks of real audio written; dropped as duplicates or late; known never to have arrived (gaps and lost tail). |
 | `clientChunksPushed` | The highest count of captured chunks the client reported; `null` if it reported none. |
 | `gaps` | Inserted silence. `reason`: `sequence_gap` (between two chunks that arrived) or `lost_tail` (after the last one). `capped` / `missingSamples` on a capped fill. At most 5,000 listed (`gapsTruncated`); `gapCount` and `insertedSilenceSamples` cover all. |
 | `muted` | Real audio recorded while the participant's mic was muted, built from the per-chunk `muted` flag the client sends with every chunk (more reliable than the `mic_timeline` toggle event). Muted stretches either side of a gap are listed separately. At most 5,000 listed (`mutedTruncated`); `mutedSamples` covers all. Empty for the mix. |
-| `timelineIntact` | Sequenced and no capped fill: sample *n* is chunk-index time *n*. |
-| `complete` | Sequenced, nothing missing, no server write error. `null` when not sequenced (unknown). |
+| `timelineIntact` | Sequenced throughout and no capped fill: sample *n* is chunk-index time *n*. |
+| `complete` | Sequenced throughout, nothing missing, no server write error. `null` when not (unknown). |
 | `tracksAligned` | Both tracks present, both timelines intact, same rate and chunk size. Lengths can still differ at the end (one track's tail unknown). |
 
 Staff see it in the admin session view, under each player, as one line, for
 example `2:20 long • 1.2 s of silence inserted for lost audio in 2 gaps • 30.0 s muted`
-(the mix shows no muted time), and can download the whole file with
+(the mix shows no muted time). When the sidecar failed to store they see
+`Track data missing: inserted silence cannot be told from a muted microphone`
+(or `Track data could not be read: ...` for `unknown`); a recording from before
+the sidecar shows nothing. They can download the whole file with
 **Track data (JSON)** (`GET /admin/api/sessions/:id/recording-tracks?download=1`,
 same access rules as playback). The dataset export does not carry it; the
 sidecar travels with the WAVs.
 
-## Pause and timing analysis must exclude gaps and muted stretches
+## Pause and timing analysis: inserted silence (a rule) and muted stretches (a decision)
 
-Before measuring pauses, speech rate or timing on `participant.wav`, drop every
-range in `gaps` and in `muted`, and treat a silent run that touches one as of
-unknown length (not a pause):
+**Inserted silence must be excluded.** A range in `gaps` is audio that never
+arrived: there is nothing to measure, so drop it and treat a silent run that
+touches one as of unknown length (not a pause).
+
+**Muted stretches are a decision for the study owner, not yet made.** The
+phase-2 application promises "pause structure" without defining how a muted
+mic counts. A participant who mutes to think produces exact zeros of a known
+length (the sidecar's `muted` ranges), not lost audio. Two defensible choices:
+
+- *Exclude* muted stretches like inserted silence (what the built-in job does
+  today): pause measures describe only time the mic was open; a mute-to-think
+  stretch is not a pause, and the muted time is reported separately
+  (`mutedSamples`).
+- *Count* a muted stretch as a pause, flagged: its length is exact (`muted`
+  range), so it can enter pause counts and durations as its own category
+  ("muted pause"), letting analysis include or drop it later.
+
+The sidecar supports either: `muted` gives each stretch's exact position and
+length, `gaps` the inserted silence, both in samples of the WAV. Until the
+owner decides, the code keeps excluding muted stretches; whichever is chosen
+should be written into the analysis plan.
+
+Sketch (both lists excluded, the current behaviour):
 
 ```python
 import json, soundfile as sf
@@ -138,9 +172,9 @@ excluded = sorted((r["start"], r["start"] + r["length"]) for r in side["gaps"] +
 
 Also check `timelineIntact` (after a capped fill, positions past it are not
 the client's time) and `sequenced` (an older client: losses are unknown, the
-track may be short). The built-in acoustic feature job
-(`acousticFeatures.service.ts`, off unless `features.telemetry_acoustic_features`)
-already does this: frames touching an excluded range are left out of every
+track may be short; `"partial"`: the timeline is not intact). The built-in
+acoustic feature job (`acousticFeatures.service.ts`, off unless
+`features.telemetry_acoustic_features`) excludes both lists today: frames touching an excluded range are left out of every
 measure, a pause cut by one is not counted, and `excluded_ms` records how much
 was left out. Recordings without a sidecar are measured whole.
 
@@ -166,7 +200,10 @@ A browser that loaded the app before a deploy keeps its old uploader until it
 reloads. Clients from before PR #95 send no `seq`, `muted` or `pushed`: their
 chunks are appended exactly as before (no fill), and the sidecar says
 `sequenced: false`. Clients from PR #95 send `seq` and `muted` but not `pushed`:
-gaps are filled, a lost tail is not (`clientChunksPushed: null`).
+gaps are filled, a lost tail is not (`clientChunksPushed: null`). A
+participant who reloads into the new app mid-session can feed one track both
+kinds of batch: the sidecar then says `sequenced: "partial"`,
+`timelineIntact: false`, `complete: null`.
 
 ## Limits
 

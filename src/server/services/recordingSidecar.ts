@@ -17,6 +17,12 @@ import { getObjectStream } from '../config/objectStorage.js';
 
 export const SIDECAR_OBJECT_NAME = 'recording-tracks.json';
 export const SIDECAR_VERSION = 1;
+/**
+ * WAV object metadata key (review of #105): 'stored', or 'missing' when the
+ * sidecar upload failed (inserted silence then cannot be told from a muted
+ * mic). Absent on recordings made before the sidecar existed.
+ */
+export const TRACK_DATA_METADATA_KEY = 'track-data';
 
 /** Object key of a session's sidecar, next to recording.wav and participant.wav. */
 export function recordingSidecarKey(sessionId: string): string {
@@ -49,8 +55,13 @@ export interface TrackSidecar {
   sampleRate: number;
   /** Samples in the WAV, inserted silence included. */
   totalSamples: number;
-  /** The client sent chunk indexes (every client since PR #95); false for older clients. */
-  sequenced: boolean;
+  /**
+   * The client sent chunk indexes (every client since PR #95); false for older
+   * clients; 'partial' when some batches came with indexes and some without
+   * (the app was updated mid-session): the timeline is then not intact and
+   * losses are unknown.
+   */
+  sequenced: boolean | 'partial';
   /** Samples per chunk used to size the fills (4096 from the browser); null if never known. */
   chunkSamples: number | null;
   /** Chunks of real audio written to the WAV. */
@@ -115,7 +126,7 @@ export interface TrackSummary {
   insertedSilenceMs: number;
   gapCount: number;
   mutedMs: number;
-  sequenced: boolean;
+  sequenced: boolean | 'partial';
   complete: boolean | null;
   timelineIntact: boolean;
 }

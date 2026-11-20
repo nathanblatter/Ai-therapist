@@ -42,6 +42,8 @@ const {
   pcm16RmsDbfs,
   pcm16SumSquares,
   MAX_FILL_SAMPLE_RATE,
+  SIDECAR_ATTEMPTS,
+  trackSampleRate,
 } = await import('./recorder.service.js');
 
 // The WAV uploads only; finalize also stores the JSON sidecar (ai-therapist-384).
@@ -84,7 +86,8 @@ describe('recorder.service', () => {
 
     await finalize(sessionId);
 
-    expect(ensureBucketMock).toHaveBeenCalledOnce();
+    // Once for the sidecar, once for the WAV (the sidecar goes first).
+    expect(ensureBucketMock).toHaveBeenCalledTimes(2);
     expect(wavPuts()).toHaveLength(1);
 
     const [key, body, contentType] = wavPuts()[0];
@@ -229,6 +232,7 @@ describe('recorder.service', () => {
     appendChunk(sessionId, pcmChunk(4096), 48000, 'mixed');
     appendChunk(sessionId, pcmChunk(4096), 48000, 'participant');
     putObjectMock
+      .mockResolvedValueOnce(undefined) // sidecar
       .mockResolvedValueOnce(undefined) // mixed upload succeeds
       .mockRejectedValueOnce(new Error('minio hiccup')); // participant fails
 
@@ -371,7 +375,10 @@ describe('a voice session without usable participant audio is flagged (ai-therap
     const sessionId = `sess-372-failed-${Date.now()}`;
     feed(sessionId, 'mixed', 12);
     feed(sessionId, 'participant', 12);
-    putObjectMock.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('minio hiccup'));
+    putObjectMock
+      .mockResolvedValueOnce(undefined) // sidecar
+      .mockResolvedValueOnce(undefined) // mix
+      .mockRejectedValueOnce(new Error('minio hiccup')); // participant
     await finalize(sessionId);
     expect(flagProblemMock).toHaveBeenCalledWith(sessionId, expect.objectContaining({ problem: 'missing' }));
   });
@@ -783,8 +790,12 @@ describe('lost audio is filled with silence and described in the sidecar (ai-the
       return v;
     });
     expect(new Set(strings)).toEqual(new Set(['recording.wav', 'participant.wav']));
-    // Written after both WAVs.
-    expect(putObjectMock.mock.calls.at(-1)?.[0]).toBe(`sessions/${s}/recording-tracks.json`);
+    // Written BEFORE both WAVs (review of #105), and each WAV says so.
+    expect(putObjectMock.mock.calls[0][0]).toBe(`sessions/${s}/recording-tracks.json`);
+    for (const [, , type, meta] of wavPuts()) {
+      expect(type).toBe('audio/wav');
+      expect(meta).toEqual({ 'track-data': 'stored' });
+    }
   });
 
   it('a sidecar upload failure never marks a track failed', async () => {
@@ -796,6 +807,60 @@ describe('lost audio is filled with silence and described in the sidecar (ai-the
     await finalize(s);
     expect(setRecordingMock).toHaveBeenCalledWith(s, expect.objectContaining({ status: 'ready' }));
     expect(setRecordingMock).not.toHaveBeenCalledWith(s, { status: 'failed' });
+    // Retried a bounded number of times, then recorded on the WAV (review of #105).
+    const sidecarTries = putObjectMock.mock.calls.filter((c) => String(c[0]).endsWith('.json'));
+    expect(sidecarTries).toHaveLength(SIDECAR_ATTEMPTS);
+    expect(wavPuts()[0][3]).toEqual({ 'track-data': 'missing' });
+  });
+
+  it('a sidecar upload that fails once is retried and stored (review of #105)', async () => {
+    const s = sid('sidecar-retry');
+    send(s, 'participant', [0, 2]);
+    let failures = 0;
+    putObjectMock.mockImplementation(async (key: string) => {
+      if (key.endsWith('.json') && failures++ === 0) throw new Error('minio hiccup');
+    });
+    await finalize(s);
+    expect(putObjectMock.mock.calls.filter((c) => String(c[0]).endsWith('.json'))).toHaveLength(2);
+    expect(sidecarOf(s).tracks.participant.gapCount).toBe(1);
+    expect(wavPuts()[0][3]).toEqual({ 'track-data': 'stored' });
+  });
+
+  it('reports the rate a track was opened at, for the route to refuse another (review of #105)', async () => {
+    const s = sid('rate');
+    expect(trackSampleRate(s, 'participant')).toBeNull();
+    send(s, 'participant', [0], { sampleRate: 44100 });
+    expect(trackSampleRate(s, 'participant')).toBe(44100);
+    expect(trackSampleRate(s, 'mixed')).toBeNull();
+    await finalize(s);
+    expect(trackSampleRate(s, 'participant')).toBeNull();
+  });
+
+  it('a track fed unsequenced and then sequenced batches is not claimed intact (review of #105)', async () => {
+    const s = sid('mixed-clients');
+    // An older bundle (no seq), then the participant reloads into the new one.
+    appendChunk(s, marked(0), 48000, 'participant');
+    appendChunk(s, marked(1), 48000, 'participant');
+    send(s, 'participant', [0, 1, 3]);
+    await finalize(s);
+    const t = sidecarOf(s).tracks.participant;
+    expect(t.sequenced).toBe('partial');
+    expect(t.timelineIntact).toBe(false);
+    expect(t.complete).toBeNull();
+    expect(sidecarOf(s).tracksAligned).toBe(false);
+    // Sequenced only, and unsequenced only, are unchanged.
+    const a = sid('seq-only');
+    send(a, 'participant', [0, 1]);
+    const b = sid('unseq-only');
+    appendChunk(b, marked(0), 48000, 'participant');
+    await finalize(a);
+    await finalize(b);
+    expect(sidecarOf(a).tracks.participant).toEqual(
+      expect.objectContaining({ sequenced: true, timelineIntact: true, complete: true }),
+    );
+    expect(sidecarOf(b).tracks.participant).toEqual(
+      expect.objectContaining({ sequenced: false, timelineIntact: false, complete: null }),
+    );
   });
 
   it('judges a participant track "short" on the audio received, not on inserted silence', () => {

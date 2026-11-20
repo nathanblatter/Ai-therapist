@@ -28,7 +28,12 @@ import { generateSessionNameAsync } from '../../services/sessionName.service.js'
 import { getSessionRecording } from '../../db/recording.queries.js';
 import { getParticipantRecordingForSession } from '../../db/acousticFeatures.queries.js';
 import { getObjectStream, headObject } from '../../config/objectStorage.js';
-import { readRecordingSidecar, summarizeTrack, type TrackSummary } from '../../services/recordingSidecar.js';
+import {
+  readRecordingSidecar,
+  summarizeTrack,
+  TRACK_DATA_METADATA_KEY,
+  type TrackSummary,
+} from '../../services/recordingSidecar.js';
 
 import { createLogger } from '../../utils/logger.js';
 
@@ -290,6 +295,13 @@ export default function adminSessionsRoutes(): Router {
           participant: TrackSummary | null;
           tracksAligned: boolean;
         } | null = null;
+        // Why there is none, when there is none (review of #105): each WAV
+        // stored since the sidecar existed says in its object metadata whether
+        // the sidecar was stored. 'failed': it was not, so inserted silence
+        // cannot be told from a muted mic; 'predates': a recording from before
+        // sidecars; 'unknown': the WAV says stored (or cannot be checked) but
+        // the sidecar cannot be read now.
+        let trackDataStatus: 'stored' | 'failed' | 'predates' | 'unknown' = 'stored';
         if (sidecar) {
           trackData = {
             url: `/admin/api/sessions/${sessionId}/recording-tracks`,
@@ -297,6 +309,10 @@ export default function adminSessionsRoutes(): Router {
             participant: sidecar.tracks.participant ? summarizeTrack(sidecar.tracks.participant) : null,
             tracksAligned: sidecar.tracksAligned,
           };
+        } else {
+          const meta = await headObject(rec.objectKey);
+          const flag = meta?.metadata?.[TRACK_DATA_METADATA_KEY];
+          trackDataStatus = !meta ? 'unknown' : flag === 'missing' ? 'failed' : flag ? 'unknown' : 'predates';
         }
         res.json({
           available: true,
@@ -306,6 +322,7 @@ export default function adminSessionsRoutes(): Router {
           url: `/admin/api/sessions/${sessionId}/recording`,
           participantTrack,
           trackData,
+          trackDataStatus,
         });
       } catch (err) {
         log.error({ err }, 'Failed to fetch recording info');
