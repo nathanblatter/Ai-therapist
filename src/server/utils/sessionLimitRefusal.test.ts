@@ -91,3 +91,20 @@ describe('buildTooManyAttemptsRefusal', () => {
     expect(body.message).toMatch(/988/);
   });
 });
+
+// system_config.crisis_contact.text is stored as "HOME to 741741" (migration
+// 090) on some databases and "Text HOME to 741741" on others. The refusal used
+// to lower-case the first letter, so the first form read "or hOME to 741741"
+// (seen in the nightly eval run of 2026-11-20).
+describe('the text line reads the same whichever way it is stored', () => {
+  const contact = (text: string) => ({ hotline: '988 Suicide & Crisis Lifeline', phone: '988', text, enabled: true });
+  const want = /any time at 988, or text HOME to 741741\.$/;
+
+  it.each(['HOME to 741741', 'Text HOME to 741741', 'text HOME to 741741', '  TEXT  HOME to 741741 '])(
+    'stored as %j',
+    (text) => {
+      expect(buildTooManyAttemptsRefusal(contact(text)).message).toMatch(want);
+      expect(buildTooManyAttemptsRefusal(contact(text)).message).not.toMatch(/hOME|[Tt]ext\s+[Tt]ext/);
+    },
+  );
+});

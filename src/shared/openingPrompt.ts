@@ -60,10 +60,29 @@ const OPENING_LANGUAGE_NAMES: Record<string, string> = {
   ru: 'Russian',
 };
 
+/**
+ * The configured text line as the words that follow "text": "HOME to 741741".
+ * system_config.crisis_contact.text is stored both ways ("HOME to 741741" since
+ * migration 090, "Text HOME to 741741" in the fallback defaults and on older
+ * rows), and a renderer that assumed one form printed "text Text HOME to
+ * 741741" or "hOME to 741741" for the other. Every participant-facing sentence
+ * goes through this and writes the word "text" itself ("Text: HOME to 741741"
+ * is accepted too). Empty when unset, or when the value is only the word.
+ */
+export function crisisTextLineWords(text: string | null | undefined): string {
+  return typeof text === 'string' ? text.trim().replace(/^text(?:\s*:\s*|\s+|$)/i, '') : '';
+}
+
+/** " or text HOME to 741741" (with `lead`), or '' when no text line is configured. */
+export function crisisTextLinePhrase(text: string | null | undefined, lead = ' or '): string {
+  const words = crisisTextLineWords(text);
+  return words ? `${lead}text ${words}` : '';
+}
+
 /** The AI disclosure preamble. `includeVoiceNote` adds the microphone line. */
 export function openingPreamble(crisis: OpeningCrisisContact, includeVoiceNote = true): string {
   const crisisText = crisis.enabled
-    ? `call the ${crisis.hotline} crisis line at ${crisis.phone}${crisis.text ? ' or text ' + crisis.text : ''}`
+    ? `call the ${crisis.hotline} crisis line at ${crisis.phone}${crisisTextLinePhrase(crisis.text)}`
     : 'call or text 988 (Suicide and Crisis Lifeline), or call 911 for immediate danger';
 
   const voiceNote = includeVoiceNote

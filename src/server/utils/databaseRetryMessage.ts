@@ -7,7 +7,7 @@
 // Language: there is no localisation for server-sent participant strings in
 // this codebase (the session-limit refusal, the minor goodbye and this message
 // are all English), so this stays English like them.
-import type { OpeningCrisisContact } from '../../shared/openingPrompt.js';
+import { crisisTextLinePhrase, type OpeningCrisisContact } from '../../shared/openingPrompt.js';
 import { DATABASE_RETRY_MESSAGE } from './dbErrors.js';
 import { peekCachedSystemConfig } from './sessionHelpers.js';
 
@@ -19,8 +19,7 @@ export function buildDatabaseRetryMessage(contact: OpeningCrisisContact | null |
   const hotline = typeof contact?.hotline === 'string' ? contact.hotline.trim() : '';
   const phone = typeof contact?.phone === 'string' ? contact.phone.trim() : '';
   if (!contact || contact.enabled === false || !hotline || !phone) return DATABASE_RETRY_MESSAGE;
-  const text = typeof contact.text === 'string' ? contact.text.trim() : '';
-  const textPart = text ? `, or ${text.charAt(0).toLowerCase()}${text.slice(1)}` : '';
+  const textPart = crisisTextLinePhrase(contact.text, ', or ');
   return `${RETRY_SENTENCE} If you are in crisis, contact the ${hotline} at ${phone}${textPart}, or call 911.`;
 }
 

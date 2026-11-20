@@ -10,6 +10,7 @@ import { ArrowLeft, ChevronRight, Clock, Info, Lock, MessageSquare, Phone, Send 
 import { useMessaging, type ParticipantMessage, type ParticipantThread } from '../hooks/useMessaging';
 import { timeLabel } from '../../shared/format';
 import type { CrisisContact } from '../../../shared/systemConfig';
+import { crisisTextLinePhrase } from '../../../shared/openingPrompt';
 
 // Rendered contact always has defaults filled in, so no optional fields.
 // CrisisContact.enabled is intentionally unread here: the safety banners
@@ -48,8 +49,7 @@ function NotForEmergenciesBanner({ crisis }: { crisis: DisplayCrisisContact }) {
           <a href={`tel:${crisis.phone}`} className="underline">
             {crisis.phone}
           </a>{' '}
-          &mdash; the {crisis.hotline} &mdash; or{' '}
-          {crisis.text.toLowerCase().startsWith('text') ? crisis.text : `text ${crisis.text}`}.
+          &mdash; the {crisis.hotline} &mdash; or {crisisTextLinePhrase(crisis.text, '')}.
         </p>
       </div>
     </div>

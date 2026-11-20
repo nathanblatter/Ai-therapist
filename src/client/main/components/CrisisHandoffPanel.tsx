@@ -18,6 +18,7 @@
 import { useEffect, useState } from 'react';
 import { Loader, MessageSquare, Mic, Phone } from 'react-feather';
 import type { CrisisContact } from '../../../shared/systemConfig';
+import { crisisTextLineWords } from '../../../shared/openingPrompt';
 import type { HandoffKind } from '../../../shared/textHandoff';
 
 const DEFAULT_PHONE = '988';
@@ -47,7 +48,7 @@ export interface CrisisLineActions {
 export function crisisLineActions(contact: CrisisContact | null | undefined): CrisisLineActions {
   const enabled = contact != null && contact.enabled !== false;
   const phone = (enabled && contact.phone?.trim()) || DEFAULT_PHONE;
-  const textLine = (enabled && contact.text?.trim()) || DEFAULT_TEXT_LINE;
+  const textLine = (enabled && crisisTextLineWords(contact.text)) || DEFAULT_TEXT_LINE;
   const phoneDigits = dialable(phone, DEFAULT_PHONE);
   const text =
     phoneDigits === DEFAULT_PHONE

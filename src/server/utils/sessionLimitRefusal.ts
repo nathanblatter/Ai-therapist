@@ -11,7 +11,7 @@
 // usually just between sessions, not in crisis, so the resources are offered
 // ("if you would like support before then"), never implied to be needed, and
 // nothing here claims anyone was told or will reach out.
-import { DEFAULT_CRISIS_CONTACT, type OpeningCrisisContact } from '../../shared/openingPrompt.js';
+import { crisisTextLinePhrase, DEFAULT_CRISIS_CONTACT, type OpeningCrisisContact } from '../../shared/openingPrompt.js';
 import { getSystemConfig, type SessionLimitResult } from './sessionHelpers.js';
 
 export type SessionLimitDenied = Extract<SessionLimitResult, { allowed: false }>;
@@ -67,7 +67,7 @@ export function resolveCrisisResources(contact: OpeningCrisisContact | null | un
 
 /** "If you would like support before then, ..." built from the crisis contact. */
 export function crisisResourcesSentence(r: SessionLimitCrisisResources): string {
-  const text = r.text ? `, or ${r.text.charAt(0).toLowerCase()}${r.text.slice(1)}` : '';
+  const text = crisisTextLinePhrase(r.text, ', or ');
   return `If you would like support before then, you can reach the ${r.hotline} any time at ${r.phone}${text}.`;
 }
 

@@ -13,7 +13,7 @@
 import type { ToolDefinition } from '../services/toolRegistry.service.js';
 import { toRealtimeTools } from '../services/toolRegistry.service.js';
 import { GROK_SAMPLE_RATE } from '../../shared/grokVoiceProtocol.js';
-import { openingDeliveryInstruction } from '../../shared/openingPrompt.js';
+import { crisisTextLinePhrase, openingDeliveryInstruction } from '../../shared/openingPrompt.js';
 
 import { createLogger } from './logger.js';
 
@@ -330,7 +330,7 @@ export function buildGrokCrisisPhrase(crisis: CrisisContactLike | undefined): st
   const enabled = crisis?.enabled !== false && Boolean(crisis?.phone);
   return enabled
     ? `call the ${crisis?.hotline ?? '988 Suicide & Crisis Lifeline'} crisis line at ${crisis?.phone}` +
-        (crisis?.text ? ` or text ${crisis.text}` : '')
+        crisisTextLinePhrase(crisis?.text)
     : 'call or text 988 (Suicide and Crisis Lifeline), or call 911 for immediate danger';
 }
 

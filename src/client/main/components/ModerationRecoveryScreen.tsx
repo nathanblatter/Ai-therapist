@@ -19,6 +19,7 @@
 // It is presentation only; the hand-off itself lives in App.tsx.
 import { Heart, Loader, Phone, MessageSquare, AlertTriangle, RefreshCw } from 'react-feather';
 import type { CrisisContact } from '../../../shared/systemConfig';
+import { crisisTextLineWords } from '../../../shared/openingPrompt';
 
 export type ModerationRecoveryStage =
   /** Moving the conversation to typed chat. The expected path. */
@@ -54,7 +55,7 @@ export default function ModerationRecoveryScreen({ stage, crisisContact, onRetry
   const enabled = crisisContact.enabled !== false;
   const hotline = (enabled && crisisContact.hotline) || DEFAULT_HOTLINE;
   const phone = (enabled && crisisContact.phone) || DEFAULT_PHONE;
-  const textLine = (enabled && crisisContact.text) || DEFAULT_TEXT;
+  const textLine = (enabled && crisisTextLineWords(crisisContact.text)) || DEFAULT_TEXT;
 
   return (
     <>

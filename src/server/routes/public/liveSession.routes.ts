@@ -71,6 +71,7 @@ import {
   hasStudyContact,
 } from '../../utils/liveSessionConfig.js';
 import {
+  crisisTextLinePhrase,
   DEFAULT_CRISIS_CONTACT,
   LIVE_RECOVERY_NUDGE_LOG,
   liveOpeningInstruction,
@@ -307,7 +308,7 @@ export default function liveSessionRoutes(): Router {
         const crisisContact = (systemConfig.crisis_contact ?? {}) as { phone?: string; text?: string };
         const crisisLine = [
           crisisContact.phone ? `${crisisContact.phone}` : '988',
-          crisisContact.text ? `or text ${crisisContact.text}` : '',
+          crisisTextLinePhrase(crisisContact.text, 'or '),
         ]
           .filter(Boolean)
           .join(' ');
