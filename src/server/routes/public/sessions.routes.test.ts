@@ -108,8 +108,29 @@ describe('POST /api/sessions/:id/audio recording-consent gate (039/086)', () => 
     ]);
   });
 
-  it('refuses a malformed seq or muted list', async () => {
-    for (const extra of [{ seq: -1 }, { seq: 1.5 }, { seq: '3' }, { muted: [5] }, { muted: 'all' }, { muted: [0.5] }]) {
+  it('passes the client count of captured chunks to every chunk (ai-therapist-384)', async () => {
+    const res = await request(makeApp())
+      .post(`/api/sessions/${SESSION_ID}/audio`)
+      .send({ chunks: ['AAAA', 'BBBB'], sampleRate: 48000, track: 'participant', seq: 3, pushed: 9 });
+    expect(res.status).toBe(204);
+    expect(recorderMocks.appendChunk.mock.calls.map((c) => c[4])).toEqual([
+      { seq: 3, muted: false, pushed: 9 },
+      { seq: 4, muted: false, pushed: 9 },
+    ]);
+  });
+
+  it('refuses a malformed seq, muted list or pushed count', async () => {
+    for (const extra of [
+      { seq: -1 },
+      { seq: 1.5 },
+      { seq: '3' },
+      { muted: [5] },
+      { muted: 'all' },
+      { muted: [0.5] },
+      { pushed: -1 },
+      { pushed: '9' },
+      { pushed: 2.5 },
+    ]) {
       const res = await request(makeApp())
         .post(`/api/sessions/${SESSION_ID}/audio`)
         .send({ ...body, ...extra });

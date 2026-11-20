@@ -22,8 +22,11 @@ const log = createLogger('clientEventsRoutes');
 export const CLIENT_EVENT_KINDS = [
   'js_error',
   // End of a voice session: the participant's mute/unmute history for the
-  // assistant's voice on their own device, as offsets in ms from the start of
-  // the session's audio, plus muted and total ms and how many crisis signals
+  // assistant's voice on their own device, as offsets in ms on the client's
+  // monotonic clock (performance.now) from when the voice session began
+  // setting up, before the mic and the connection (not audio samples, so it
+  // runs ahead of the recordings by the connect time: see mic_timeline
+  // below), plus muted and total ms and how many crisis signals
   // arrived while muted. Numbers only. Playback only: the recording, the
   // transcript and the model are unaffected by mute (lib/speakerMute.ts).
   'speaker_timeline',
@@ -40,9 +43,17 @@ export const CLIENT_EVENT_KINDS = [
   'audio_play_refused',
   // End of a voice session (ai-therapist-372). audio_upload_summary: per-track
   // counts of chunks sent, retried, lost, dropped and undelivered, numbers
-  // only. mic_timeline: when the participant's mic was on or muted, as offsets
-  // into participant.wav, so prosody analysis can tell muted stretches from
-  // pauses and a muted session from lost audio.
+  // only. mic_timeline: when the participant's mic was on or muted, as ms
+  // offsets in the participant uploader's own audio time (samples it was
+  // given, from its first chunk). Since ai-therapist-384 the server fills every
+  // gap, and a tail the client reported, with silence of the missing length,
+  // so these offsets are also positions in participant.wav, except after a
+  // capped fill (the sidecar's timelineIntact is then false) and for audio the
+  // client never reported (a tail lost when no batch with its count arrived).
+  // The authoritative muted ranges are in the recording sidecar
+  // (sessions/<id>/recording-tracks.json, built from the per-chunk flags);
+  // this event is a cross-check. speaker_timeline (above) is wall-clock time,
+  // not audio samples, so it lines up with the WAVs only approximately.
   'audio_upload_summary',
   'mic_timeline',
   // Sideband attach failures (ai-therapist-195). Without a sideband a realtime

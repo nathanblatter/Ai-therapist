@@ -5,8 +5,8 @@ vi.mock('../config/db.js', () => ({
   pool: { query: queryMock, connect: vi.fn(), on: vi.fn() },
 }));
 
-const { deleteObjectMock } = vi.hoisted(() => ({ deleteObjectMock: vi.fn() }));
-vi.mock('../config/objectStorage.js', () => ({ deleteObject: deleteObjectMock }));
+const { deleteObjectMock, headObjectMock } = vi.hoisted(() => ({ deleteObjectMock: vi.fn(), headObjectMock: vi.fn() }));
+vi.mock('../config/objectStorage.js', () => ({ deleteObject: deleteObjectMock, headObject: headObjectMock }));
 
 const mocks = vi.hoisted(() => ({
   getRecordingsToAgeOut: vi.fn(),
@@ -35,6 +35,7 @@ const SETTINGS = {
 beforeEach(() => {
   queryMock.mockReset();
   deleteObjectMock.mockReset();
+  headObjectMock.mockReset().mockResolvedValue(null);
   mocks.getRecordingsToAgeOut.mockReset().mockResolvedValue([]);
   mocks.getOrphanedRecordingsPastGrace.mockReset().mockResolvedValue([]);
   mocks.clearRecordingColumns.mockReset().mockResolvedValue(undefined);
@@ -122,6 +123,26 @@ describe('enforceRetention', () => {
     const refs = mocks.insertDeletionLog.mock.calls.map((c) => c[0].artifactRef);
     expect(refs).toContain('sessions/s1/recording.wav');
     expect(refs).toContain('sessions/s1/participant.wav');
+    expect(result.recordingsDeleted).toBe(1);
+  });
+
+  it('deletes the recording sidecar with the WAVs when there is one, with its own log row (ai-therapist-384)', async () => {
+    mocks.getRecordingsToAgeOut.mockResolvedValue([
+      {
+        session_id: 's1',
+        recording_object_key: 'sessions/s1/recording.wav',
+        participant_recording_object_key: 'sessions/s1/participant.wav',
+        user_id: 7,
+      },
+    ]);
+    headObjectMock.mockImplementation(async (key: string) =>
+      key === 'sessions/s1/recording-tracks.json' ? { contentLength: 10, contentType: 'application/json' } : null,
+    );
+    deleteObjectMock.mockResolvedValue(undefined);
+    const result = await enforceRetention('manual', 'cli');
+    expect(deleteObjectMock).toHaveBeenCalledWith('sessions/s1/recording-tracks.json');
+    const refs = mocks.insertDeletionLog.mock.calls.map((c) => c[0].artifactRef);
+    expect(refs).toContain('sessions/s1/recording-tracks.json');
     expect(result.recordingsDeleted).toBe(1);
   });
 

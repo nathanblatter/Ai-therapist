@@ -146,6 +146,60 @@ describe('GET /admin/api/sessions/:sessionId/recording', () => {
     expect(without.body.participantTrack).toBeNull();
   });
 
+  it('recording-info carries the per-track numbers from the sidecar, and null without one (ai-therapist-384)', async () => {
+    const track = (over: Record<string, unknown>) => ({
+      object: 'participant.wav',
+      sampleRate: 1000,
+      totalSamples: 90_000,
+      sequenced: true,
+      chunkSamples: 100,
+      chunksReceived: 880,
+      chunksStale: 0,
+      chunksMissing: 20,
+      clientChunksPushed: 900,
+      insertedSilenceSamples: 2_000,
+      gapCount: 2,
+      gaps: [],
+      gapsTruncated: false,
+      muted: [],
+      mutedSamples: 30_000,
+      mutedTruncated: false,
+      timelineIntact: true,
+      complete: false,
+      ...over,
+    });
+    const sidecar = { version: 1, tracks: { participant: track({}) }, tracksAligned: false };
+    getObjectStreamMock.mockImplementation(async (key: string) => ({
+      body: Readable.from([key.endsWith('recording-tracks.json') ? Buffer.from(JSON.stringify(sidecar)) : WAV]),
+    }));
+    const res = await request(makeApp()).get('/admin/api/sessions/s1/recording-info');
+    expect(res.body.trackData).toEqual({
+      url: '/admin/api/sessions/s1/recording-tracks',
+      mixed: null,
+      participant: {
+        durationMs: 90_000,
+        insertedSilenceMs: 2_000,
+        gapCount: 2,
+        mutedMs: 30_000,
+        sequenced: true,
+        complete: false,
+        timelineIntact: true,
+      },
+      tracksAligned: false,
+    });
+
+    const download = await request(makeApp()).get('/admin/api/sessions/s1/recording-tracks?download=1');
+    expect(download.status).toBe(200);
+    expect(download.headers['content-disposition']).toBe('attachment; filename="session-s1-recording-tracks.json"');
+    expect(download.body).toEqual(sidecar);
+
+    getObjectStreamMock.mockRejectedValue(Object.assign(new Error('NoSuchKey'), { name: 'NoSuchKey' }));
+    const none = await request(makeApp()).get('/admin/api/sessions/s1/recording-info');
+    expect(none.body.available).toBe(true);
+    expect(none.body.trackData).toBeNull();
+    expect((await request(makeApp()).get('/admin/api/sessions/s1/recording-tracks')).status).toBe(404);
+  });
+
   it('404s when no recording is ready, without an audit row', async () => {
     getSessionRecordingMock.mockResolvedValueOnce({ status: 'pending', objectKey: null });
     const res = await request(makeApp()).get('/admin/api/sessions/s1/recording?download=1');

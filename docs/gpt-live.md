@@ -1146,10 +1146,14 @@ are not delayed or changed.
 
 Study record: one `speaker_timeline` client event per voice session, sent at
 teardown (and by beacon on page hide), numbers only, shaped like the
-`mic_timeline` event: `toggles` as `[ms since the session's audio started, 1
+`mic_timeline` event: `toggles` as `[ms on the browser's monotonic clock since
+the voice session began setting up (before the mic and the connection), 1
 audible / 0 muted]` (first entry at 0, at most 60), `truncated`, `mutedMs`,
 `totalMs`, and `crisisSignalsWhileMuted`. Every voice session reports one, so
-"never muted" is a row with `mutedMs: 0`, not a missing row.
+"never muted" is a row with `mutedMs: 0`, not a missing row. These offsets are
+wall-clock time, not audio samples: they run ahead of the recordings by the
+connect time (see [recordings.md](recordings.md) for what lines up with the
+WAVs exactly).
 
 Checks: `lib/speakerMute.test.ts` (state, reset and crisis rules, the event,
 and the recording tap still fed while muted) and

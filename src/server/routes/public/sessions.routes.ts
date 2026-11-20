@@ -45,12 +45,13 @@ export default function sessionsRoutes(): Router {
   // uploader already treats as "recording off" (ai-therapist-322).
   router.post('/api/sessions/:sessionId/audio', json({ limit: '8mb' }), dropIfWithdrawn, async (req, res) => {
     const { sessionId } = req.params;
-    const { chunks, sampleRate, track, seq, muted } = req.body as {
+    const { chunks, sampleRate, track, seq, muted, pushed } = req.body as {
       chunks?: string[];
       sampleRate?: number;
       track?: string;
       seq?: unknown;
       muted?: unknown;
+      pushed?: unknown;
     };
     if (!sessionId || !Array.isArray(chunks) || typeof sampleRate !== 'number') {
       return res.status(400).json({ error: 'chunks[] and sampleRate required' });
@@ -59,8 +60,14 @@ export default function sessionsRoutes(): Router {
     // first chunk, so the recorder can log gaps and drop stale (duplicate or
     // out-of-order) chunks; `muted` lists the batch positions recorded while
     // the participant's mic was muted. Older clients send neither.
+    // `pushed` (ai-therapist-384, optional too): how many chunks the client
+    // had captured on this track when it sent the batch, so a tail lost at
+    // the end can be filled with silence of the right length.
     if (seq !== undefined && !(Number.isSafeInteger(seq) && (seq as number) >= 0)) {
       return res.status(400).json({ error: 'invalid seq' });
+    }
+    if (pushed !== undefined && !(Number.isSafeInteger(pushed) && (pushed as number) >= 0)) {
+      return res.status(400).json({ error: 'invalid pushed' });
     }
     if (
       muted !== undefined &&
@@ -119,6 +126,7 @@ export default function sessionsRoutes(): Router {
         appendChunk(sessionId, pcm, sampleRate, recordingTrack, {
           seq: firstSeq === undefined ? undefined : firstSeq + i,
           muted: mutedSet.has(i),
+          ...(pushed === undefined ? {} : { pushed: pushed as number }),
         });
       } catch {
         /* best-effort recording */

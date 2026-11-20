@@ -72,6 +72,8 @@ export interface ParticipantAudioProblemDetails {
   participantUnmutedMs: number;
   participantRmsDbfs: number | null;
   participantGapChunks: number;
+  /** Silence inserted in participant.wav for lost audio (ai-therapist-384). */
+  participantInsertedSilenceMs?: number;
 }
 
 const PARTICIPANT_AUDIO_DESCRIPTION: Record<ParticipantAudioProblemDetails['problem'], string> = {
