@@ -112,6 +112,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  delete process.env.LIVE_OPENING_DELIVERY;
 });
 
 describe('POST /api/live/session when the voice provider refuses the mint', () => {
@@ -310,9 +311,25 @@ describe('POST /api/live/session recovery speak-first', () => {
     expect(text).toContain('HOME to 741741');
   });
 
-  // ai-therapist-315: the ordinary opening uses the same recipe. Its text is
-  // the opening the server delivers at `session.started`, byte for byte.
-  it('an ordinary start carries the ordinary opening (not the recovery nudge) as one developer message', async () => {
+  // ai-therapist-315: by default the ordinary opening is the instructions
+  // append it always was (no startup input), watched; the greeting recipe is
+  // behind LIVE_OPENING_DELIVERY=recipe until it has been measured.
+  it('by default an ordinary start has no startup input and its opening goes as an instructions append', async () => {
+    mocks.upstreamFetch.mockResolvedValue(healthy());
+    await start().expect(201);
+    expect(mintedSession()).not.toHaveProperty('input');
+    const inject = vi.fn().mockResolvedValue(true);
+    await deliverLiveOpening('sess_live_4', inject);
+    expect(inject).toHaveBeenCalledWith(
+      liveOpeningInstruction('en', DEFAULT_CRISIS_CONTACT, false).text,
+      'instructions',
+    );
+  });
+
+  // Under the recipe its text is the opening the server delivers at
+  // `session.started`, byte for byte.
+  it('LIVE_OPENING_DELIVERY=recipe: the ordinary opening (not the recovery nudge) as one developer message', async () => {
+    process.env.LIVE_OPENING_DELIVERY = 'recipe';
     mocks.upstreamFetch.mockResolvedValue(healthy());
     await start().expect(201);
     const input = mintedSession().input!;
@@ -330,6 +347,7 @@ describe('POST /api/live/session recovery speak-first', () => {
 
   it('with the sideband kill switch thrown there is no startup opening (the browser sends its own)', async () => {
     process.env.SIDEBAND_ENABLED = 'false';
+    process.env.LIVE_OPENING_DELIVERY = 'recipe';
     try {
       mocks.upstreamFetch.mockResolvedValue(healthy());
       await start().expect(201);

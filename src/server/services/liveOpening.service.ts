@@ -25,8 +25,14 @@
 // therefore still decides WHEN (it calls POST /api/sessions/:id/opening on
 // `session.started`), but no longer WHAT: the text never leaves the server.
 //
+// For the ORDINARY opening that two-step recipe is opt-in
+// (LIVE_OPENING_DELIVERY=recipe, see liveOpeningDelivery below); by default it
+// is still step 2 alone as an instructions append, the vendor's channel for a
+// disclosure's exact wording, until a live measurement shows the recipe keeps
+// the disclosure word for word.
+//
 // The vendor still does not guarantee speech, so a delivered ordinary opening
-// is watched (see "Opening watchdog" below).
+// is watched in either delivery (see "Opening watchdog" below).
 //
 // State is in-process, like the sideband socket it is delivered on.
 import { createLogger } from '../utils/logger.js';
@@ -35,6 +41,35 @@ import { LIVE_OPENING_RETRIGGER_MS, LIVE_OPENING_UNSPOKEN_MS } from '../../share
 const log = createLogger('liveOpening');
 
 export type LiveOpeningVia = 'instructions' | 'commentary';
+
+/**
+ * How the ORDINARY opening is delivered, from the LIVE_OPENING_DELIVERY env var
+ * (an env var, not a system_config flag: flipping a feature flag inside the
+ * study window is itself a recorded deviation, and this must be switchable
+ * after measurement without one).
+ *
+ *   instructions (default) - one `session.instructions.append` at
+ *     `session.started`, the delivery that shipped before ai-therapist-315 and
+ *     the channel the vendor names for a disclosure's exact wording
+ *     (live-conversations, "Deliver a disclosure": "Use
+ *     session.instructions.append to request specific spoken wording for a
+ *     disclosure. session.commentary.append may paraphrase the text.").
+ *   recipe - the greeting recipe: a `developer` message in `session.input` at
+ *     creation plus one `session.commentary.append` at `session.started`, as a
+ *     recovery session does. Measured on the 35-word recovery nudge only;
+ *     whether it keeps the 110-word disclosure word for word, and how often the
+ *     two halves make the model say it twice, is not. Not to be the default
+ *     until a paid live measurement (docs/gpt-live.md, "Opening preamble") shows
+ *     both.
+ *
+ * The watchdog (re-send at 4 s, on-screen text at 8 s) runs in both modes: it
+ * acts only on a start that has not spoken.
+ */
+export type LiveOpeningDelivery = 'instructions' | 'recipe';
+
+export function liveOpeningDelivery(env: NodeJS.ProcessEnv = process.env): LiveOpeningDelivery {
+  return env.LIVE_OPENING_DELIVERY?.trim().toLowerCase() === 'recipe' ? 'recipe' : 'instructions';
+}
 
 /** How the watch on a delivered opening ended. */
 export type LiveOpeningOutcome = 'spoken' | 'participant_first' | 'crisis' | 'unspoken' | 'closed';
@@ -85,6 +120,9 @@ const OPENING_TTL_MS = 10 * 60 * 1000;
  * transcript trails the audio).
  */
 const RECORD_SETTLE_MS = 3_000;
+
+/** After giving up on an unspoken opening, how long the record waits for late speech. */
+const RECORD_LATE_SPEECH_MS = 15_000;
 
 const openings = new Map<string, PendingOpening>();
 
@@ -366,9 +404,15 @@ function settle(sessionId: string, entry: PendingOpening, outcome: LiveOpeningOu
   if (!w || w.outcome) return;
   w.outcome = outcome;
   stopWatchTimers(entry);
-  if (outcome === 'spoken') {
-    // Wait for the other of audio / transcript to arrive before recording.
-    w.recordTimer = setTimeout(() => writeRecord(sessionId, entry), RECORD_SETTLE_MS);
+  if (outcome === 'spoken' || outcome === 'unspoken') {
+    // Spoken: wait for the other of audio / transcript to arrive. Unspoken:
+    // wait in case the model speaks after all (the latch still notes it), so
+    // the record tells a late start from one that never spoke. A close before
+    // then records at once (clearLiveOpening).
+    w.recordTimer = setTimeout(
+      () => writeRecord(sessionId, entry),
+      outcome === 'spoken' ? RECORD_SETTLE_MS : RECORD_LATE_SPEECH_MS,
+    );
     w.recordTimer.unref?.();
   } else {
     writeRecord(sessionId, entry);

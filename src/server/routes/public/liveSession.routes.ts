@@ -78,7 +78,11 @@ import {
 } from '../../../shared/openingPrompt.js';
 import { sidebandManager } from '../../services/sidebandManager.service.js';
 import { buildRecoverySpeakFirstNudge, type RecoveryCrisisContact } from '../../../shared/recoveryPrompt.js';
-import { registerLiveOpening, scheduleLiveOpeningFallback } from '../../services/liveOpening.service.js';
+import {
+  liveOpeningDelivery,
+  registerLiveOpening,
+  scheduleLiveOpeningFallback,
+} from '../../services/liveOpening.service.js';
 
 import { createLogger } from '../../utils/logger.js';
 import { classifyOpenAIError, classifyOpenAIResponse } from '../../utils/openaiErrors.js';
@@ -330,7 +334,10 @@ export default function liveSessionRoutes(): Router {
         const sidebandEnabled = process.env.SIDEBAND_ENABLED !== 'false';
 
         // Built once: the startup input and the sideband delivery must carry
-        // the same text.
+        // the same text. Which delivery is an env setting (liveOpeningDelivery):
+        // the instructions append by default, the greeting recipe only once it
+        // has been measured on the disclosure (ai-therapist-315).
+        const openingRecipe = liveOpeningDelivery() === 'recipe';
         const ordinaryOpening = liveOpeningInstruction(
           userLanguage,
           (systemConfig.crisis_contact as OpeningCrisisContact | undefined) || DEFAULT_CRISIS_CONTACT,
@@ -366,7 +373,8 @@ export default function liveSessionRoutes(): Router {
           // commentary the server sends at `session.started`. Same text,
           // same builder (ai-therapist-315). Only with a sideband: without one
           // the browser sends the opening itself and this would make it twice.
-          speakFirst: sidebandEnabled && !isRecovery ? ordinaryOpening.text : undefined,
+          // Only under LIVE_OPENING_DELIVERY=recipe.
+          speakFirst: sidebandEnabled && !isRecovery && openingRecipe ? ordinaryOpening.text : undefined,
         });
 
         const apiKey = await getOpenAIKey();
@@ -596,13 +604,15 @@ export default function liveSessionRoutes(): Router {
                   via: 'commentary' as const,
                 }
               : {
-                  // Already in the session's startup input (speakFirst above);
-                  // sent again as commentary at `session.started`, as the
-                  // recovery start is, and watched (liveOpening.service.ts):
-                  // a single instructions append left about one start in six
-                  // silent (ai-therapist-315).
+                  // Watched in both deliveries (liveOpening.service.ts): a
+                  // single instructions append left about one start in six
+                  // silent, and nothing noticed (ai-therapist-315). Under the
+                  // recipe it is already in the startup input (speakFirst
+                  // above) and goes again as commentary, as the recovery start
+                  // does; by default it is the instructions append, the
+                  // vendor's channel for a disclosure's exact wording.
                   ...ordinaryOpening,
-                  via: 'commentary' as const,
+                  via: openingRecipe ? ('commentary' as const) : ('instructions' as const),
                   watch: true,
                 },
           );

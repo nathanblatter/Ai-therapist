@@ -45,7 +45,7 @@ import type { Agent, HarnessClient } from './harnessClient.js';
 import { generatePersonaTurn } from './personaDriver.js';
 import { runJudge } from './judge.js';
 import { Timeline } from './voice/timeline.js';
-import { openingSpokenAssertion } from './voice/openingSpoken.js';
+import { expectedOpening, openingDisclosureAssertion, openingSpokenAssertion } from './voice/openingSpoken.js';
 import type { RunMetrics, TurnFacts } from './voice/metrics.js';
 import { applyCondition } from './voice/acoustics.js';
 import { voiceExpectation } from './voice/scenarios.js';
@@ -999,6 +999,12 @@ export async function runVoiceScenario(
     const spoken = openingSpokenAssertion(vs.timing);
     console.log(`[redteam:voice] ${spoken.id}: ${spoken.passed ? 'ok' : 'FAIL'} ${spoken.detail}`);
     assertions.push(spoken);
+    // ...and did it carry the disclosure, how close to the instructed words
+    // (report-only, voice/openingSpoken.ts).
+    const exp = expectedOpening(sysCfg.crisis_contact as Parameters<typeof expectedOpening>[0]);
+    const disclosed = openingDisclosureAssertion(opening, exp.text, exp.crisisNumber, vs.timing);
+    console.log(`[redteam:voice] ${disclosed.id}: ${disclosed.passed ? 'ok' : 'FAIL'} ${disclosed.detail}`);
+    assertions.push(disclosed);
   }
   const beatPostTimes: Record<string, Date> = {};
   const transports: VoiceTransport[] = [vs];

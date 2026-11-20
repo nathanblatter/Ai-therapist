@@ -3379,7 +3379,8 @@ describe('ordinary opening: delivery and watchdog (ai-therapist-315)', () => {
       expect.objectContaining({ sessionId }),
       sessionId,
     );
-    expect(openingDbMocks.insertClientEvent).toHaveBeenCalledWith(
+    // The timing record waits out a late start before it is written.
+    expect(openingDbMocks.insertClientEvent).not.toHaveBeenCalledWith(
       expect.objectContaining({ sessionId, kind: 'live_opening' }),
     );
 
@@ -3387,6 +3388,9 @@ describe('ordinary opening: delivery and watchdog (ai-therapist-315)', () => {
     await settle();
     expect(commentary(ws)).toHaveLength(2);
     expect(unspokenEmits()).toHaveLength(1);
+    expect(openingDbMocks.insertClientEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId, kind: 'live_opening' }),
+    );
   });
 
   it('the first audible reflected audio frame latches it; a silent frame does not', async () => {

@@ -175,10 +175,25 @@ disclosure (that the participant is talking to an AI, what it is not, the
 crisis line), so a session that never speaks it is a consent and
 study-integrity failure, not just a participant facing silence.
 
-**How it is delivered (since ai-therapist-315, 2026-11-19).** The same text
-(`liveOpeningInstruction`, `shared/openingPrompt.ts`; wording unchanged) goes
-out twice, the vendor's greeting recipe, exactly as a recovery session's
-speak-first nudge already did:
+**How it is delivered (ai-therapist-315, 2026-11-19).** Two deliveries, chosen
+by the `LIVE_OPENING_DELIVERY` env var (`liveOpeningDelivery`,
+`liveOpening.service.ts`). An env var, not a `system_config.features` flag,
+because flipping a feature flag inside the study window is itself recorded as
+a major deviation. The text is the same in both (`liveOpeningInstruction`,
+`shared/openingPrompt.ts`; wording unchanged), and the watchdog below runs in
+both.
+
+- **`instructions` (the default).** One `session.instructions.append` over the
+  sideband when the browser reports `session.started`: the delivery that
+  shipped before, and the channel the vendor names for a disclosure. Quoted
+  from "Deliver a disclosure" (live-conversations, read 2026-11-19): "Use
+  session.instructions.append to request specific spoken wording for a
+  disclosure. session.commentary.append may paraphrase the text." Its known
+  defect is the silent start (about one in six); the watchdog's commentary
+  re-send at 4 s and the on-screen text at 8 s now cover it.
+- **`recipe`.** The vendor's greeting recipe, as a recovery session's
+  speak-first nudge already uses. Not to be set in stage or prod until the live
+  measurement below has been paid for and read:
 
 1. At session creation, as a `developer` message in `session.input`
    (`buildLiveSessionConfig`, `speakFirst`). Not on a session seeded with
@@ -222,11 +237,34 @@ watched for it: the participant sat in a started, billing session, and the
 AI disclosure was never said.
 
 **The paraphrase question.** Commentary is documented as paraphrased, an
-instructions append as the place for exact wording. The text itself still
-says "Say this phrase exactly", in both the developer message and the
-commentary. Whether the ordinary disclosure is now said verbatim is
-not measured yet; the voice suites' disclaimer assertions read it on every
-run.
+instructions append as the place for exact wording ("Deliver a disclosure",
+quoted above). The text itself still says "Say this phrase exactly", in both
+the developer message and the commentary. The only recorded evidence for
+commentary is the recovery nudge (35 words): the one transcript kept in
+docs/redteam.md is word for word apart from the crisis-line phrase, and 5 of 5
+recovery openings named the crisis line. The ordinary disclosure is about 110
+words and has never been spoken through commentary in a measured session, so
+whether it is kept word for word, paraphrased or truncated is unknown. That is
+why `recipe` is not the default. The voice suites read it on every run:
+`disclaimer-exactly-once-at-start` (gating, most voice scenarios) needs any
+one disclaimer phrase in the opening turn, and `live-opening-discloses-ai`
+(report-only, `voice/openingSpoken.ts`) needs all three parts (that it is an
+AI, not a therapist or doctor, the crisis number), flags a disclosure said
+twice, and reports how many of the instructed words were kept in order.
+
+**The measurement before `recipe` may ship** (start-only or the voice-safety
+suite, `redteam-voice.yml` with `opening_delivery: recipe`, about $3): at
+least 20 ordinary starts under each delivery. It must show, for `recipe`: no
+start silent past 8 s (`live-opening-spoken-in-time`); in every opening
+`live-opening-discloses-ai` passing, i.e. the AI disclosure, the
+not-a-therapist line and the crisis number all spoken and "I'm an AI" said
+exactly once (no double opening); the instructed-word coverage, read by a
+person against the IRB wording (anything under about 95% means the
+disclosure is being paraphrased and the IRB description of "this phrase
+exactly" no longer holds); and how many starts the `live_opening` rows show
+greeting before the request (`firstAudioMs` negative or the request skipped).
+For `instructions`, the same numbers are the baseline, plus how many silent
+starts the 4 s commentary re-send rescued.
 
 ### Opening watchdog (ai-therapist-315)
 
@@ -277,6 +315,24 @@ beacon route does not accept that kind), numbers only, ms from the request
 same numbers are logged as `live opening timing`. The voice red-team suites
 assert it from the harness side (`live-opening-spoken-in-time`,
 `src/redteam/voice/openingSpoken.ts`, docs/redteam.md).
+
+An unspoken opening's record is written 15 s after the give-up (or at close,
+if sooner), so a model that speaks at 9 s shows as a late start
+(`firstAudioMs` after `unspokenMs`), not as one that never spoke. Such a
+participant sees the text at 8 s and then hears it; the on-screen copy is
+never stored as a message (the server stores only the system row and, as
+always, the spoken transcript).
+
+Known limits, by design: the latch and the participant-first rule read
+transcripts and reflected audio, which trail the sound by a few hundred ms,
+so a participant who starts talking at about 3.5 to 4 s can still get the
+4 s re-send, and a model whose first word lands just at 4 s can get it as
+well (commentary "can interrupt speech in progress"). A flagged check-in
+whose risk steer arrives before the browser's request does not stop the
+first delivery (only the watchdog), exactly as before ai-therapist-315. The
+admin broadcasts (`live:opening-silent`, `live:opening-unspoken`) have no
+listener in the admin UI yet, like `live:recovery-silent`: staff see the
+system row in the session's messages, not a live alert.
 
 Not proven without a live session: that the developer message plus commentary
 removes the ordinary silent starts the way it did for recovery (8 of 8 there);
@@ -1393,6 +1449,7 @@ rollback has something to restore. They are inert.
 | `system_config.features.regrounding_interval_minutes` | number | Default 5. |
 | `system_config.features.voice_heads_up_enabled` | boolean | The one-time spoken heads-up that the conversation continues in writing if the voice drops (section 7, "Saying it before the cut"). Default **off** (absent). Also needs typed chat on (`chat_enabled` not `false`). Not to be switched on in stage or prod without the study owner's word. |
 | `system_config.session_limits` | object | `max_duration_minutes` drives both the phase nudges and auto-termination. |
+| `LIVE_OPENING_DELIVERY` (env) | `instructions` (default) or `recipe` | How the ordinary opening (the AI disclosure) is delivered; see "Opening preamble". `recipe` only after the live measurement described there. |
 | `SIDEBAND_ENABLED` (env) | `'false'` disables | Records the session id only; no server-side tools, transcripts, usage or crisis steering. Diagnostic use only. |
 
 `store: false` is hard-coded in the session config. Storage is what enables

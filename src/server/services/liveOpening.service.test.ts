@@ -21,6 +21,7 @@ import {
   noteLiveOpeningParticipantSpeech,
   noteLiveOpeningCrisis,
   liveOpeningAwaitingSpeech,
+  liveOpeningDelivery,
   _resetLiveOpeningsForTests,
   _setLiveOpeningWatchDepsForTests,
   _liveOpeningOutcomeForTests,
@@ -42,6 +43,16 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe('liveOpeningDelivery (LIVE_OPENING_DELIVERY)', () => {
+  it('is the instructions append unless the recipe is asked for by name', () => {
+    expect(liveOpeningDelivery({})).toBe('instructions');
+    expect(liveOpeningDelivery({ LIVE_OPENING_DELIVERY: '' })).toBe('instructions');
+    expect(liveOpeningDelivery({ LIVE_OPENING_DELIVERY: 'commentary' })).toBe('instructions');
+    expect(liveOpeningDelivery({ LIVE_OPENING_DELIVERY: 'recipe' })).toBe('recipe');
+    expect(liveOpeningDelivery({ LIVE_OPENING_DELIVERY: ' Recipe ' })).toBe('recipe');
+  });
 });
 
 describe('deliverLiveOpening', () => {
@@ -270,6 +281,42 @@ describe('opening watchdog (ai-therapist-315)', () => {
       unspokenMs: LIVE_OPENING_UNSPOKEN_MS,
       watched: 1,
     });
+  });
+
+  it('an opening spoken after the give-up is still in the record (a late start, not a silent one)', async () => {
+    await start();
+    await vi.advanceTimersByTimeAsync(LIVE_OPENING_UNSPOKEN_MS);
+    expect(deps.onUnspoken).toHaveBeenCalledTimes(1);
+    expect(deps.record).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1_000);
+    noteLiveOpeningAssistantSpeech(ID, 'audio');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.record).toHaveBeenCalledTimes(1);
+    expect(deps.record.mock.calls[0][1]).toMatchObject({
+      firstAudioMs: LIVE_OPENING_UNSPOKEN_MS + 1_000,
+      unspokenMs: LIVE_OPENING_UNSPOKEN_MS,
+    });
+    expect(_liveOpeningOutcomeForTests(ID)).toBe('unspoken');
+    expect(deps.resend).toHaveBeenCalledTimes(1);
+  });
+
+  it('a close after the give-up records at once', async () => {
+    await start();
+    await vi.advanceTimersByTimeAsync(LIVE_OPENING_UNSPOKEN_MS);
+    clearLiveOpening(ID);
+    expect(deps.record).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.record).toHaveBeenCalledTimes(1);
+  });
+
+  it('the default instructions delivery is watched the same way; its one re-send is commentary', async () => {
+    await start({ ...OPENING, via: 'instructions', watch: true });
+    expect(sidebandMocks.tryInject).toHaveBeenCalledWith(ID, 'system', OPENING.text, true);
+    expect(sidebandMocks.tryCommentary).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(LIVE_OPENING_UNSPOKEN_MS);
+    expect(deps.resend).toHaveBeenCalledTimes(1);
+    expect(deps.resend).toHaveBeenCalledWith(ID, OPENING.text);
+    expect(deps.onUnspoken).toHaveBeenCalledTimes(1);
   });
 
   it('latches on the first assistant audio just before the first bound: nothing is re-sent', async () => {
