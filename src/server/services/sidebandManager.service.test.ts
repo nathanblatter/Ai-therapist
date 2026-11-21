@@ -110,6 +110,9 @@ import {
   LiveDelegationUnsupportedError,
   LIVE_STEER_KEEP_SPEAKING,
   LIVE_STEER_RESUME_COMMENTARY,
+  STEER_RESUME_CHECK_MS,
+  STEER_TALKING_CEILING_MS,
+  STEER_UNRESOLVED_AFTER_MS,
   DELEGATION_STALL_MS,
   DELEGATION_STALL_UNKNOWN_MS,
   RECONNECT_GAP_SETTLE_MS,
@@ -1086,6 +1089,230 @@ describe('clinical steers keep the assistant speaking', () => {
     await vi.advanceTimersByTimeAsync(600); // the 3 s check, 600 ms after their last word
     await flush();
     expect(commentary(ws)).toHaveLength(0);
+  });
+
+  it('a check that finds the participant talking waits for them to finish instead of being dropped', async () => {
+    const sessionId = 's-steer-participant-backchannel';
+    const ws = await attach(sessionId);
+    await fire(sessionId, assistantDelta('That sounds'));
+    ws.send.mockClear();
+
+    await sidebandManager.tryInject(sessionId, 'system', STEER, false);
+    await vi.advanceTimersByTimeAsync(2_500);
+    await fire(sessionId, userDelta('Mm-hmm', 5_000)); // 2.5 s after the steer
+    await vi.advanceTimersByTimeAsync(1_400); // 3.9 s: 1.4 s after their last word
+    await flush();
+    expect(commentary(ws)).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(200); // the 4.0 s look: they have been quiet 1.5 s
+    await flush();
+    expect(commentary(ws)).toHaveLength(1);
+    expect(commentary(ws)[0].content).toBe(LIVE_STEER_RESUME_COMMENTARY);
+
+    // The second prompt keeps its distance from the first (4 s), not its
+    // original 7 s mark: nothing at 7.5 s, one at 8.1 s.
+    await vi.advanceTimersByTimeAsync(3_400);
+    await flush();
+    expect(commentary(ws)).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(600);
+    await flush();
+    expect(commentary(ws)).toHaveLength(2);
+  });
+
+  it('a participant who speaks into the silence just before each check is still followed by both prompts', async () => {
+    // The first measured call: the reply was cut, the participant said
+    // "Mm-hmm" into the silence, and nothing more was ever said. With the
+    // checks at fixed times a word just before each one cancelled both.
+    const sessionId = 's-steer-mm-hmm-twice';
+    const ws = await attach(sessionId);
+    await fire(sessionId, assistantDelta("I'm really sorry you're feeling that way. That sounds"));
+    ws.send.mockClear();
+
+    await sidebandManager.tryInject(sessionId, 'system', STEER, false);
+    await vi.advanceTimersByTimeAsync(2_900);
+    await fire(sessionId, userDelta('Mm-hmm', 5_000));
+    await vi.advanceTimersByTimeAsync(2_000); // 4.9 s
+    await flush();
+    expect(commentary(ws)).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(3_400); // 8.3 s, just before the second prompt
+    await fire(sessionId, userDelta('Are you there?', 12_000));
+    await vi.advanceTimersByTimeAsync(2_200); // 10.5 s
+    await flush();
+    expect(commentary(ws)).toHaveLength(2);
+  });
+
+  it('a participant who keeps the floor is never spoken over, and their talking is not recorded as silence', async () => {
+    const sessionId = 's-steer-participant-monologue';
+    const ws = await attach(sessionId);
+    await fire(sessionId, assistantDelta('That sounds'));
+    ws.send.mockClear();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await sidebandManager.tryInject(sessionId, 'system', STEER, false);
+      // They talk without a pause from 1 s to 60 s after the steer: longer
+      // than every wait for them (three checks, STEER_TALKING_CEILING_MS each).
+      expect(3 * STEER_TALKING_CEILING_MS + 11_000).toBeLessThan(60_000);
+      for (let t = 1_000; t <= 60_000; t += 1_000) {
+        await vi.advanceTimersByTimeAsync(1_000);
+        await fire(sessionId, userDelta(' and', t));
+      }
+      await vi.advanceTimersByTimeAsync(120_000);
+      await flush();
+      expect(commentary(ws)).toHaveLength(0);
+      expect(error).not.toHaveBeenCalledWith(expect.stringContaining('STEER SILENCE UNRESOLVED'));
+      expect(broadcastMock).not.toHaveBeenCalledWith(
+        expect.anything(),
+        'live:steer-unresolved',
+        expect.anything(),
+        sessionId,
+      );
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('two steers in the same moment (the risk steer and the risk-check requirement) run one chain, not two', async () => {
+    const sessionId = 's-steer-pair';
+    const ws = await attach(sessionId);
+    await fire(sessionId, assistantDelta('That sounds'));
+    ws.send.mockClear();
+
+    await sidebandManager.injectMessage(sessionId, 'system', STEER, false);
+    await sidebandManager.tryInject(sessionId, 'system', `${STEER} Begin the ladder.`, false);
+    expect(sentEvents(ws).filter((e) => e.type === 'session.instructions.append')).toHaveLength(2);
+
+    await vi.advanceTimersByTimeAsync(3_100);
+    await flush();
+    expect(commentary(ws)).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(4_000);
+    await flush();
+    expect(commentary(ws)).toHaveLength(2);
+  });
+
+  it('records the silence as unresolved when both prompts fail, and sends the model nothing more', async () => {
+    const sessionId = 's-steer-unresolved';
+    const ws = await attach(sessionId);
+    await fire(sessionId, assistantDelta("I'm really sorry you're feeling that way. That sounds"));
+    ws.send.mockClear();
+    insertMessagesBatchMock.mockClear();
+    broadcastMock.mockClear();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await sidebandManager.tryInject(sessionId, 'system', STEER, false);
+      const last = STEER_RESUME_CHECK_MS[STEER_RESUME_CHECK_MS.length - 1];
+      await vi.advanceTimersByTimeAsync(last + STEER_UNRESOLVED_AFTER_MS - 100);
+      await flush();
+      expect(commentary(ws)).toHaveLength(2);
+      expect(error).not.toHaveBeenCalledWith(expect.stringContaining('STEER SILENCE UNRESOLVED'));
+
+      await vi.advanceTimersByTimeAsync(200);
+      await flush();
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('STEER SILENCE UNRESOLVED'));
+      expect(broadcastMock).toHaveBeenCalledWith(
+        expect.anything(),
+        'live:steer-unresolved',
+        expect.objectContaining({ sessionId, prompts: 2, afterMs: last + STEER_UNRESOLVED_AFTER_MS }),
+        sessionId,
+      );
+      const systemRows = () =>
+        insertMessagesBatchMock.mock.calls.map((c) => c[0][0]).filter((row: Internal) => row.role === 'system');
+      expect(systemRows()).toHaveLength(1);
+      expect(systemRows()[0]).toMatchObject({
+        session_id: sessionId,
+        message_type: 'system',
+        metadata: { source: 'live-steer-unresolved', prompts: 2 },
+      });
+      // Numbers only: nothing anyone said, and no steer text.
+      expect(systemRows()[0].content).toBe(
+        'No assistant speech 11 s after a clinical steer (2 prompt(s) to speak sent)',
+      );
+
+      // Once, and no third prompt.
+      await vi.advanceTimersByTimeAsync(120_000);
+      await flush();
+      expect(sentEvents(ws)).toHaveLength(3); // the steer and the two prompts
+      expect(systemRows()).toHaveLength(1);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('records nothing when the second prompt brings the assistant back', async () => {
+    const sessionId = 's-steer-second-prompt-works';
+    const ws = await attach(sessionId);
+    await fire(sessionId, assistantDelta('That sounds'));
+    ws.send.mockClear();
+    insertMessagesBatchMock.mockClear();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await sidebandManager.tryInject(sessionId, 'system', STEER, false);
+      await vi.advanceTimersByTimeAsync(7_100);
+      await flush();
+      expect(commentary(ws)).toHaveLength(2);
+      await fire(sessionId, assistantDelta(' I am here. Are you having thoughts of suicide?'));
+      await vi.advanceTimersByTimeAsync(120_000);
+      await flush();
+      expect(error).not.toHaveBeenCalledWith(expect.stringContaining('STEER SILENCE UNRESOLVED'));
+      const systemRows = insertMessagesBatchMock.mock.calls
+        .map((c) => c[0][0])
+        .filter((row: Internal) => row.role === 'system');
+      expect(systemRows).toEqual([]);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('the final check waits for a participant who is talking, then records the silence', async () => {
+    const sessionId = 's-steer-unresolved-after-talking';
+    const ws = await attach(sessionId);
+    await fire(sessionId, assistantDelta('That sounds'));
+    ws.send.mockClear();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await sidebandManager.tryInject(sessionId, 'system', STEER, false);
+      await vi.advanceTimersByTimeAsync(10_500);
+      await fire(sessionId, userDelta('Hello?', 20_000)); // 0.5 s before the final check
+      await vi.advanceTimersByTimeAsync(1_000); // 11.5 s
+      await flush();
+      expect(error).not.toHaveBeenCalledWith(expect.stringContaining('STEER SILENCE UNRESOLVED'));
+      await vi.advanceTimersByTimeAsync(1_000); // 12.5 s: they have been quiet 2 s
+      await flush();
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('STEER SILENCE UNRESOLVED'));
+      expect(commentary(ws)).toHaveLength(2);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('a prompt that cannot be sent is not counted, and the silence is still recorded', async () => {
+    const sessionId = 's-steer-prompt-send-fails';
+    const ws = await attach(sessionId);
+    await fire(sessionId, assistantDelta('That sounds'));
+    await sidebandManager.tryInject(sessionId, 'system', STEER, false);
+    broadcastMock.mockClear();
+    ws.send.mockImplementation(() => {
+      throw new Error('socket write failed');
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await vi.advanceTimersByTimeAsync(11_100);
+      await flush();
+      expect(broadcastMock).toHaveBeenCalledWith(
+        expect.anything(),
+        'live:steer-unresolved',
+        expect.objectContaining({ sessionId, prompts: 0 }),
+        sessionId,
+      );
+      expect(broadcastMock).not.toHaveBeenCalledWith(
+        expect.anything(),
+        'live:steer-silent',
+        expect.anything(),
+        sessionId,
+      );
+    } finally {
+      error.mockRestore();
+    }
   });
 
   it('is not armed when no reply was owed (the session had been quiet)', async () => {

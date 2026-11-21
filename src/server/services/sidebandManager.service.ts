@@ -125,6 +125,22 @@ const STEER_REPLY_OWED_WINDOW_MS = 6_000;
 const STEER_INTERRUPT_TAIL_MS = 1_200;
 /** The participant counts as still talking if a fragment of theirs arrived this recently. */
 const STEER_PARTICIPANT_TALKING_MS = 1_500;
+/**
+ * A check that finds the participant talking waits for them instead of being
+ * dropped: it looks again this often, for at most STEER_TALKING_CEILING_MS.
+ * Before, the check was simply skipped, so a participant who said "Mm-hmm"
+ * into the silence just before each check (what the first measured call did,
+ * 7 s after the cut) was never followed by a prompt at all.
+ */
+const STEER_TALKING_RECHECK_MS = 500;
+export const STEER_TALKING_CEILING_MS = 8_000;
+/**
+ * After the last prompt, how long the model gets before the silence is
+ * recorded as unresolved (`STEER SILENCE UNRESOLVED`, `live:steer-unresolved`,
+ * a system row in the session's messages). Nothing more is sent to the model:
+ * as with the opening watchdog there is no loop of prompts.
+ */
+export const STEER_UNRESOLVED_AFTER_MS = 4_000;
 
 /**
  * A delegated question must never leave the participant waiting on an answer
@@ -2703,6 +2719,13 @@ export class SidebandManager {
    * was owed at the moment the steer landed: the assistant was speaking, or
    * the participant had just finished. A steer that arrives while the
    * assistant is quietly listening must not make it talk over the participant.
+   *
+   * One chain of checks per session: the first prompt is due
+   * STEER_RESUME_CHECK_MS[0] after the steer, each later one the listed gap
+   * after the prompt before it, and STEER_UNRESOLVED_AFTER_MS after the last
+   * the silence is recorded as unresolved. Chained, not armed all at once, so
+   * a prompt that had to wait for the participant to finish is not followed
+   * by the next one a moment later.
    */
   private armSteerResume(sessionId: string, text: string): void {
     const state = this.sessions.get(sessionId);
@@ -2711,21 +2734,33 @@ export class SidebandManager {
     const lastActivity = Math.max(state.lastAssistantDeltaAt, state.lastUserDeltaAt);
     if (lastActivity === 0 || steeredAt - lastActivity > STEER_REPLY_OWED_WINDOW_MS) return;
     // One watch per session at a time: a second steer restarts it.
+    this.scheduleSteerCheck(state, STEER_RESUME_CHECK_MS[0], () =>
+      this.resumeAfterSteer(sessionId, { steeredAt, attempt: 1, prompts: 0, waitingSince: 0 }),
+    );
+  }
+
+  /** Replace the session's pending steer check (there is at most one). */
+  private scheduleSteerCheck(state: LiveSessionState, delayMs: number, check: () => Promise<void>): void {
     state.steerResumeTimers.forEach((t) => clearTimeout(t));
-    state.steerResumeTimers = STEER_RESUME_CHECK_MS.map((delayMs, index) => {
-      const timer = setTimeout(() => {
-        void this.resumeAfterSteer(sessionId, steeredAt, index + 1, delayMs);
-      }, delayMs);
-      timer.unref?.();
-      return timer;
-    });
+    const timer = setTimeout(() => {
+      state.steerResumeTimers = [];
+      void check();
+    }, delayMs);
+    timer.unref?.();
+    state.steerResumeTimers = [timer];
   }
 
   private async resumeAfterSteer(
     sessionId: string,
-    steeredAt: number,
-    attempt: number,
-    afterMs: number,
+    watch: {
+      steeredAt: number;
+      /** 1-based prompt this check would send; past the last it is the unresolved check. */
+      attempt: number;
+      /** Prompts actually sent so far. */
+      prompts: number;
+      /** When this check first found the participant talking (0 = it has not). */
+      waitingSince: number;
+    },
   ): Promise<void> {
     const state = this.sessions.get(sessionId);
     if (!state || state.finalized || !this.isConnected(sessionId)) return;
@@ -2734,31 +2769,104 @@ export class SidebandManager {
     // the interrupted sentence still arrive for a moment after the append,
     // and counting them as "carried on" is how a reply cut at "It sounds"
     // was left unprompted in the first measured run of this watch.
-    if (state.lastAssistantDeltaAt > steeredAt + STEER_INTERRUPT_TAIL_MS) {
-      state.steerResumeTimers.forEach((t) => clearTimeout(t));
-      state.steerResumeTimers = [];
+    if (state.lastAssistantDeltaAt > watch.steeredAt + STEER_INTERRUPT_TAIL_MS) return;
+
+    const now = Date.now();
+    const short = sessionId.substring(0, 12);
+    const again = (delayMs: number, next: typeof watch) =>
+      this.scheduleSteerCheck(state, delayMs, () => this.resumeAfterSteer(sessionId, next));
+    const gapAfter = (attempt: number) =>
+      attempt < STEER_RESUME_CHECK_MS.length
+        ? STEER_RESUME_CHECK_MS[attempt] - STEER_RESUME_CHECK_MS[attempt - 1]
+        : STEER_UNRESOLVED_AFTER_MS;
+
+    const last = watch.attempt > STEER_RESUME_CHECK_MS.length;
+
+    // The participant is talking: the assistant should be listening. Look
+    // again shortly instead of giving this check up; after the ceiling they
+    // are not waiting on a reply, so this prompt is skipped and the chain
+    // moves on (a later check still sees a model that never answered). At
+    // the final check a participant still holding the floor ends the watch
+    // with nothing recorded: an assistant that is listening is not silent.
+    if (now - state.lastUserDeltaAt < STEER_PARTICIPANT_TALKING_MS) {
+      const waitingSince = watch.waitingSince || now;
+      if (now - waitingSince < STEER_TALKING_CEILING_MS) {
+        again(STEER_TALKING_RECHECK_MS, { ...watch, waitingSince });
+      } else if (!last) {
+        again(gapAfter(watch.attempt), { ...watch, attempt: watch.attempt + 1, waitingSince: 0 });
+      }
       return;
     }
-    // The participant is talking: the assistant should be listening.
-    if (Date.now() - state.lastUserDeltaAt < STEER_PARTICIPANT_TALKING_MS) return;
-    const short = sessionId.substring(0, 12);
+
+    if (last) {
+      await this.recordSteerSilenceUnresolved(sessionId, now - watch.steeredAt, watch.prompts);
+      return;
+    }
+
+    const afterMs = now - watch.steeredAt;
+    let sent = false;
     try {
       console.warn(
         `[Live] SILENT AFTER STEER for ${short}...: no assistant speech ${afterMs} ms after a clinical steer; ` +
-          `telling the model to speak (attempt ${attempt}/${STEER_RESUME_CHECK_MS.length}).`,
+          `telling the model to speak (attempt ${watch.attempt}/${STEER_RESUME_CHECK_MS.length}).`,
       );
       await this.appendCommentary(sessionId, LIVE_STEER_RESUME_COMMENTARY);
+      sent = true;
       if (global.io) {
         void broadcastAdminEventForSession(
           global.io,
           'live:steer-silent',
-          { sessionId, attempt, afterMs, timestamp: new Date() },
+          { sessionId, attempt: watch.attempt, afterMs, timestamp: new Date() },
           sessionId,
         );
       }
     } catch (err) {
       console.error(`[Live] Could not resume ${short}... after a steer:`, err);
     }
+    // The state may have been replaced while the append was awaited (a
+    // reconnect builds a fresh one and clears this one's timers).
+    if (this.sessions.get(sessionId) !== state) return;
+    again(gapAfter(watch.attempt), {
+      steeredAt: watch.steeredAt,
+      attempt: watch.attempt + 1,
+      prompts: watch.prompts + (sent ? 1 : 0),
+      waitingSince: 0,
+    });
+  }
+
+  /**
+   * The prompts did not bring the assistant back: the participant has now
+   * heard nothing since a clinical steer cut its reply. Nothing further is
+   * sent to the model (no approved wording exists for a third prompt, and the
+   * two sent did not work); it is made visible instead: an error log, an
+   * admin broadcast, and a system row in the session's messages, which is
+   * where staff reading the session see it. Numbers only. Never throws.
+   */
+  private async recordSteerSilenceUnresolved(sessionId: string, afterMs: number, prompts: number): Promise<void> {
+    const short = sessionId.substring(0, 12);
+    console.error(
+      `[Live] STEER SILENCE UNRESOLVED for ${short}...: no assistant speech ${afterMs} ms after a clinical steer ` +
+        `(${prompts} prompt(s) sent).`,
+    );
+    if (global.io) {
+      void broadcastAdminEventForSession(
+        global.io,
+        'live:steer-unresolved',
+        { sessionId, afterMs, prompts, timestamp: new Date() },
+        sessionId,
+      );
+    }
+    const note = `No assistant speech ${Math.round(afterMs / 1000)} s after a clinical steer (${prompts} prompt(s) to speak sent)`;
+    await insertMessagesBatch([
+      {
+        session_id: sessionId,
+        role: 'system',
+        message_type: 'system',
+        content: note,
+        content_redacted: note,
+        metadata: { source: 'live-steer-unresolved', channel: 'live', afterMs, prompts },
+      },
+    ]).catch((err) => console.error(`[Live] Could not record the unresolved steer silence for ${short}...:`, err));
   }
 
   /**
