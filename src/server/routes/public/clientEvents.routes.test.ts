@@ -2,6 +2,7 @@
 // kind allowlist, detail size cap, session/user attribution, insert-failure
 // swallowing, and the per-IP rate limit backstop.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import express from 'express';
 import request from 'supertest';
 
@@ -120,6 +121,30 @@ describe('POST /api/client-events', () => {
     expect(cleanSessionId('redteam_rt_1723600000_x1y2z3')).toBe('redteam_rt_1723600000_x1y2z3');
     expect(cleanSessionId(42)).toBeNull();
     expect(cleanSessionId(null)).toBeNull();
+  });
+
+  it('keeps the session id of a Grok voice session, as grokSession.routes.ts mints it (ai-therapist-384)', async () => {
+    const grokId = `grok_${randomUUID()}`;
+    expect(cleanSessionId(grokId)).toBe(grokId);
+    await request(makeApp(7))
+      .post('/api/client-events')
+      .send({ kind: 'audio_upload_summary', detail: { participant: { sent: 10 } }, sessionId: grokId });
+    expect(insertClientEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: grokId, kind: 'audio_upload_summary' }),
+    );
+  });
+
+  it('still nulls a grok_ id that is not a UUID', () => {
+    for (const bad of [
+      'grok_',
+      'grok_abc',
+      'grok_not-a-uuid-at-all',
+      `grok_${randomUUID()}x`,
+      `grok_${randomUUID()}; DROP TABLE client_events`,
+      `live_${randomUUID()}`,
+    ]) {
+      expect(cleanSessionId(bad)).toBeNull();
+    }
   });
 
   it('rejects an oversized body pre-parse with 413 (route-local 4kb json limit)', async () => {

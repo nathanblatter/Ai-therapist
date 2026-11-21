@@ -71,7 +71,8 @@ export const MAX_DETAIL_BYTES = 2048;
 // Session IDs attached to beacons must look like the ids this app actually
 // mints/uses: GPT-Live voice ('live_...'), chat ('chat_...'), redteam
 // ('redteam_...'), or a legacy Realtime id ('sess_...'), alphanumeric+
-// underscore, bounded length. Anything else (junk, injection attempts,
+// underscore, bounded length; or a Grok voice id, 'grok_' plus the UUID
+// grokSession.routes.ts mints. Anything else (junk, injection attempts,
 // over-long strings) is stored as null.
 //
 // 'live_' was added with the GPT-Live migration. Without it EVERY beacon from a
@@ -82,7 +83,14 @@ export const MAX_DETAIL_BYTES = 2048;
 // 'sess_' is retained deliberately: Phase 1 sessions recorded under the
 // Realtime API still exist in client_events and their historical rows must keep
 // validating.
-const SESSION_ID_RE = /^(live|sess|chat|redteam)_\w{1,56}$/;
+//
+// Grok ids were refused twice over (ai-therapist-384): 'grok' was not in the
+// prefix list, and a UUID's hyphens are not \w. The browser sent the id with
+// every beacon; this check stored null, so no client event (or engagement
+// event, which shares it) of a Grok session could be tied to its session,
+// audio_upload_summary and mic_timeline included.
+const SESSION_ID_RE =
+  /^(?:(?:live|sess|chat|redteam)_\w{1,56}|grok_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 
 export function cleanSessionId(sessionId: unknown): string | null {
   return typeof sessionId === 'string' && sessionId.length <= 64 && SESSION_ID_RE.test(sessionId) ? sessionId : null;
