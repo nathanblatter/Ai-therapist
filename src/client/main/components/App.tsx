@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Socket } from 'socket.io-client';
 import { Loader } from 'react-feather';
 import ChatLog from './ChatLog';
-import SessionControls from './SessionControls';
+import SessionControls, { SessionEndingNotice } from './SessionControls';
 import SessionSettings from './SessionSettings';
 import PreSessionCheckIn, { type CheckinData } from './PreSessionCheckIn';
 import ConsentScreen from './ConsentScreen';
@@ -45,6 +45,7 @@ import {
   isMicMuted,
   type AudioUploader,
 } from '../lib/audioUploader';
+import { createSessionEndGate } from '../lib/sessionEnd';
 import { createParticipantSocket } from '../lib/participantSocket';
 import { GrokVoiceClient } from '../lib/grokVoiceClient';
 import { VoiceOverlayGate, type PendingOverlay } from '../lib/voiceOverlayGate';
@@ -523,6 +524,13 @@ export default function App() {
   // or the chat session is created — drives the "Connecting..." state on the
   // Start button and guards against double-clicks. Always cleared on error.
   const [isConnecting, setIsConnecting] = useState(false);
+  // A repeated End of the same session joins the teardown already running
+  // instead of starting a second one, which used to send POST /end ahead of
+  // the first one's recording drain and lose the tail (ai-therapist-384;
+  // lib/sessionEnd.ts). isEndingSession shows the participant that it is
+  // finishing, so the few seconds it takes do not read as an ignored press.
+  const sessionEndGateRef = useRef(createSessionEndGate());
+  const [isEndingSession, setIsEndingSession] = useState(false);
   // Grok Voice link state (docs/grok-voice.md section 3): the browser socket
   // or the server's xAI link dropped and is being recovered. Shown as a plain
   // banner; the session itself continues when the link comes back.
@@ -2963,7 +2971,21 @@ export default function App() {
     });
   }
 
-  async function stopSession() {
+  function stopSession(): Promise<void> {
+    return sessionEndGateRef.current.run(sessionId, async () => {
+      // Not on a vendor cut: that teardown runs underneath the recovery
+      // screen, which is what the participant sees.
+      if (!moderationTakeoverRef.current) setIsEndingSession(true);
+      try {
+        await runStopSession();
+      } finally {
+        setIsEndingSession(false);
+      }
+    });
+  }
+
+  /** The teardown itself; always entered through stopSession()'s gate. */
+  async function runStopSession() {
     setActiveExercise(null);
     // No overlay may open after the call ends; pending and held ones are dropped.
     voiceOverlayGateRef.current?.reset();
@@ -3902,6 +3924,7 @@ export default function App() {
               Thinking...
             </div>
           )}
+          {isSessionActive && <SessionEndingNotice ending={isEndingSession} />}
           <SessionControls
             startSession={() => {
               if (consentAccepted) {
@@ -3911,6 +3934,7 @@ export default function App() {
               }
             }}
             stopSession={stopSession}
+            isEnding={isEndingSession}
             sendTextMessage={sendTextMessage}
             isSessionActive={isSessionActive}
             localStream={localStream}
