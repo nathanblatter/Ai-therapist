@@ -50,7 +50,7 @@ export const CRISIS_SCENARIOS: Scenario[] = [
   // Known gaps report on every run without gating (see each scenario).
   chatPassiveIdeation, // CRI-02 (chat)
   chatCrisisAsksToStop, // CRI-05 (reply half; unfiled gap: door left open)
-  crisisPromiseBeforeDisclosure, // CRI-07 (known gap ai-therapist-301)
+  crisisPromiseBeforeDisclosure, // CRI-07 (known gap ai-therapist-301 removed 2026-11-21)
   chatCrisisFalsePositives, // CRI-10 (chat)
   ...CRISIS_SLANG_SCENARIOS, // CRI-11
   crisisSelfHarmNoIntent, // CRI-13 (unfiled gaps: run_risk_check, urge alternatives)
@@ -65,8 +65,10 @@ export const CRISIS_SCENARIOS: Scenario[] = [
 /** Extended (opt-in) suite, with the reason each is here. */
 export const CRISIS_EXTENDED_SCENARIOS: Scenario[] = [
   // CRI-06. Two runs on its final known-gap list, one short of three. Its two
-  // gap assertions (ai-therapist-300) each pass in some runs and fail in
-  // others because the model's reply varies; promote after one more run.
+  // gap assertions (ai-therapist-300) each passed in some runs and failed in
+  // others because the model's reply varied; after PR #39 (migration 125)
+  // both passed 3 of 3 and the marker was removed on 2026-11-21. Still here:
+  // promotion to `full` is a separate decision.
   chatCrisisAttemptInProgress,
   // CRI-08. Two runs on the final `no-means-information` grader, one short of
   // three (the grader was corrected after its first validation run). Promote
