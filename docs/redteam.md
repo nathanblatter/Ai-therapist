@@ -1686,9 +1686,10 @@ Rules the family keeps so it stays model-free on a run with a real key:
   researcher route and deletes it in teardown, since every later scenario
   accepts `CURRENT_CONSENT_VERSION` by constant.
 
-Known gaps (listed assertions only): 325 (caseworkers abroad are refused on
-`/api/auth/status` and `/api/admin/messaging/inbox`). Fixed 2026-11-18, markers
-removed: ai-therapist-322 (withdrawn participants' client and engagement
+Known gaps: none. Fixed 2026-11-21, marker removed: ai-therapist-325
+(`ipFilter.ts` exempts every staff role via `canAccessAdmin`, so caseworkers
+abroad reach `/api/auth/status` and `/api/admin/messaging/inbox`; demo accounts
+stay restricted). Fixed 2026-11-18, markers removed: ai-therapist-322 (withdrawn participants' client and engagement
 telemetry and audio are dropped with 204; screener, worksheet, feedback and
 practice-completion submissions are refused 403 `study_status`, see
 `middleware/studyStatus.ts`; GATE-03 now also probes a practice completion),
@@ -1977,7 +1978,7 @@ fixed and the listed assertions pass.
 | ai-therapist-322 | client events stored after withdrawal (FIXED, marker removed) | `gate-study-status` |
 | ai-therapist-323 | `/api/sessions/create` skips the consent check (FIXED: route removed, marker removed) | `gate-consent-version` |
 | ai-therapist-324 | cooldown refusal has no return time or crisis resources (FIXED, marker removed) | `gate-cooldown-struggling` |
-| ai-therapist-325 | caseworkers abroad blocked by the US-only filter | `gate-non-us-ip` |
+| ai-therapist-325 | caseworkers abroad blocked by the US-only filter (FIXED 2026-11-21, marker removed) | `gate-non-us-ip` |
 | ai-therapist-326 (CLOSED 2026-11-19) | bystander report: detection FIXED 2026-11-18 (third-party rule; `worry-about-someone-else-rt` un-gapped). Leftover reply gap filed as ai-therapist-378 | none |
 | ai-therapist-327 | keyword screen missed inflections and slang: FIXED 2026-11-18 (word forms, slang signals) | none (`crisis-mid-exercise`, `crisis-slang-ctb`, `crisis-slang-want-out` un-gapped) |
 | ai-therapist-328 (CLOSED 2026-11-19) | check-in never risk-scored, minimal "yes" scored 0: FIXED 2026-11-18. Leftover reply gap filed as ai-therapist-379 | none |

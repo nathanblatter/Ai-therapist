@@ -1,9 +1,10 @@
 // IP Geolocation filtering middleware
 // Restricts participants to US-based access only
-// Allows therapists and researchers to access from anywhere
+// Allows study staff (therapist, researcher, caseworker) to access from anywhere
 
 import geoip from 'geoip-lite';
 import type { Request, Response, NextFunction } from 'express';
+import { canAccessAdmin } from './auth.js';
 
 /**
  * Get client IP address from request.
@@ -40,17 +41,21 @@ function isUsBasedIp(ip: string | undefined): boolean {
 }
 
 /**
- * Middleware to restrict participant access to US-based IPs only
- * Therapists and researchers can access from anywhere
+ * Middleware to restrict participant access to US-based IPs only.
+ * Staff roles (canAccessAdmin: therapist, researcher, caseworker) can access
+ * from anywhere: the admin app calls routes outside /admin on load
+ * (/api/auth/status, /api/admin/messaging/inbox), so a staff role missing
+ * here is locked out of it abroad. Demo accounts are not staff and stay
+ * restricted like participants.
  */
 export function restrictParticipantsToUs(req: Request, res: Response, next: NextFunction): Response | void {
-  // Skip IP check for admin routes - therapists/researchers handle their own auth
+  // Skip IP check for admin routes - staff roles handle their own auth
   if (req.path.startsWith('/admin')) {
     return next();
   }
 
-  // Skip IP check for authentication routes so therapists/researchers abroad
-  // can log in (their role then exempts them below).
+  // Skip IP check for authentication routes so staff abroad can log in
+  // (their role then exempts them below).
   if (req.path === '/api/auth/login' || req.path === '/api/auth/logout') {
     return next();
   }
@@ -63,8 +68,8 @@ export function restrictParticipantsToUs(req: Request, res: Response, next: Next
   const clientIp = getClientIp(req);
   const userRole = req.session?.userRole;
 
-  // If user is authenticated as therapist or researcher, allow from anywhere
-  if (userRole === 'therapist' || userRole === 'researcher') {
+  // If user is authenticated as study staff, allow from anywhere
+  if (userRole && canAccessAdmin(userRole)) {
     return next();
   }
 
@@ -73,7 +78,7 @@ export function restrictParticipantsToUs(req: Request, res: Response, next: Next
     return res.status(403).json({
       error: 'Access Restricted',
       message:
-        'This service is only available to users within the United States. If you are a therapist or researcher, please log in to access from any location.',
+        'This service is only available to users within the United States. If you are study staff, please log in to access from any location.',
     });
   }
 

@@ -47,12 +47,6 @@ export const nonUsIpGate: Scenario = {
   personaSystem: '',
   beats: [],
   runJudge: false,
-  knownGap: {
-    reason:
-      'ipFilter.ts exempts only therapist and researcher, and /api/admin/* is not under /admin, so a caseworker outside the US gets 403 on /api/auth/status and /api/admin/messaging/inbox, both of which the admin app calls on load.',
-    ref: 'ai-therapist-325',
-    assertionIds: ['staff-app-shell-unaffected-abroad'],
-  },
   setup: async (pool) => {
     await ensureGateAccounts(pool, [
       { username: PARTICIPANT, role: 'participant', userid: PARTICIPANT_ID },

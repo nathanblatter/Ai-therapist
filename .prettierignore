@@ -5,6 +5,8 @@ dist/
 node_modules/
 coverage/
 redteam-results/
+# Agent worktrees are whole checkouts (plus their scratch output) under the repo root.
+.claude/
 *.min.js
 package-lock.json
 docs/
