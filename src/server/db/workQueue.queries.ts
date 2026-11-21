@@ -15,6 +15,7 @@ export type WorkItemType =
   | 'note_awaiting_signature'
   | 'inactivity'
   | 'screener_worsening'
+  | 'screener_trend'
   | 'message_unread_stale'
   | 'survey_drift'
   | 'participant_enrolled'
@@ -259,4 +260,75 @@ export async function expireWorkItemsBySource(
     [itemType, sourceTable, sourceIds],
   );
   return result.rows.map((row) => row.item_id);
+}
+
+/** One PHQ-2 / GAD-2 administration for the screener_trend sweep. */
+export interface ScreenerTrendReadingRow {
+  client_id: number;
+  scale: string;
+  response_id: number;
+  score: number;
+  created_at: string;
+}
+
+/**
+ * The last `perScale` PHQ-2 / GAD-2 administrations per client and scale
+ * (oldest first within each group) for every client with at least one
+ * care-team edge, limited to readings in the last `lookbackDays`. Clients
+ * with no care team are skipped: a pool item for them would be visible to
+ * nobody (MEMBER_VISIBILITY).
+ */
+export async function listScreenerTrendReadings(
+  lookbackDays: number,
+  perScale: number,
+): Promise<ScreenerTrendReadingRow[]> {
+  const result = await pool.query<ScreenerTrendReadingRow>(
+    `WITH ranked AS (
+       SELECT ts.user_id AS client_id, sr.scale, sr.response_id, sr.score,
+              sr.created_at,
+              ROW_NUMBER() OVER (PARTITION BY ts.user_id, sr.scale
+                                 ORDER BY sr.created_at DESC, sr.response_id DESC) AS rn
+       FROM scale_responses sr
+       JOIN therapy_sessions ts ON ts.session_id = sr.session_id
+       WHERE ts.user_id IS NOT NULL
+         AND sr.scale IN ('phq2', 'gad2')
+         AND sr.created_at > now() - ($1 || ' days')::interval
+         AND EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.client_id = ts.user_id)
+     )
+     SELECT client_id, scale, response_id, score, created_at::text AS created_at
+     FROM ranked
+     WHERE rn <= $2
+     ORDER BY client_id, scale, created_at, response_id`,
+    [lookbackDays, perScale],
+  );
+  return result.rows.map((row) => ({
+    ...row,
+    client_id: Number(row.client_id),
+    response_id: Number(row.response_id),
+    score: Number(row.score),
+  }));
+}
+
+/**
+ * Expire a client's open/acked screener_trend items for one scale, except
+ * `keepSourceId` (the item for the current reading, when there is one).
+ * Used when a newer reading supersedes an item and when scores recover.
+ * Returns the expired rows so the caller can emit work_item:updated.
+ */
+export async function expireScreenerTrendItems(
+  clientId: number,
+  scale: string,
+  keepSourceId: string | null,
+): Promise<WorkItemRow[]> {
+  const result = await pool.query<WorkItemRow>(
+    `UPDATE work_items
+     SET status = 'expired'
+     WHERE item_type = 'screener_trend' AND client_id = $1
+       AND detail->>'scale' = $2
+       AND status IN ('open', 'acked')
+       AND ($3::text IS NULL OR source_id <> $3)
+     RETURNING ${ITEM_COLUMNS}`,
+    [clientId, scale, keepSourceId],
+  );
+  return result.rows;
 }

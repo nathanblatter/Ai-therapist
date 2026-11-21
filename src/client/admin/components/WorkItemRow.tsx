@@ -11,6 +11,7 @@ import {
   Mail,
   Check,
   CheckCircle,
+  TrendingUp,
 } from 'react-feather';
 import type { FC } from 'react';
 import type { IconProps } from 'react-feather';
@@ -30,6 +31,7 @@ const TYPE_ICONS: Record<string, FC<IconProps>> = {
   note_awaiting_signature: Edit3,
   inactivity: Clock,
   screener_worsening: Activity,
+  screener_trend: TrendingUp,
   message_unread_stale: Mail,
 };
 
@@ -42,7 +44,17 @@ const TYPE_LABELS: Record<string, string> = {
   note_awaiting_signature: 'Note to sign',
   inactivity: 'Inactivity',
   screener_worsening: 'Screener trend',
+  screener_trend: 'Screening trend (self-report)',
   message_unread_stale: 'Stale unread',
+};
+
+// Item kinds whose title is a full descriptive sentence (wrap, don't truncate)
+// and the plain-language caption that frames them. screener_trend describes
+// what the client's own screener answers did; it must never read as a risk
+// prediction or a diagnosis.
+const TYPE_CAPTIONS: Record<string, string> = {
+  screener_trend:
+    "Describes the client's own PHQ-2 / GAD-2 answers. A screening trend, not a risk prediction or a diagnosis.",
 };
 
 interface WorkItemRowProps {
@@ -56,6 +68,7 @@ export default function WorkItemRow({ item, onAck, onResolve, onSelectClient }: 
   const [showResolve, setShowResolve] = useState(false);
   const [note, setNote] = useState('');
   const Icon = TYPE_ICONS[item.item_type] ?? FileText;
+  const caption = TYPE_CAPTIONS[item.item_type];
   const closed = item.status === 'resolved' || item.status === 'expired';
 
   const submitResolve = async () => {
@@ -74,7 +87,7 @@ export default function WorkItemRow({ item, onAck, onResolve, onSelectClient }: 
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium text-ink truncate">{item.title}</span>
+            <span className={`font-medium text-ink ${caption ? '' : 'truncate'}`}>{item.title}</span>
             <span className={`text-xs px-2 py-0.5 rounded-full ${workItemSeverityClass(item.severity)}`}>
               {item.severity}
             </span>
@@ -104,6 +117,7 @@ export default function WorkItemRow({ item, onAck, onResolve, onSelectClient }: 
               </button>
             )}
           </div>
+          {caption && <p className="text-xs text-gray-600 mt-1">{caption}</p>}
           {item.resolution_note && <p className="text-xs text-gray-600 mt-1">Resolution: {item.resolution_note}</p>}
           {showResolve && !closed && (
             <div className="mt-2 flex items-start gap-2">

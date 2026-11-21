@@ -8,7 +8,7 @@
 //
 // Also owns the sweeps (spec section 5 producers with no source row):
 //   - daily work-item sweep: inactivity / screener_worsening /
-//     message_unread_stale items + expiry reconciliation,
+//     screener_trend / message_unread_stale items + expiry reconciliation,
 //   - hourly digest sweep (delegates to notification.service).
 // Sweep SQL lives here with direct pool access, matching the
 // dataRetention/contentWipe sweep-service pattern.
@@ -21,6 +21,9 @@ import {
   getIrbStudyOrgId,
   getOrgTherapistIds,
   getResearcherIds,
+  listScreenerTrendReadings,
+  expireScreenerTrendItems,
+  type ScreenerTrendReadingRow,
   type WorkItemRow,
   type WorkItemType,
   type WorkItemSeverity,
@@ -30,6 +33,16 @@ import { therapistRoom, caseworkerRoom, ADMIN_BROADCAST_ROOM } from '../utils/ad
 import { denverDateStamp } from '../utils/timezoneHelpers.js';
 import { notifyWorkItem, runDigestSweep, type NotificationRecipient } from './notification.service.js';
 import { createLogger } from '../utils/logger.js';
+import {
+  evaluateScreenerTrend,
+  MAX_GAP_DAYS,
+  RECENCY_DAYS,
+  SCREENING_CUTOFF,
+  SUSTAINED_RUN_LENGTH,
+  TREND_SCALES,
+  type ScreenerReading,
+  type TrendScale,
+} from '../utils/screenerTrend.js';
 
 const log = createLogger('workQueue');
 
@@ -211,6 +224,9 @@ export const DEFAULT_SWEEP_THRESHOLDS: SweepThresholds = {
  *                       re-engagement and reactivate if inactivity recurs)
  *   screener_worsening  pool item when a client's latest screener score rose
  *                       by >= delta vs the previous response (last 30 days)
+ *   screener_trend      pool item describing a PHQ-2/GAD-2 cutoff crossing or
+ *                       sustained increase (runScreenerTrendSweep; one live
+ *                       item per client+scale, expired on recovery)
  *   message_unread_stale item for the thread clinician when a participant
  *                       message has sat unread for `stale_unread_days`
  * All inserts go through enqueueWorkItem (idempotent + notification choke
@@ -218,7 +234,7 @@ export const DEFAULT_SWEEP_THRESHOLDS: SweepThresholds = {
  */
 export async function runWorkItemSweep(
   thresholds: SweepThresholds = DEFAULT_SWEEP_THRESHOLDS,
-  _now: Date = new Date(), // kept for signature stability (scheduler passes it)
+  now: Date = new Date(), // scheduler passes it; screener_trend recency uses it
 ): Promise<void> {
   // --- inactivity: expire stale items for re-engaged clients first ---------
   try {
@@ -317,6 +333,9 @@ export async function runWorkItemSweep(
     log.error({ err }, '[sweep] screener_worsening producer failed');
   }
 
+  // --- screener_trend ------------------------------------------------------
+  await runScreenerTrendSweep(now);
+
   // --- message_unread_stale ------------------------------------------------
   try {
     const stale = await pool.query<{
@@ -355,6 +374,95 @@ export async function runWorkItemSweep(
   } catch (err) {
     log.error({ err }, '[sweep] message_unread_stale producer failed');
   }
+}
+
+/** Readings fetched per client and scale: the rules look at most 3 back. */
+const SCREENER_TREND_READINGS_PER_SCALE = SUSTAINED_RUN_LENGTH;
+/** Enough history that a 3-reading run with maximal gaps still fits. */
+const SCREENER_TREND_LOOKBACK_DAYS = RECENCY_DAYS + 2 * MAX_GAP_DAYS;
+
+export function screenerTrendSourceId(clientId: number, scale: TrendScale, latestResponseId: number): string {
+  return `screener_trend:${clientId}:${scale}:${latestResponseId}`;
+}
+
+/**
+ * screener_trend producer (part of the daily sweep; idea ai-therapist-87).
+ * Evaluates each care-team client's PHQ-2 and GAD-2 series with the pure
+ * rules in utils/screenerTrend.ts and keeps at most ONE live item per
+ * client+scale:
+ *   worsening  -> enqueue a pool item keyed on the LATEST reading's response
+ *                 id (no reopen). Re-running with no new reading is an
+ *                 idempotent no-op, and an item the clinician resolved stays
+ *                 resolved: a persisting trend never re-files. A newer reading
+ *                 that is still worsening is new information: it files a new
+ *                 item and expires the superseded one.
+ *   recovered  -> expire the open/acked item(s) for that client+scale.
+ *   no_change / insufficient_data -> leave everything as is (a stale series
+ *                 neither raises nor clears; the clinician resolves).
+ * Pool items reach the client's care team through the same caseload
+ * visibility as screener_worsening. Descriptive only: this is independent of
+ * crisis detection and never touches crisis state. Never throws.
+ */
+export async function runScreenerTrendSweep(now: Date = new Date()): Promise<void> {
+  let readings: ScreenerTrendReadingRow[];
+  try {
+    readings = await listScreenerTrendReadings(SCREENER_TREND_LOOKBACK_DAYS, SCREENER_TREND_READINGS_PER_SCALE);
+  } catch (err) {
+    log.error({ err }, '[sweep] screener_trend readings query failed');
+    return;
+  }
+
+  const series = new Map<string, { clientId: number; scale: TrendScale; readings: ScreenerReading[] }>();
+  for (const row of readings) {
+    if (!(TREND_SCALES as readonly string[]).includes(row.scale)) continue;
+    const scale = row.scale as TrendScale;
+    const key = `${row.client_id}:${scale}`;
+    let entry = series.get(key);
+    if (!entry) {
+      entry = { clientId: row.client_id, scale, readings: [] };
+      series.set(key, entry);
+    }
+    entry.readings.push({ responseId: row.response_id, score: row.score, administeredAt: row.created_at });
+  }
+
+  for (const { clientId, scale, readings: clientReadings } of series.values()) {
+    try {
+      const result = evaluateScreenerTrend(scale, clientReadings, now);
+      if (result.status === 'worsening') {
+        const sourceId = screenerTrendSourceId(clientId, scale, result.latestResponseId);
+        await enqueueWorkItem({
+          itemType: 'screener_trend',
+          severity: 'warning',
+          title: result.observation,
+          detail: {
+            scale,
+            rules: result.rules,
+            scores: result.scores,
+            from_score: result.fromScore,
+            to_score: result.toScore,
+            cutoff: SCREENING_CUTOFF,
+            latest_response_id: result.latestResponseId,
+            latest_at: result.latestAt,
+            observation: result.observation,
+            kind: 'descriptive_self_report_screening_trend',
+          },
+          sourceTable: 'scale_responses',
+          sourceId,
+          clientId,
+        });
+        await expireAndAnnounce(clientId, scale, sourceId);
+      } else if (result.status === 'recovered') {
+        await expireAndAnnounce(clientId, scale, null);
+      }
+    } catch (err) {
+      log.error({ err, clientId, scale }, '[sweep] screener_trend evaluation failed');
+    }
+  }
+}
+
+async function expireAndAnnounce(clientId: number, scale: TrendScale, keepSourceId: string | null): Promise<void> {
+  const expired = await expireScreenerTrendItems(clientId, scale, keepSourceId);
+  for (const item of expired) await emitWorkItemUpdated(item);
 }
 
 // ---------------------------------------------------------------------------
