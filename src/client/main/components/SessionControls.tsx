@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Mic, MicOff, PhoneOff, Send, Settings, AlertCircle } from 'react-feather';
+import { Mic, MicOff, PhoneOff, Send, Settings, AlertCircle, Loader } from 'react-feather';
 import { toast } from '../../shared/components/Toast';
 import { SpeakerMuteButton } from './AgentVoiceMute';
 
@@ -54,8 +54,31 @@ function SessionStopped({
   );
 }
 
+export const SESSION_ENDING_TEXT = 'Ending your session... this takes a few seconds.';
+
+/**
+ * Shown above the controls while a session end is in flight (ai-therapist-384):
+ * a voice session takes a few seconds to close and to finish saving, and with
+ * nothing on screen the first press looked ignored and was repeated.
+ */
+export function SessionEndingNotice({ ending }: { ending: boolean }) {
+  if (!ending) return null;
+  return (
+    <div className="mb-2 flex items-center justify-center gap-2 text-sm text-gray-600" role="status" aria-live="polite">
+      <Loader size={14} className="animate-spin" aria-hidden="true" />
+      {SESSION_ENDING_TEXT}
+    </div>
+  );
+}
+
 interface SessionActiveProps {
   stopSession: () => void;
+  /**
+   * The session end is in flight. The button shows it and stays pressable: a
+   * further press joins the running teardown (lib/sessionEnd.ts), so it can
+   * neither cut the recording's tail nor become a dead button.
+   */
+  isEnding: boolean;
   sendTextMessage: (message: string) => void;
   localStream: MediaStream | null;
   /**
@@ -82,6 +105,7 @@ interface SessionActiveProps {
 
 function SessionActive({
   stopSession,
+  isEnding,
   sendTextMessage,
   localStream,
   startMicOn,
@@ -170,14 +194,15 @@ function SessionActive({
       <button
         className="p-3 sm:px-4 sm:py-2 bg-royal hover:bg-red-600 text-white rounded-full flex items-center justify-center shrink-0 min-h-[48px] min-w-[48px] sm:min-h-0 sm:min-w-0"
         onClick={stopSession}
-        title="Disconnect"
+        title={isEnding ? 'Ending session' : 'Disconnect'}
+        aria-busy={isEnding}
       >
         {/* Icon is visible only on small screens */}
         <span className="sm:hidden">
-          <PhoneOff size={18} />
+          {isEnding ? <Loader size={18} className="animate-spin" aria-hidden="true" /> : <PhoneOff size={18} />}
         </span>
         {/* Text is hidden on small screens and visible on larger screens */}
-        <span className="hidden sm:inline">Disconnect Session</span>
+        <span className="hidden sm:inline">{isEnding ? 'Ending...' : 'Disconnect Session'}</span>
       </button>
 
       {/* Only show mic button in realtime (voice) mode */}
@@ -272,6 +297,8 @@ function SessionActive({
 interface SessionControlsProps {
   startSession: () => void;
   stopSession: () => void;
+  /** See SessionActiveProps.isEnding. */
+  isEnding?: boolean;
   sendTextMessage: (message: string) => void;
   isSessionActive: boolean;
   localStream: MediaStream | null;
@@ -291,6 +318,7 @@ interface SessionControlsProps {
 export default function SessionControls({
   startSession,
   stopSession,
+  isEnding = false,
   sendTextMessage,
   isSessionActive,
   localStream,
@@ -310,6 +338,7 @@ export default function SessionControls({
       {isSessionActive ? (
         <SessionActive
           stopSession={stopSession}
+          isEnding={isEnding}
           sendTextMessage={sendTextMessage}
           localStream={localStream}
           startMicOn={startMicOn}
