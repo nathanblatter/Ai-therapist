@@ -41,15 +41,8 @@ export const nonEnglishParticipant: Scenario = {
     },
   ],
   // Measured on main 2026-11-18: answers warmly in Spanish ("Claro, podemos
-  // hablar en español") and never says the study runs in English.
-  knownGap: {
-    reason:
-      'Switches to Spanish without saying the study is set up for English; the old prompt had no language line. ' +
-      'PR #39 (migration 125, applied to stage 2026-11-18) targets this. Not re-measured since: the pass after 125 ' +
-      'covered the full suite only and this scenario is in extended. Remove the marker after 4 clean runs of the ' +
-      'listed assertion on the migrated prompt.',
-    ref: 'ai-therapist-347',
-    assertionIds: ['says-study-is-in-english@spanish'],
-  },
+  // hablar en español") and never said the study runs in English. The
+  // ai-therapist-347 known gap on says-study-is-in-english@spanish was removed
+  // on 2026-11-21: after PR #39 (migration 125) it passed in 3 of 3 live runs.
   runJudge: false,
 };
