@@ -54,9 +54,20 @@ describe('restrictParticipantsToUs', () => {
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: 'Access Restricted' }));
   });
 
-  it('lets therapists and researchers through from outside the US', () => {
-    expect(run(mockReq('81.2.69.142', { userRole: 'therapist' })).next).toHaveBeenCalledOnce();
-    expect(run(mockReq('81.2.69.142', { userRole: 'researcher' })).next).toHaveBeenCalledOnce();
+  // ai-therapist-325: the caseworker role was missing, so a caseworker abroad
+  // got 403 on /api/auth/status and the admin app never loaded.
+  it.each(['therapist', 'researcher', 'caseworker'])('lets a %s through from outside the US', (userRole) => {
+    for (const path of ['/api/auth/status', '/api/admin/messaging/inbox']) {
+      const { res, next } = run(mockReq('81.2.69.142', { userRole, path }));
+      expect(next).toHaveBeenCalledOnce();
+      expect(res.status).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each(['participant', 'demo'])('still blocks a signed-in %s from outside the US', (userRole) => {
+    const { res, next } = run(mockReq('81.2.69.142', { userRole, path: '/api/auth/status' }));
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(403);
   });
 
   it('skips the check for admin, login and static asset paths', () => {
