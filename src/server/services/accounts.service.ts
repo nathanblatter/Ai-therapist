@@ -22,6 +22,7 @@ import {
   deleteUser,
   getUserById,
   setSquawkUserId,
+  getSquawkUserId,
   setCognitoSub,
   replaceCognitoSub,
   setCognitoTotpEnrolledAt,
@@ -289,9 +290,12 @@ export async function resetAuthenticator(userid: number | string): Promise<UserR
 export async function updateAccount(userid: number | string, updates: AccountUpdates): Promise<UserRow> {
   const via = provider();
   if (via === 'cognito') return updateInPool(userid, updates);
-  // The row as it is now: Squawk's link, and the role to compare a sent role with.
+  // The row as it is now: the name a rename is compared with, and the role a
+  // sent role is compared with. Squawk's link is read by its own query:
+  // getUserById does not select it (prod has no such column), and reading it
+  // from that row is why nothing was mirrored before (ai-therapist-408).
   const current = via === 'squawk' || updates.role !== undefined ? await getUserById(userid) : null;
-  const linked = via === 'squawk' ? (current?.squawk_user_id ?? null) : null;
+  const linked = via === 'squawk' ? await getSquawkUserId(userid) : null;
   if (linked && updates.username !== undefined && updates.username !== current?.username) {
     throw new Error('Username cannot be changed');
   }
@@ -335,18 +339,16 @@ async function removeFromPool(userid: number | string): Promise<UserRow> {
 export async function removeAccount(userid: number | string): Promise<UserRow> {
   const via = provider();
   if (via === 'cognito') return removeFromPool(userid);
-  const current = via === 'squawk' ? await getUserById(userid) : null;
+  // Read the link before the row goes (its own query: see updateAccount).
+  const linked = via === 'squawk' ? await getSquawkUserId(userid) : null;
   const deleted = await deleteUser(userid);
   await endSessions(deleted.userid ?? userid, 'account deleted');
-  if (current?.squawk_user_id) {
+  if (linked) {
     try {
-      await squawk.deleteUser(current.squawk_user_id);
+      await squawk.deleteUser(linked);
     } catch (err) {
       if (!(err instanceof squawk.SquawkError && err.status === 404)) {
-        log.error(
-          { err, userid, squawkUserId: current.squawk_user_id },
-          'Squawk account deletion failed; the local row is gone',
-        );
+        log.error({ err, userid, squawkUserId: linked }, 'Squawk account deletion failed; the local row is gone');
       }
     }
   }
