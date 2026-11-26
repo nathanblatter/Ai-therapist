@@ -18,6 +18,7 @@ const CALLBACK_ERRORS: Record<string, string> = {
   sign_in_failed: 'Sign-in did not complete. Try again.',
   owner_not_mapped: 'The owner passkey is not mapped to an account here yet.',
   server_error: 'The sign-in service is unavailable. Try again shortly.',
+  too_many_attempts: 'Too many sign-in attempts from this network. Wait a few minutes and try again.',
 };
 
 interface SquawkConfig {

@@ -21,6 +21,7 @@
 // same fields the legacy login did, after regenerating the session id. The
 // password is typed on Cognito's page and never reaches this app.
 import { Router, type Request, type Response } from 'express';
+import rateLimit from 'express-rate-limit';
 import { createHash, randomBytes } from 'node:crypto';
 import {
   getCognitoTotpEnrolledAt,
@@ -195,8 +196,35 @@ function otpauthUrl(username: string, secret: string): string {
   return `otpauth://totp/${label}?secret=${encodeURIComponent(secret)}&issuer=${encodeURIComponent(issuer)}`;
 }
 
+/** Sign-in starts and callbacks per address in 15 minutes. Generous: a
+ *  campus or a clinic can sit behind one address, and every sign-in is one
+ *  start and one callback. It bounds a script, not a classroom. Each start
+ *  writes a session row, which is what an unbounded caller would fill. */
+export const SIGN_IN_LIMIT = 300;
+/** Enrolment calls per address in 15 minutes. A hold already allows only 8
+ *  code attempts; this bounds how many holds one address can work through. */
+export const ENROL_LIMIT = 40;
+
+function limiter(limit: number, onLimit: (req: Request, res: Response) => void) {
+  return rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res) => {
+      log.warn({ path: req.path }, 'Cognito sign-in rate limit reached for one address');
+      onLimit(req, res);
+    },
+  });
+}
+
 export default function cognitoAuthRoutes(): Router {
   const router = Router();
+  // Browser navigations: answer with the login page and a reason, not JSON.
+  const signInLimiter = limiter(SIGN_IN_LIMIT, (_req, res) => loginError(res, 'too_many_attempts'));
+  const enrolLimiter = limiter(ENROL_LIMIT, (_req, res) =>
+    res.status(429).json({ error: 'Too many attempts. Try again in a few minutes.', code: 'too_many_attempts' }),
+  );
 
   router.get('/api/auth/cognito/config', (_req, res) => {
     res.json({ enabled: cognito.enabled() });
@@ -204,7 +232,7 @@ export default function cognitoAuthRoutes(): Router {
 
   // Start: stash PKCE verifier, state and nonce on the session, send the
   // browser to the hosted sign-in page.
-  router.get('/api/auth/cognito/start', requireCognito, (req, res) => {
+  router.get('/api/auth/cognito/start', requireCognito, signInLimiter, (req, res) => {
     const { verifier, challenge } = pkcePair();
     const state = randomBytes(24).toString('base64url');
     const nonce = randomBytes(24).toString('base64url');
@@ -219,7 +247,7 @@ export default function cognitoAuthRoutes(): Router {
   });
 
   // Callback: exchange the code, verify the ID token, map to the local account.
-  router.get('/api/auth/cognito/callback', requireCognito, async (req, res) => {
+  router.get('/api/auth/cognito/callback', requireCognito, signInLimiter, async (req, res) => {
     const { code, state, error } = req.query as Record<string, unknown>;
     const stashed = req.session.cognitoAuth;
     delete req.session.cognitoAuth;
@@ -328,7 +356,7 @@ export default function cognitoAuthRoutes(): Router {
     res.json(pending ? { pending: true, username: pending.username } : { pending: false });
   });
 
-  router.post('/api/auth/cognito/totp/begin', requireCognito, async (req, res) => {
+  router.post('/api/auth/cognito/totp/begin', requireCognito, enrolLimiter, async (req, res) => {
     const pending = pendingEnrolment(req);
     if (!pending)
       return res.status(401).json({ error: 'Sign in again to set up your authenticator app.', code: 'enrol_expired' });
@@ -343,7 +371,7 @@ export default function cognitoAuthRoutes(): Router {
     }
   });
 
-  router.post('/api/auth/cognito/totp/verify', requireCognito, async (req, res) => {
+  router.post('/api/auth/cognito/totp/verify', requireCognito, enrolLimiter, async (req, res) => {
     const pending = pendingEnrolment(req);
     if (!pending)
       return res.status(401).json({ error: 'Sign in again to set up your authenticator app.', code: 'enrol_expired' });
