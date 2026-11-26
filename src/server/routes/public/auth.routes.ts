@@ -160,6 +160,11 @@ export default function authRoutes(): Router {
       if (error instanceof Error && error.name === 'ResearchOrgCaseworkerError') {
         return res.status(400).json({ error: error.message });
       }
+      if (error instanceof Error && error.name === 'AccountSyncError') {
+        // 400 when the provider refused the password itself, 502 otherwise.
+        const refused = (error as { code?: string }).code === 'password_rejected';
+        return res.status(refused ? 400 : 502).json({ error: error.message });
+      }
       log.error({ err: error }, 'Registration error');
       res.status(500).json({ error: 'Registration failed' });
     }

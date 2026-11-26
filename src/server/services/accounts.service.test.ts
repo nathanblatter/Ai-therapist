@@ -1,0 +1,357 @@
+// Account lifecycle against the sign-in provider (auth-service-33 Squawk,
+// ai-therapist-396 Cognito): which provider is written, in what order, and
+// what a provider failure leaves behind. The db, both providers and the pool
+// admin client are mocked: no database, no network.
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+const db = vi.hoisted(() => ({
+  createUser: vi.fn(),
+  updateUser: vi.fn(),
+  deleteUser: vi.fn(),
+  getUserById: vi.fn(),
+  setSquawkUserId: vi.fn(),
+  setCognitoSub: vi.fn(),
+}));
+vi.mock('../db/index.js', () => db);
+
+const squawk = vi.hoisted(() => {
+  class SquawkError extends Error {
+    constructor(
+      public readonly status: number,
+      public readonly code: string,
+    ) {
+      super(`squawk ${status} ${code}`);
+    }
+  }
+  return {
+    SquawkError,
+    enabled: vi.fn(() => false),
+    createPasswordUser: vi.fn(),
+    setPassword: vi.fn(),
+    setRole: vi.fn(),
+    deleteUser: vi.fn(),
+  };
+});
+vi.mock('./squawk.service.js', () => squawk);
+
+const cognito = vi.hoisted(() => ({ enabled: vi.fn(() => false) }));
+vi.mock('./cognito.service.js', () => cognito);
+
+const pool = vi.hoisted(() => {
+  class CognitoAdminError extends Error {
+    constructor(
+      public readonly code: string,
+      public readonly operation = 'Op',
+      public readonly awsName = 'SomeException',
+    ) {
+      super(`cognito ${operation} ${awsName}`);
+      this.name = 'CognitoAdminError';
+    }
+  }
+  return {
+    CognitoAdminError,
+    createUser: vi.fn(),
+    setPassword: vi.fn(),
+    setRole: vi.fn(),
+    deleteUser: vi.fn(),
+    getUserSub: vi.fn(),
+  };
+});
+vi.mock('./cognitoAdmin.service.js', () => pool);
+
+const email = vi.hoisted(() => ({ clearEmailIfIneligible: vi.fn() }));
+vi.mock('./researcherEmail.service.js', () => email);
+
+const { registerAccount, updateAccount, removeAccount, PASSWORD_REJECTED_MESSAGE } = await import(
+  './accounts.service.js'
+);
+
+const ROW = { userid: 7, username: 'p_one', role: 'participant' };
+
+function expectNoPoolCalls(): void {
+  expect(pool.createUser).not.toHaveBeenCalled();
+  expect(pool.setPassword).not.toHaveBeenCalled();
+  expect(pool.setRole).not.toHaveBeenCalled();
+  expect(pool.deleteUser).not.toHaveBeenCalled();
+}
+
+function expectNoSquawkCalls(): void {
+  expect(squawk.createPasswordUser).not.toHaveBeenCalled();
+  expect(squawk.setPassword).not.toHaveBeenCalled();
+  expect(squawk.setRole).not.toHaveBeenCalled();
+  expect(squawk.deleteUser).not.toHaveBeenCalled();
+}
+
+beforeEach(() => {
+  vi.resetAllMocks();
+  cognito.enabled.mockReturnValue(false);
+  squawk.enabled.mockReturnValue(false);
+  db.createUser.mockResolvedValue({ ...ROW });
+  db.updateUser.mockResolvedValue({ ...ROW });
+  db.deleteUser.mockResolvedValue({ userid: 7, username: 'p_one' });
+  db.getUserById.mockResolvedValue({ ...ROW });
+  db.setCognitoSub.mockResolvedValue(undefined);
+  db.setSquawkUserId.mockResolvedValue(undefined);
+  email.clearEmailIfIneligible.mockResolvedValue(undefined);
+  pool.createUser.mockResolvedValue({ sub: 'sub-123' });
+  pool.setPassword.mockResolvedValue(undefined);
+  pool.setRole.mockResolvedValue(undefined);
+  pool.deleteUser.mockResolvedValue(undefined);
+});
+
+describe('no provider configured', () => {
+  it('only writes the local row', async () => {
+    await expect(registerAccount('p_one', 'a long passphrase', 'participant')).resolves.toEqual(ROW);
+    await updateAccount(7, { password: 'another passphrase', role: 'therapist', username: 'renamed' });
+    await removeAccount(7);
+    expect(db.createUser).toHaveBeenCalledWith('p_one', 'a long passphrase', 'participant');
+    expect(db.updateUser).toHaveBeenCalledTimes(1);
+    expect(db.deleteUser).toHaveBeenCalledTimes(1);
+    expect(db.getUserById).not.toHaveBeenCalled();
+    expectNoPoolCalls();
+    expectNoSquawkCalls();
+  });
+});
+
+describe('Cognito configured', () => {
+  beforeEach(() => cognito.enabled.mockReturnValue(true));
+
+  describe('registerAccount', () => {
+    it('writes the row, then the pool user, then the subject', async () => {
+      const order: string[] = [];
+      db.createUser.mockImplementation(async () => {
+        order.push('row');
+        return { ...ROW };
+      });
+      pool.createUser.mockImplementation(async () => {
+        order.push('pool');
+        return { sub: 'sub-123' };
+      });
+      const user = await registerAccount('p_one', 'a long passphrase', 'participant', { orgId: 3 });
+      expect(order).toEqual(['row', 'pool']);
+      expect(db.createUser).toHaveBeenCalledWith('p_one', 'a long passphrase', 'participant', { orgId: 3 });
+      expect(pool.createUser).toHaveBeenCalledWith('p_one', 'a long passphrase', 'participant');
+      expect(db.setCognitoSub).toHaveBeenCalledWith(7, 'sub-123');
+      expect(user).toEqual({ ...ROW, cognito_sub: 'sub-123' });
+      expect(db.deleteUser).not.toHaveBeenCalled();
+    });
+
+    it('rolls the row back and says the username is taken when the pool has it', async () => {
+      pool.createUser.mockRejectedValue(new pool.CognitoAdminError('username_taken'));
+      const err = await registerAccount('p_one', 'a long passphrase', 'participant').catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toBe('Username already exists');
+      expect((err as Error).name).toBe('Error');
+      expect(db.deleteUser).toHaveBeenCalledWith(7);
+      expect(db.setCognitoSub).not.toHaveBeenCalled();
+    });
+
+    it('rolls the row back with a clean error when the pool refuses the password', async () => {
+      pool.createUser.mockRejectedValue(new pool.CognitoAdminError('password_rejected'));
+      await expect(registerAccount('p_one', 'a long passphrase', 'participant')).rejects.toMatchObject({
+        name: 'AccountSyncError',
+        code: 'password_rejected',
+        message: PASSWORD_REJECTED_MESSAGE,
+      });
+      expect(db.deleteUser).toHaveBeenCalledWith(7);
+    });
+
+    it('rolls the row back on any other pool failure', async () => {
+      pool.createUser.mockRejectedValue(new pool.CognitoAdminError('failed'));
+      await expect(registerAccount('p_one', 'a long passphrase', 'participant')).rejects.toMatchObject({
+        name: 'AccountSyncError',
+        message: 'Sign-in service rejected the new account',
+        code: undefined,
+      });
+      expect(db.deleteUser).toHaveBeenCalledWith(7);
+    });
+
+    it('still surfaces the pool failure when the local rollback fails too', async () => {
+      pool.createUser.mockRejectedValue(new Error('socket hang up'));
+      db.deleteUser.mockRejectedValue(new Error('db down'));
+      await expect(registerAccount('p_one', 'a long passphrase', 'participant')).rejects.toMatchObject({
+        name: 'AccountSyncError',
+      });
+    });
+
+    it('does not call the pool when the local row cannot be created', async () => {
+      db.createUser.mockRejectedValue(new Error('Username already exists'));
+      await expect(registerAccount('p_one', 'a long passphrase', 'participant')).rejects.toThrow(
+        'Username already exists',
+      );
+      expectNoPoolCalls();
+    });
+
+    it('keeps the finished account when the subject is missing or cannot be stored', async () => {
+      pool.createUser.mockResolvedValueOnce({ sub: null });
+      await expect(registerAccount('p_one', 'a long passphrase', 'participant')).resolves.toEqual(ROW);
+      expect(db.setCognitoSub).not.toHaveBeenCalled();
+
+      db.setCognitoSub.mockRejectedValue(new Error('db down'));
+      await expect(registerAccount('p_one', 'a long passphrase', 'participant')).resolves.toEqual(ROW);
+      expect(db.deleteUser).not.toHaveBeenCalled();
+      expect(pool.deleteUser).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('updateAccount', () => {
+    it('writes the row, then the password, then the role, by username', async () => {
+      const order: string[] = [];
+      db.updateUser.mockImplementation(async () => {
+        order.push('row');
+        return { ...ROW, role: 'therapist' };
+      });
+      pool.setPassword.mockImplementation(async () => void order.push('password'));
+      pool.setRole.mockImplementation(async () => void order.push('role'));
+      const updated = await updateAccount(7, { password: 'another passphrase', role: 'therapist' });
+      expect(order).toEqual(['row', 'password', 'role']);
+      expect(pool.setPassword).toHaveBeenCalledWith('p_one', 'another passphrase');
+      expect(pool.setRole).toHaveBeenCalledWith('p_one', 'therapist');
+      expect(email.clearEmailIfIneligible).toHaveBeenCalledWith(7, 'therapist');
+      expect(updated.role).toBe('therapist');
+    });
+
+    it('mirrors only what changed', async () => {
+      await updateAccount(7, { role: 'researcher' });
+      expect(pool.setRole).toHaveBeenCalledWith('p_one', 'researcher');
+      expect(pool.setPassword).not.toHaveBeenCalled();
+    });
+
+    it('refuses a rename before anything is written', async () => {
+      await expect(updateAccount(7, { username: 'renamed' })).rejects.toThrow('Username cannot be changed');
+      expect(db.updateUser).not.toHaveBeenCalled();
+      expectNoPoolCalls();
+    });
+
+    it('lets an unchanged username through without a pool call', async () => {
+      await updateAccount(7, { username: 'p_one' });
+      expect(db.updateUser).toHaveBeenCalledTimes(1);
+      expectNoPoolCalls();
+    });
+
+    it('surfaces a pool failure and leaves the local change in place', async () => {
+      pool.setRole.mockRejectedValue(new pool.CognitoAdminError('failed'));
+      await expect(updateAccount(7, { role: 'therapist' })).rejects.toMatchObject({
+        name: 'AccountSyncError',
+        message: 'Sign-in service rejected the change',
+      });
+      expect(db.updateUser).toHaveBeenCalledTimes(1);
+      expect(db.deleteUser).not.toHaveBeenCalled();
+    });
+
+    it('does not change the role in the pool when the password was refused', async () => {
+      pool.setPassword.mockRejectedValue(new pool.CognitoAdminError('password_rejected'));
+      await expect(updateAccount(7, { password: 'another passphrase', role: 'therapist' })).rejects.toMatchObject({
+        name: 'AccountSyncError',
+        code: 'password_rejected',
+        message: PASSWORD_REJECTED_MESSAGE,
+      });
+      expect(pool.setRole).not.toHaveBeenCalled();
+    });
+
+    it('says so when the pool has no such account', async () => {
+      pool.setPassword.mockRejectedValue(new pool.CognitoAdminError('user_not_found'));
+      await expect(updateAccount(7, { password: 'another passphrase' })).rejects.toMatchObject({
+        name: 'AccountSyncError',
+        message: 'This account does not exist in the sign-in service',
+      });
+    });
+
+    it('does not call the pool when the row does not exist', async () => {
+      db.getUserById.mockResolvedValue(null);
+      db.updateUser.mockRejectedValue(new Error('User not found'));
+      await expect(updateAccount(99, { role: 'therapist' })).rejects.toThrow('User not found');
+      expectNoPoolCalls();
+    });
+  });
+
+  describe('removeAccount', () => {
+    it('deletes the row, then the pool user by username', async () => {
+      const order: string[] = [];
+      db.deleteUser.mockImplementation(async () => {
+        order.push('row');
+        return { userid: 7, username: 'p_one' };
+      });
+      pool.deleteUser.mockImplementation(async () => void order.push('pool'));
+      await expect(removeAccount(7)).resolves.toEqual({ userid: 7, username: 'p_one' });
+      expect(order).toEqual(['row', 'pool']);
+      expect(pool.deleteUser).toHaveBeenCalledWith('p_one');
+    });
+
+    it('treats an account the pool never had as deleted', async () => {
+      pool.deleteUser.mockRejectedValue(new pool.CognitoAdminError('user_not_found'));
+      await expect(removeAccount(7)).resolves.toEqual({ userid: 7, username: 'p_one' });
+    });
+
+    it('surfaces a pool failure; the row is already gone', async () => {
+      pool.deleteUser.mockRejectedValue(new pool.CognitoAdminError('failed'));
+      await expect(removeAccount(7)).rejects.toMatchObject({ name: 'AccountSyncError' });
+      expect(db.deleteUser).toHaveBeenCalledWith(7);
+    });
+
+    it('does not call the pool when the row does not exist', async () => {
+      db.deleteUser.mockRejectedValue(new Error('User not found'));
+      await expect(removeAccount(99)).rejects.toThrow('User not found');
+      expectNoPoolCalls();
+    });
+  });
+});
+
+describe('both providers configured', () => {
+  beforeEach(() => {
+    cognito.enabled.mockReturnValue(true);
+    squawk.enabled.mockReturnValue(true);
+    db.getUserById.mockResolvedValue({ ...ROW, squawk_user_id: 'sq-1' });
+  });
+
+  it('mirrors to the pool only', async () => {
+    await registerAccount('p_one', 'a long passphrase', 'participant');
+    await updateAccount(7, { password: 'another passphrase', role: 'therapist' });
+    await removeAccount(7);
+    expect(pool.createUser).toHaveBeenCalledTimes(1);
+    expect(pool.setPassword).toHaveBeenCalledTimes(1);
+    expect(pool.setRole).toHaveBeenCalledTimes(1);
+    expect(pool.deleteUser).toHaveBeenCalledTimes(1);
+    expect(db.setSquawkUserId).not.toHaveBeenCalled();
+    expectNoSquawkCalls();
+  });
+});
+
+describe('only Squawk configured (unchanged)', () => {
+  beforeEach(() => {
+    squawk.enabled.mockReturnValue(true);
+    db.getUserById.mockResolvedValue({ ...ROW, squawk_user_id: 'sq-1' });
+    squawk.createPasswordUser.mockResolvedValue({ id: 'sq-1' });
+  });
+
+  it('creates, updates and deletes in Squawk and never in the pool', async () => {
+    const user = await registerAccount('p_one', 'a long passphrase', 'participant');
+    expect(squawk.createPasswordUser).toHaveBeenCalledWith('p_one', 'a long passphrase', 'participant');
+    expect(db.setSquawkUserId).toHaveBeenCalledWith(7, 'sq-1');
+    expect(user).toEqual({ ...ROW, squawk_user_id: 'sq-1' });
+
+    await updateAccount(7, { password: 'another passphrase', role: 'therapist' });
+    expect(squawk.setPassword).toHaveBeenCalledWith('sq-1', 'another passphrase');
+    expect(squawk.setRole).toHaveBeenCalledWith('sq-1', 'therapist');
+
+    await removeAccount(7);
+    expect(squawk.deleteUser).toHaveBeenCalledWith('sq-1');
+
+    expect(db.setCognitoSub).not.toHaveBeenCalled();
+    expectNoPoolCalls();
+  });
+
+  it('rolls the row back and maps a taken identity', async () => {
+    squawk.createPasswordUser.mockRejectedValue(new squawk.SquawkError(409, 'identity_taken'));
+    await expect(registerAccount('p_one', 'a long passphrase', 'participant')).rejects.toThrow(
+      'Username already exists',
+    );
+    expect(db.deleteUser).toHaveBeenCalledWith(7);
+  });
+
+  it('refuses a rename of a linked account and swallows a failed Squawk delete', async () => {
+    await expect(updateAccount(7, { username: 'renamed' })).rejects.toThrow('Username cannot be changed');
+    squawk.deleteUser.mockRejectedValue(new squawk.SquawkError(500, 'server_error'));
+    await expect(removeAccount(7)).resolves.toEqual({ userid: 7, username: 'p_one' });
+  });
+});

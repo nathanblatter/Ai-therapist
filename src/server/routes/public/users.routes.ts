@@ -282,10 +282,14 @@ export default function usersRoutes(): Router {
         return res.status(404).json({ error: 'User not found' });
       }
       if (error instanceof Error && error.message === 'Username cannot be changed') {
-        return res.status(409).json({ error: 'Usernames cannot change once the account signs in through Squawk' });
+        return res
+          .status(409)
+          .json({ error: 'Usernames cannot change once the account exists in the sign-in service' });
       }
       if (error instanceof Error && error.name === 'AccountSyncError') {
-        return res.status(502).json({ error: error.message });
+        // 400 when the provider refused the password itself, 502 otherwise.
+        const refused = (error as { code?: string }).code === 'password_rejected';
+        return res.status(refused ? 400 : 502).json({ error: error.message });
       }
       log.error({ err: error }, 'Error updating user');
       res.status(500).json({ error: 'Failed to update user' });
@@ -322,6 +326,10 @@ export default function usersRoutes(): Router {
       if (error instanceof Error && error.message === 'User not found') {
         return res.status(404).json({ error: 'User not found' });
       }
+      // The row is gone but the provider kept the sign-in: say so.
+      if (error instanceof Error && error.name === 'AccountSyncError') {
+        return res.status(502).json({ error: error.message });
+      }
       log.error({ err: error }, 'Error deleting user');
       res.status(500).json({ error: 'Failed to delete user' });
     }
@@ -355,7 +363,9 @@ export default function usersRoutes(): Router {
         return res.status(400).json({ error: error.message });
       }
       if (error instanceof Error && error.name === 'AccountSyncError') {
-        return res.status(502).json({ error: error.message });
+        // 400 when the provider refused the password itself, 502 otherwise.
+        const refused = (error as { code?: string }).code === 'password_rejected';
+        return res.status(refused ? 400 : 502).json({ error: error.message });
       }
       log.error({ err: error }, 'User creation error');
       res.status(500).json({ error: 'Failed to create user' });
