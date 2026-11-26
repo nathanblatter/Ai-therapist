@@ -15,6 +15,9 @@ import { getSystemConfig } from '../../utils/sessionHelpers.js';
 import {
   getAllUsers,
   getUserById,
+  insertAccountAudit,
+  listAccountAudit,
+  type AccountAuditAction,
   getUserPreferences,
   updateUserPreferences,
   setUserPreferredTheme,
@@ -74,6 +77,25 @@ async function accountInReach(req: Request, userid: string): Promise<UserRow | n
   return target;
 }
 
+/** Record an account change in the audit trail (migration 132), with the
+ *  signed-in person as the actor. Never throws. */
+function audit(
+  req: Request,
+  action: AccountAuditAction,
+  target: { userid?: number | null; username?: string | null; organization_id?: number | null },
+  detail?: Record<string, unknown>,
+): Promise<void> {
+  return insertAccountAudit({
+    action,
+    targetUserId: typeof target.userid === 'number' ? target.userid : null,
+    targetUsername: target.username ?? null,
+    organizationId: target.organization_id ?? req.session.orgId ?? null,
+    actorUserId: req.session.userId ?? null,
+    actorUsername: req.session.username ?? null,
+    detail,
+  });
+}
+
 export default function usersRoutes(): Router {
   const router = Router();
 
@@ -98,6 +120,21 @@ export default function usersRoutes(): Router {
     } catch (error) {
       log.error({ err: error }, 'Error fetching users');
       res.status(500).json({ error: 'Failed to fetch users' });
+    }
+  });
+
+  // GET /api/users/audit - the account audit trail of the researcher's own
+  // organisation, newest first (migration 132). Registered before
+  // /api/users/:userid so "audit" is not read as an id.
+  router.get('/api/users/audit', requireRole('researcher'), async (req, res) => {
+    try {
+      const orgId = await orgIdFor(req);
+      if (orgId === null) return res.json({ audit: [] });
+      const limit = Number.parseInt(String(req.query.limit ?? ''), 10);
+      res.json({ audit: await listAccountAudit(orgId, Number.isFinite(limit) ? limit : 200) });
+    } catch (error) {
+      log.error({ err: error }, 'Error reading the account audit trail');
+      res.status(500).json({ error: 'Failed to read the account audit trail' });
     }
   });
 
@@ -259,7 +296,10 @@ export default function usersRoutes(): Router {
     }
 
     try {
-      if (!isSelf && !(await accountInReach(req, userid))) {
+      // The row before the change: who may be reached, and what the audit
+      // trail records as "from".
+      const before = await accountInReach(req, userid);
+      if (!before) {
         return res.status(404).json({ error: 'User not found' });
       }
       const updates: UserUpdates = {};
@@ -289,6 +329,19 @@ export default function usersRoutes(): Router {
         // Unreachable (the empty-update guard above), kept for the type.
         return res.status(400).json({ error: 'No fields to update' });
       }
+
+      // Audit what actually changed (the form sends the role and username
+      // with every save). Never the password or the address themselves.
+      const self = isSelf ? { self: true } : {};
+      const target = { userid: before.userid, username: before.username, organization_id: before.organization_id };
+      if (updates.role !== undefined && updates.role !== before.role) {
+        await audit(req, 'role_changed', target, { from: before.role, to: updates.role });
+      }
+      if (updates.username !== undefined && updates.username !== before.username) {
+        await audit(req, 'username_changed', target, { from: before.username, to: updates.username, ...self });
+      }
+      if (updates.password !== undefined) await audit(req, 'password_changed', target, self);
+      if (email !== undefined) await audit(req, 'email_changed', target, { set: email !== null && email !== '' });
 
       if (isSelf) {
         if (updates.username) req.session.username = updatedUser.username;
@@ -334,6 +387,7 @@ export default function usersRoutes(): Router {
       }
       const { user, address } = await provisionStudyAddress(req.params.userid);
       log.info({ userid: user.userid, by: req.session.userId, address }, 'study email address provisioned');
+      await audit(req, 'email_changed', user, { set: true, provisioned: true });
       res.json({
         success: true,
         email: address,
@@ -360,10 +414,12 @@ export default function usersRoutes(): Router {
     }
     try {
       // Same reach as the user list: accounts in the researcher's own organisation.
-      if (!(await accountInReach(req, req.params.userid))) {
+      const target = await accountInReach(req, req.params.userid);
+      if (!target) {
         return res.status(404).json({ error: 'User not found' });
       }
       const user = await resetAuthenticator(req.params.userid);
+      await audit(req, 'authenticator_reset', target, { role: target.role });
       log.warn(
         { userid: user.userid, username: user.username, by: req.session.userId, byUsername: req.session.username },
         'authenticator app reset by a researcher',
@@ -385,10 +441,21 @@ export default function usersRoutes(): Router {
   router.delete('/api/users/:userid', requireRole('researcher'), async (req, res) => {
     const { userid } = req.params;
     try {
-      if (!(await accountInReach(req, userid))) {
+      const target = await accountInReach(req, userid);
+      if (!target) {
         return res.status(404).json({ error: 'User not found' });
       }
-      const deletedUser = await removeAccount(userid);
+      // Recorded before the pool call can fail: the local row is gone either way.
+      let deletedUser;
+      try {
+        deletedUser = await removeAccount(userid);
+      } catch (removeErr) {
+        if (removeErr instanceof Error && removeErr.name === 'AccountSyncError') {
+          await audit(req, 'account_deleted', target, { role: target.role, signInServiceRemoved: false });
+        }
+        throw removeErr;
+      }
+      await audit(req, 'account_deleted', target, { role: target.role });
       res.json({ success: true, message: `User ${deletedUser.username} deleted successfully` });
     } catch (error: unknown) {
       if (error instanceof Error && error.message === 'User not found') {
@@ -420,6 +487,7 @@ export default function usersRoutes(): Router {
 
     try {
       const user = await registerAccount(username, password, role);
+      await audit(req, 'account_created', user, { role: user.role, via: 'user_management' });
       res.json({ success: true, user: { userid: user.userid, username: user.username, role: user.role } });
     } catch (error: unknown) {
       if (error instanceof Error && error.message === 'Username already exists') {
