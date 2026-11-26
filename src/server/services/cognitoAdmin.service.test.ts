@@ -321,3 +321,20 @@ describe('authenticator-app codes', () => {
     ]);
   });
 });
+
+describe('explicitCredentials', () => {
+  it('uses the pool key pair only when both halves are set', () => {
+    expect(
+      admin.explicitCredentials({ COGNITO_AWS_ACCESS_KEY_ID: ' AKIAPOOL ', COGNITO_AWS_SECRET_ACCESS_KEY: 'secret' }),
+    ).toEqual({ credentials: { accessKeyId: 'AKIAPOOL', secretAccessKey: 'secret' } });
+    expect(admin.explicitCredentials({ COGNITO_AWS_ACCESS_KEY_ID: 'AKIAPOOL' })).toEqual({});
+    expect(admin.explicitCredentials({ COGNITO_AWS_SECRET_ACCESS_KEY: 'secret' })).toEqual({});
+    expect(admin.explicitCredentials({ COGNITO_AWS_ACCESS_KEY_ID: '', COGNITO_AWS_SECRET_ACCESS_KEY: '  ' })).toEqual(
+      {},
+    );
+  });
+
+  it("never borrows the deployment's general AWS key", () => {
+    expect(admin.explicitCredentials({ AWS_ACCESS_KEY_ID: 'AKIAOTHER', AWS_SECRET_ACCESS_KEY: 'other' })).toEqual({});
+  });
+});

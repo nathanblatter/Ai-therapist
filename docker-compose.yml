@@ -33,6 +33,9 @@ services:
       COGNITO_CLIENT_ID: ${COGNITO_CLIENT_ID:-}
       COGNITO_CLIENT_SECRET: ${COGNITO_CLIENT_SECRET:-}
       COGNITO_DOMAIN: ${COGNITO_DOMAIN:-}
+      # Key pair for the Cognito pool only (scripts/cognito/iam-app-policy.json).
+      COGNITO_AWS_ACCESS_KEY_ID: ${COGNITO_AWS_ACCESS_KEY_ID:-}
+      COGNITO_AWS_SECRET_ACCESS_KEY: ${COGNITO_AWS_SECRET_ACCESS_KEY:-}
       # Magic-link demo access. Unset => /demo/:token 404s (feature disabled).
       DEMO_MAGIC_TOKEN: ${DEMO_MAGIC_TOKEN}
       # Stage is the public demo: keep the demo pill/overlay + [DEMO] titles.

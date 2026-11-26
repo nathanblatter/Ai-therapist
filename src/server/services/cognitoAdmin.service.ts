@@ -10,9 +10,10 @@
 //    and no email attribute is written.
 //  * A user sits in exactly one role group (the group is named after the app
 //    role; cognito.service.ts refuses a sign-in with none or more than one).
-//  * Credentials come from the AWS SDK's default chain (an instance or
-//    container role, or AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY in the
-//    environment), as the crisis SMS client does. The identity needs
+//  * Credentials: COGNITO_AWS_ACCESS_KEY_ID + COGNITO_AWS_SECRET_ACCESS_KEY
+//    when both are set (a key pair for the pool only), otherwise the AWS
+//    SDK's default chain (an instance or container role, or
+//    AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY). The identity needs
 //    scripts/cognito/iam-app-policy.json and nothing more: every action used
 //    here is listed there.
 //
@@ -74,10 +75,27 @@ interface Sender {
 
 let client: Sender | null = null;
 
+/** A key pair meant for the pool and nothing else, when one is configured
+ *  (COGNITO_AWS_ACCESS_KEY_ID + COGNITO_AWS_SECRET_ACCESS_KEY). It keeps the
+ *  pool identity apart from whatever AWS_ACCESS_KEY_ID the deployment holds
+ *  for other jobs, and it is the only way credentials reach the stage
+ *  container, whose compose file passes variables one by one. Without both,
+ *  the SDK's default chain is used (an instance or container role, or
+ *  AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY). */
+export function explicitCredentials(env: NodeJS.ProcessEnv = process.env): {
+  credentials?: { accessKeyId: string; secretAccessKey: string };
+} {
+  const accessKeyId = (env.COGNITO_AWS_ACCESS_KEY_ID ?? '').trim();
+  const secretAccessKey = (env.COGNITO_AWS_SECRET_ACCESS_KEY ?? '').trim();
+  if (!accessKeyId || !secretAccessKey) return {};
+  return { credentials: { accessKeyId, secretAccessKey } };
+}
+
 function getClient(): Sender {
   if (!client) {
     client = new CognitoIdentityProviderClient({
       region: cognito.REGION,
+      ...explicitCredentials(),
       // One retry at most: an account form is waiting on the answer.
       maxAttempts: 2,
       requestHandler: { requestTimeout: REQUEST_TIMEOUT_MS, connectionTimeout: CONNECTION_TIMEOUT_MS },
