@@ -16,6 +16,8 @@ export interface UserRow {
   is_sandbox?: boolean;
   /** The account's id in Squawk (auth-service-33), once it exists there. */
   squawk_user_id?: string | null;
+  /** The account's subject in the study's Cognito user pool (ai-therapist-387), once linked. */
+  cognito_sub?: string | null;
   /** Staff email address (119, ai-therapist-283); never set for participants. */
   email?: string | null;
   password?: string;
@@ -422,6 +424,46 @@ export async function setSquawkUserId(userid: number | string, squawkUserId: str
  *  source of roles once an account lives there; RBAC middleware keeps reading
  *  the column). No-op when unchanged. */
 export async function syncRoleFromSquawk(userid: number | string, role: string): Promise<void> {
+  await pool.query('UPDATE users SET role = $1, updated_at = CURRENT_TIMESTAMP WHERE userid = $2 AND role <> $1', [
+    role,
+    userid,
+  ]);
+}
+
+// ── Cognito linkage (ai-therapist-387) ──────────────────────────────────────
+// These never read squawk_user_id: prod never applied migration 106.
+
+/** The local account a Cognito subject belongs to, with what a login needs. */
+export async function getUserByCognitoSub(cognitoSub: string): Promise<UserRow | null> {
+  const result = await pool.query<UserRow>(
+    'SELECT userid, username, role, organization_id, is_sandbox, cognito_sub FROM users WHERE cognito_sub = $1',
+    [cognitoSub],
+  );
+  return result.rows[0] ?? null;
+}
+
+/** The local account for a username (the token's cognito:username), or null. */
+export async function getUserByUsernameForCognito(username: string): Promise<UserRow | null> {
+  const result = await pool.query<UserRow>(
+    'SELECT userid, username, role, organization_id, is_sandbox, cognito_sub FROM users WHERE username = $1',
+    [username],
+  );
+  return result.rows[0] ?? null;
+}
+
+/** Record the Cognito subject of a local account. Only fills an empty link:
+ *  a row already linked to another subject is left alone. */
+export async function setCognitoSub(userid: number | string, cognitoSub: string): Promise<void> {
+  await pool.query(
+    'UPDATE users SET cognito_sub = $1, updated_at = CURRENT_TIMESTAMP WHERE userid = $2 AND cognito_sub IS NULL',
+    [cognitoSub, userid],
+  );
+}
+
+/** Copy the role the pool holds for the account into users.role (the pool's
+ *  role group is the source of roles once sign-in runs through Cognito; RBAC
+ *  middleware keeps reading the column). No-op when unchanged. */
+export async function syncRoleFromCognito(userid: number | string, role: string): Promise<void> {
   await pool.query('UPDATE users SET role = $1, updated_at = CURRENT_TIMESTAMP WHERE userid = $2 AND role <> $1', [
     role,
     userid,
