@@ -54,6 +54,7 @@ import { isToolTimeoutError, toolTimeoutMs } from './toolTimeouts.js';
 import { clearVoiceToolOutcomes, reportVoiceToolOutcome, voiceOverlayEvent, withScreenNote } from './toolOverlays.js';
 import { buildRecoverySpeakFirstNudge, type RecoveryCrisisContact } from '../../shared/recoveryPrompt.js';
 import { rememberTurn } from '../utils/recentTurns.js';
+import { participantMicEvidence, type ParticipantMicEvidence } from './recorder.service.js';
 import { noteVoiceHeadsUpSpeech, voiceHeadsUpPending } from './voiceHeadsUp.service.js';
 import {
   clearLiveOpening,
@@ -2204,6 +2205,22 @@ export class SidebandManager {
     // before this one (a split sentence, a safety question) whatever the
     // database does (ai-therapist-373).
     const remembered = rememberTurn(sessionId, 'user', text);
+    // What the server had received of the participant's own microphone track
+    // when this turn closed, stored beside it as evidence and nothing more.
+    // The voice model has produced participant transcripts out of digital
+    // silence (2 of 80 session starts measured 2026-11-25: "a purple", "the
+    // text in"), and the mic track is the only thing on this server that says
+    // whether the microphone was on. It cannot gate the turn: it arrives late
+    // and can be lost (participantMicEvidence), and a real disclosure dropped
+    // is far worse than a phantom kept. So every turn is still stored and
+    // scored exactly as before; a turn recorded with `unmuted_ms: 0` is a
+    // candidate for review, not a verdict. Absent when there is no track.
+    let micAudio: ParticipantMicEvidence | null = null;
+    try {
+      micAudio = participantMicEvidence(sessionId);
+    } catch (err) {
+      console.error(`[Live] Reading the mic evidence failed for ${sessionId.substring(0, 12)}...:`, err);
+    }
 
     const work = (async () => {
       let messageId: string | number | null = null;
@@ -2219,7 +2236,12 @@ export class SidebandManager {
             message_type: 'voice',
             content: text,
             content_redacted: null,
-            metadata: { channel: 'live', start_ms: startMs, end_ms: endMs },
+            metadata: {
+              channel: 'live',
+              start_ms: startMs,
+              end_ms: endMs,
+              ...(micAudio ? { mic_audio: micAudio } : {}),
+            },
           },
         ]);
         messageId = inserted?.[0]?.message_id ?? null;
@@ -2711,6 +2733,35 @@ export class SidebandManager {
       console.error(`[Live] tryInject failed for ${sessionId.substring(0, 12)}...:`, err);
       return false;
     }
+  }
+
+  /**
+   * The note the participant's own end route leaves just before it closes the
+   * session ("the participant ended the session from their screen"). It dates
+   * from the Realtime API, where it became a conversation item and so told
+   * the vendor-side conversation why it stopped. Returns whether it was sent.
+   *
+   * A GPT-Live session gets nothing. There the only way in is
+   * `session.instructions.append`, context for the model's NEXT words, and
+   * the caller sends `session.close` right after, so there are no next words.
+   * The note was never spoken and never reached a transcript (ours is
+   * assembled from the transcript deltas alone, and "ended by the
+   * participant" is recorded on the session row by the route). What it did
+   * produce: the API answers a close with an `error` of code
+   * `context_injection_incomplete` for every append still pending ("Closing
+   * the session returns errors for appends that are still pending"), and that
+   * error was written to `sideband_error` and shown to staff as a sideband
+   * error on every participant-ended voice session (87 of 87 in the measured
+   * runs of 2026-11-25), replacing whatever real error the row held and
+   * counting the session in the dashboard's error figure.
+   *
+   * A session owned by another voice backend (Grok) still gets the note the
+   * way it always did: there it is a conversation item.
+   */
+  async injectClosingNote(sessionId: string, text: string): Promise<boolean> {
+    const delegate = this.delegateFor(sessionId);
+    if (delegate) return delegate.tryInject(sessionId, 'system', text, false);
+    return false;
   }
 
   /**

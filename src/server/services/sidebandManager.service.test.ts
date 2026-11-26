@@ -134,6 +134,7 @@ import { ToolTimeoutError, toolTimeoutMessage, toolTimeoutMs } from './toolTimeo
 import { EXPECTED_OVERLAY, OUTCOME_CASES, OVERLAY_ARGS, REGISTRY_RESULT } from './toolOverlays.testTable.js';
 import { OVERLAY_NOT_SHOWN_NOTE, OVERLAY_UNCONFIRMED_NOTE } from '../../shared/toolOverlayPolicy.js';
 import { getVoiceToolOutcome } from './toolOverlays.js';
+import { appendChunk, abort as abortRecording } from './recorder.service.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Internal = any;
@@ -365,6 +366,56 @@ describe('user turn -> crisis pipeline', () => {
       { sessionId, messageId: null, content: 'I want to kill myself' },
       'realtime',
     );
+  });
+
+  // The voice model has produced participant transcripts out of a muted
+  // microphone's digital silence (2 of 80 starts measured 2026-11-25). The
+  // participant's own mic track is the only server-side sign of that, and it
+  // arrives late and can be lost, so it is stored as evidence and gates
+  // nothing: a real disclosure must never be dropped on its say-so.
+  describe('what had arrived of the microphone track is stored beside the turn, as evidence only', () => {
+    const silentSecond = Buffer.alloc(48000 * 2).toString('base64');
+    const userRows = () =>
+      insertMessagesBatchMock.mock.calls.map((c) => c[0][0]).filter((row: Internal) => row.role === 'user');
+
+    it('a turn that closes while only muted audio has arrived says so, and is stored and scored all the same', async () => {
+      const sessionId = 's-mic-muted';
+      await attach(sessionId);
+      appendChunk(sessionId, silentSecond, 48000, 'participant', { seq: 0, muted: true });
+      appendChunk(sessionId, silentSecond, 48000, 'participant', { seq: 1, muted: true });
+      try {
+        await fire(sessionId, userDelta('I want to kill myself', 0, 1500));
+        await vi.advanceTimersByTimeAsync(TURN_GAP_MS);
+        await flush();
+
+        expect(userRows()).toHaveLength(1);
+        expect(userRows()[0]).toMatchObject({ role: 'user', message_type: 'voice', content: 'I want to kill myself' });
+        expect(userRows()[0].metadata).toEqual({
+          channel: 'live',
+          start_ms: 0,
+          end_ms: 1500,
+          mic_audio: { received_ms: 2000, muted_ms: 2000, unmuted_ms: 0, unmuted_rms_dbfs: null },
+        });
+        expect(runCrisisPipelineMock).toHaveBeenCalledExactlyOnceWith(
+          { sessionId, messageId: 42, content: 'I want to kill myself' },
+          'realtime',
+        );
+      } finally {
+        abortRecording(sessionId);
+      }
+    });
+
+    it('a session with no microphone track here stores the turn as before, with nothing added', async () => {
+      const sessionId = 's-mic-unknown';
+      await attach(sessionId);
+      await fire(sessionId, userDelta('a purple', 0, 400));
+      await vi.advanceTimersByTimeAsync(TURN_GAP_MS);
+      await flush();
+
+      expect(userRows()).toHaveLength(1);
+      expect(userRows()[0].metadata).toEqual({ channel: 'live', start_ms: 0, end_ms: 400 });
+      expect(runCrisisPipelineMock).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('does not score assistant turns through the crisis pipeline', async () => {
@@ -958,6 +1009,31 @@ describe('clinical steers keep the assistant speaking', () => {
     } finally {
       error.mockRestore();
     }
+  });
+
+  // The participant's End sent its closing note as an instructions append and
+  // closed the session at once: the append was still pending, so the API
+  // answered with context_injection_incomplete, stored as a sideband error on
+  // every participant-ended session (87 of 87 measured, 2026-11-25).
+  it('the participant-ended closing note is not appended to a GPT-Live session: the close is all that is sent', async () => {
+    const sessionId = 's-participant-end';
+    const ws = await attach(sessionId);
+    const before = sentEvents(ws).length;
+
+    const sent = await sidebandManager.injectClosingNote(
+      sessionId,
+      '[The participant ended the session from their screen. The session is now closing.]',
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const closing = sidebandManager.disconnect(sessionId, { graceMs: 0 });
+    await vi.advanceTimersByTimeAsync(0);
+    await closing;
+    warn.mockRestore();
+
+    expect(sent).toBe(false);
+    const after = sentEvents(ws).slice(before);
+    expect(after.map((e) => e.type)).toEqual(['session.close']);
+    expect(JSON.stringify(sentEvents(ws))).not.toContain('ended the session from their screen');
   });
 
   it('a rejection that names the steer only at the top level of the error event is answered too', async () => {

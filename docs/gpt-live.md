@@ -578,6 +578,24 @@ The matching `*.appended` events are **acknowledgements only**. They are
 explicitly not proof that the model consumed the update, spoke it, or that the
 participant heard anything.
 
+**Nothing is appended on the way out.** An append is context for the model's
+next words, so one sent just before `session.close` can never be used, and the
+API answers the close with an `error` of code `context_injection_incomplete`
+for it. The participant's End route (`POST /api/sessions/:id/end`) did exactly
+that until 2026-11-26: it appended its Realtime-era closing note ("the
+participant ended the session from their screen") and closed. The note was
+never spoken and never reached a transcript, and the error was stored in
+`therapy_sessions.sideband_error` and shown to staff as a sideband error on
+every participant-ended voice session (87 of 87 in the measured runs of
+2026-11-25), overwriting any real error on the row and counting the session in
+the Analytics "error sessions" figure. The route now calls
+`sidebandManager.injectClosingNote`, which sends the note only to a backend
+where it is a conversation item (Grok) and nothing to GPT-Live; that the
+participant ended the session is recorded on the session row
+(`ended_by = 'user'`), as before. The same error for a steer that was pending
+when the vendor or the participant ended the call is still recorded: there it
+is true that the steer did not land.
+
 Quiet context is not a privacy boundary. It can still influence later speech, so
 anything appended via `session.thinking.append` must be factual and must contain
 nothing the model can never be allowed to reveal.
@@ -639,6 +657,65 @@ An assembled participant turn is persisted to `messages` (with
 outage must never silently disable crisis detection. The pipeline channel stays
 `'realtime'`: that argument selects steering *delivery* (sideband vs. the chat
 request/response cycle), and this is the sideband path.
+
+### Participant transcripts out of silence (found 2026-11-25, open)
+
+With only digital silence on the microphone at session start, GPT-Live
+produced a participant transcript in 2 of 80 starts ("a purple", "the text
+in"). Digital silence is exactly what a real participant sends: the mic is off
+by default (`SessionControls`, `track.enabled = false`, which transmits exact
+zeros) until they press the button, and again whenever they mute. The fragment
+is indistinguishable on the wire from speech: `session.input_transcript.delta`
+carries `delta`, `start_ms` and `end_ms` and nothing else (no confidence, no
+audio level). So it is assembled into a turn and treated as one everywhere:
+
+- stored as a `user` / `voice` message, in the research transcript;
+- scored by the crisis pipeline;
+- counted as the participant speaking: before the assistant's first words it
+  settles the opening watch as `participant_first`, so the opening is no
+  longer re-sent (`noteLiveOpeningParticipantSpeech`), and during a steer
+  watch it reads as "the participant is talking";
+- and, on the vendor's side, it is a participant turn the model may answer.
+
+**There is no guard, on purpose.** Dropping a real utterance (a disclosure
+above all) is far worse than keeping a phantom, so a guard may act only on a
+positive, reliable "the microphone was muted for this whole utterance", and
+the server has no such signal today:
+
+- Mute is a browser-local act (`track.enabled`). The server is not told when
+  it happens.
+- The only trace is the participant recording track: PCM chunks each flagged
+  muted or not (`recorder.service`). It exists only when recording is enabled
+  and consented, it arrives over batched HTTP behind the microphone (400 ms
+  batches, coalesced and retried for tens of seconds on a poor connection,
+  dropped past a cap), and it runs on the uploader's sample clock, which has no
+  mapping to the vendor timeline `start_ms` is on. "No unmuted audio has
+  arrived yet" is therefore also true for a moment after someone unmutes and
+  speaks.
+- `mic_timeline` is sent once, at the end of the session.
+
+What is recorded instead: each participant turn's `metadata.mic_audio`
+(`{ received_ms, muted_ms, unmuted_ms, unmuted_rms_dbfs }`, numbers only) is
+what had arrived of that track when the turn closed
+(`participantMicEvidence`). The turn is stored and scored exactly as before. A
+turn with `unmuted_ms: 0` is a candidate phantom to review against the
+recording sidecar's muted ranges, never a verdict; the key is absent when the
+session has no participant track. It is not on the redacted-metadata allowlist
+(`metadataProjection.ts`), so exports do not carry it yet.
+
+What a real guard needs: the mic state reported to the server as it changes
+and acknowledged before it takes effect. Concretely, the browser posts every
+toggle (and the initial state) to an authenticated route and enables the track
+on unmute only once the server has acknowledged it, or after a timeout longer
+than the server keeps believing "muted" without a fresh report, so a lost
+request can only ever fail towards "not muted". With that, a muted interval is
+one in which the vendor was sent exact zeros, and a transcript wholly inside
+it (with a margin at both ends) cannot be the participant's voice. The server
+could then either mark such a turn as not participant speech (kept, excluded
+from scoring and exports), or prevent it at the source with
+`session.input_audio.mute` on the sideband while the mic is off
+(`muteInput`); whether the vendor still transcribes a muted input has not been
+measured. The cost is a short wait on unmute over a bad connection.
 
 Because fragments carry no item id, admin transcript rows are keyed by
 `role` + turn using a stable synthetic id (`live-user` / `live-assistant`), which

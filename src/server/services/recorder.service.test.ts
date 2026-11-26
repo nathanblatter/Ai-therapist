@@ -44,6 +44,7 @@ const {
   MAX_FILL_SAMPLE_RATE,
   SIDECAR_ATTEMPTS,
   trackSampleRate,
+  participantMicEvidence,
 } = await import('./recorder.service.js');
 
 // The WAV uploads only; finalize also stores the JSON sidecar (ai-therapist-384).
@@ -888,5 +889,62 @@ describe('lost audio is filled with silence and described in the sidecar (ai-the
     const base = { durationMs: 20_000, unmutedMs: 20_000, unmutedRmsDbfs: -20 };
     expect(assessParticipantTrack(mixed, { ...base, insertedSilenceMs: 15_000 })).toBe('short');
     expect(assessParticipantTrack(mixed, { ...base, insertedSilenceMs: 1_000 })).toBeNull();
+  });
+});
+
+// Stored beside each GPT-Live participant turn (sidebandManager onUserTurn) so
+// a transcript the voice model produced out of a muted microphone's silence
+// can be found afterwards. Evidence only: it never gates a turn.
+describe('participantMicEvidence: what has arrived of the participant track', () => {
+  const sampleRate = 48000;
+  const second = () => pcmChunk(sampleRate, 3277); // one second at about -20 dBFS
+
+  it('is null when the session has no participant track here', () => {
+    const sessionId = `sess-evidence-none-${Date.now()}`;
+    expect(participantMicEvidence(sessionId)).toBeNull();
+    // The mix alone says nothing about the microphone.
+    appendChunk(sessionId, second(), sampleRate, 'mixed');
+    expect(participantMicEvidence(sessionId)).toBeNull();
+    abort(sessionId);
+  });
+
+  it('a track that has only ever been muted reports no unmuted audio and no level', () => {
+    const sessionId = `sess-evidence-muted-${Date.now()}`;
+    appendChunk(sessionId, pcmChunk(sampleRate, 0), sampleRate, 'participant', { seq: 0, muted: true });
+    appendChunk(sessionId, pcmChunk(sampleRate, 0), sampleRate, 'participant', { seq: 1, muted: true });
+    expect(participantMicEvidence(sessionId)).toEqual({
+      received_ms: 2000,
+      muted_ms: 2000,
+      unmuted_ms: 0,
+      unmuted_rms_dbfs: null,
+    });
+    abort(sessionId);
+  });
+
+  it('counts unmuted audio and its level once the microphone is on', () => {
+    const sessionId = `sess-evidence-on-${Date.now()}`;
+    appendChunk(sessionId, pcmChunk(sampleRate, 0), sampleRate, 'participant', { seq: 0, muted: true });
+    appendChunk(sessionId, second(), sampleRate, 'participant', { seq: 1 });
+    expect(participantMicEvidence(sessionId)).toEqual({
+      received_ms: 2000,
+      muted_ms: 1000,
+      unmuted_ms: 1000,
+      unmuted_rms_dbfs: -20,
+    });
+    abort(sessionId);
+  });
+
+  it('an unmuted microphone that delivered exact silence has audio but no level', () => {
+    const sessionId = `sess-evidence-silent-${Date.now()}`;
+    appendChunk(sessionId, pcmChunk(sampleRate, 0), sampleRate, 'participant', { seq: 0 });
+    expect(participantMicEvidence(sessionId)).toMatchObject({ unmuted_ms: 1000, unmuted_rms_dbfs: null });
+    abort(sessionId);
+  });
+
+  it('is null again once the recording is closed', () => {
+    const sessionId = `sess-evidence-closed-${Date.now()}`;
+    appendChunk(sessionId, second(), sampleRate, 'participant', { seq: 0 });
+    abort(sessionId);
+    expect(participantMicEvidence(sessionId)).toBeNull();
   });
 });

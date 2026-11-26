@@ -92,6 +92,16 @@ describe('SidebandManager delegate forwarding', () => {
     expect(d.calls).toEqual([]);
   });
 
+  // The participant-ended closing note: a conversation item on Grok, as it
+  // always was; nothing on GPT-Live, where it could only come back as an error.
+  it('sends the closing note to the delegate for its session and to nobody for a GPT-Live one', async () => {
+    const d = fakeDelegate(['grok_a']);
+    sidebandManager.registerDelegate(d);
+    expect(await sidebandManager.injectClosingNote('grok_a', 'note')).toBe(true);
+    expect(await sidebandManager.injectClosingNote('live_b', 'note')).toBe(false);
+    expect(d.calls).toEqual(['tryInject:grok_a']);
+  });
+
   it('lists delegate sessions among the active connections and shuts them down', async () => {
     const d = fakeDelegate(['grok_a', 'grok_b']);
     sidebandManager.registerDelegate(d);

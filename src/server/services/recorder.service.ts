@@ -332,6 +332,45 @@ export function trackSampleRate(sessionId: string, track: RecordingTrack): numbe
   return recordings.get(recKey(sessionId, track))?.sampleRate ?? null;
 }
 
+/**
+ * What this server has received of the participant's own microphone track so
+ * far, numbers only: audio received, how much of it the browser marked muted
+ * (the mic button disables the track, which sends exact zeros), how much it
+ * did not, and the level of that unmuted audio.
+ */
+export interface ParticipantMicEvidence {
+  received_ms: number;
+  muted_ms: number;
+  unmuted_ms: number;
+  /** Level of the unmuted audio in dBFS, one decimal; null when there is none or it is exact silence. */
+  unmuted_rms_dbfs: number | null;
+}
+
+/**
+ * The participant track's audio as received up to now, or null when the
+ * session has no open participant track here (recording off or not consented,
+ * the harness, nothing uploaded yet, already finalised).
+ *
+ * EVIDENCE, NOT A LIVE MUTE STATE. The track arrives over batched HTTP behind
+ * the microphone (400 ms batches, coalesced and retried for many seconds on a
+ * poor connection, sometimes lost), and it is the browser's own account. So
+ * `unmuted_ms: 0` means "no unmuted audio had REACHED the server yet", which
+ * is also true for a moment after a participant unmutes and speaks. It must
+ * never be used to drop or down-weight a participant turn.
+ */
+export function participantMicEvidence(sessionId: string): ParticipantMicEvidence | null {
+  const rec = recordings.get(recKey(sessionId, 'participant'));
+  if (!rec || !Number.isFinite(rec.sampleRate) || rec.sampleRate <= 0) return null;
+  const toMs = (samples: number) => Math.round((samples / rec.sampleRate) * 1000);
+  const level = rmsDbfs(rec.unmutedSumSquares, rec.unmutedSamples);
+  return {
+    received_ms: toMs(rec.byteLength / 2),
+    muted_ms: toMs(rec.mutedSamples),
+    unmuted_ms: toMs(rec.unmutedSamples),
+    unmuted_rms_dbfs: Number.isFinite(level) ? Math.round(level * 10) / 10 : null,
+  };
+}
+
 /** Whether a session currently has buffered audio on any track. */
 export function hasRecording(sessionId: string): boolean {
   return TRACKS.some((track) => recordings.has(recKey(sessionId, track)));
