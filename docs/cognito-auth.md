@@ -266,6 +266,7 @@ None of this could be checked without a pool. Check each on stage:
 | `COGNITO_CLIENT_SECRET` | only if the app client has a secret |
 | `COGNITO_DOMAIN` | the hosted-page origin, `https://<prefix>.auth.us-west-1.amazoncognito.com` |
 | `APP_URL` | this deployment's public origin (falls back to `CORS_ORIGIN`) |
+| `COGNITO_AWS_ACCESS_KEY_ID`, `COGNITO_AWS_SECRET_ACCESS_KEY` | optional key pair for the pool calls only; see Creating a pool |
 
 Pool side, per app client: callback URL `{APP_URL}/api/auth/cognito/callback`,
 sign-out URL `{APP_URL}/login`, authorization-code grant, scopes `openid` and
@@ -297,6 +298,82 @@ Two sets of AWS permissions are involved, both granted by Nathan:
 - **The running app**: `scripts/cognito/iam-app-policy.json`, limited to the
   user-management calls the app makes and to that environment's pool ARN. One
   copy per environment, each naming only its own pool.
+  The app uses `COGNITO_AWS_ACCESS_KEY_ID` and
+  `COGNITO_AWS_SECRET_ACCESS_KEY` when both are set, otherwise the AWS SDK's
+  default chain. On stage the key pair is required: the compose file passes
+  variables to the container one by one and does not pass `AWS_ACCESS_KEY_ID`.
+
+`scripts/cognito/create-first-researcher.sh <pool-id> <username>` creates the
+first researcher in a new pool (nobody can reach User Management before one
+exists). It asks for the password on the terminal. Not run yet either.
+
+## Cutover runbook
+
+Written 2026-11-26, before any pool exists. Every step marked (Nathan) is an
+IAM, account or prod decision that only he makes. Nothing here has been done.
+
+### Stage (ai-therapist-394, 398)
+
+1. (Nathan) Give the IAM identity that will run the setup Cognito admin rights
+   in the study account, for the setup only (for example attach
+   `AmazonCognitoPowerUser` to the `nathan` user, and remove it afterwards).
+2. Check the pricing page again, then run
+   `scripts/cognito/create-pool.sh stage https://ai-therapist.nathanblatter.com <domain-prefix>`.
+   Note the pool id, client id, domain and pool ARN it prints. This is the
+   first run of the script: expect to fix an option or two.
+3. (Nathan) Create an IAM user for the app's pool calls, attach
+   `scripts/cognito/iam-app-policy.json` with the stage pool ARN filled in,
+   and make an access key for it.
+4. Pick the first researcher: an existing researcher row in stage's `users`
+   table. Run `scripts/cognito/create-first-researcher.sh <pool-id> <username>`
+   and type a new password for it.
+5. In `~/deploy/Ai-therapist/.env` add the four `COGNITO_*` values, the client
+   secret, and `COGNITO_AWS_ACCESS_KEY_ID` / `COGNITO_AWS_SECRET_ACCESS_KEY`
+   from step 3. **Remove or comment out every `SQUAWK_*` line** (the two must
+   not be set together). Redeploy stage through the pipeline (re-run the
+   Deploy workflow on `main`; do not restart the container by hand).
+6. Sign in as the first researcher. Expected: hosted page, password, then the
+   app's authenticator setup screen, then `/admin`. Sign out, sign in again:
+   the hosted page now asks for a code.
+7. Work both "Unconfirmed until the first stage run" lists in this document
+   and record each result here.
+8. Move the other stage accounts: in User Management set a new password for
+   each one that should keep working. Demo and sandbox-seeded accounts are
+   never signed in with a password and need nothing.
+9. Rehearse the rollback: comment out the `COGNITO_*` lines, restore the
+   `SQUAWK_*` lines, redeploy, confirm Squawk sign-in works, then switch back.
+10. (Nathan) Remove the setup rights from step 1.
+
+Migration 129 (`users.cognito_sub`) is already on stage.
+
+### Prod (ai-therapist-399), after stage has run on Cognito
+
+Prod has three accounts (one researcher, two participants) and runs the
+legacy login today. Each promotion to prod needs Nathan's go-ahead.
+
+1. (Nathan) Tell the two participants a new password is coming, and how they
+   will get it. They have no email on file.
+2. Take a manual RDS snapshot (`ai-therapist-pre-cognito-YYYYMMDD`), wait for
+   `available`, and apply migration 129 to `ai_therapist_prod`.
+3. (Nathan) Setup rights as on stage, then
+   `scripts/cognito/create-pool.sh prod https://ai.byuisresearch.com <domain-prefix>`.
+4. (Nathan) An identity for the app with `iam-app-policy.json` naming the prod
+   pool: either the instance's existing identity or a key pair set as
+   `COGNITO_AWS_*` in `/opt/ai-therapist/.env`.
+5. `scripts/cognito/create-first-researcher.sh <prod-pool-id> <researcher username>`.
+6. Promote the Cognito code to prod (`git push origin main:prod`) with the
+   `COGNITO_*` variables still unset: nothing changes yet.
+7. Add the `COGNITO_*` values to `/opt/ai-therapist/.env` and redeploy through
+   the pipeline. From this moment the legacy login answers 410.
+8. Sign in as the researcher, set up the authenticator app, then set a new
+   password for each participant in User Management (this creates their pool
+   accounts) and pass the passwords on by the channel agreed in step 1.
+9. Confirm `https://ai.byuisresearch.com/health/deep` is 200 and one
+   participant sign-in works.
+
+Rollback at any point after step 7: remove the `COGNITO_*` lines and redeploy.
+The legacy login works again against the local password hashes, which every
+password change above also updated.
 
 ## Not built yet
 
