@@ -460,6 +460,16 @@ export async function setCognitoSub(userid: number | string, cognitoSub: string)
   );
 }
 
+/** Point the row at a new pool subject, whatever it held before. Only for a
+ *  row whose pool user was just created because the pool had none under its
+ *  username: any subject already stored belongs to a pool user that is gone. */
+export async function replaceCognitoSub(userid: number | string, cognitoSub: string): Promise<void> {
+  await pool.query('UPDATE users SET cognito_sub = $1, updated_at = CURRENT_TIMESTAMP WHERE userid = $2', [
+    cognitoSub,
+    userid,
+  ]);
+}
+
 /** Copy the role the pool holds for the account into users.role (the pool's
  *  role group is the source of roles once sign-in runs through Cognito; RBAC
  *  middleware keeps reading the column). No-op when unchanged. */

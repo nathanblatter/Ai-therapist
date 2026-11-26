@@ -199,11 +199,13 @@ Things to know:
 - **One provider only.** With both `COGNITO_*` and `SQUAWK_*` set, account
   changes go to the pool and Squawk is not written (the login page makes the
   same choice). Do not run that way on purpose.
-- **Accounts that are not in the pool.** A password or role change for an
-  account the pool does not have answers `502` "This account does not exist in
-  the sign-in service" (the local change stands). Nothing creates a pool user
-  for an account that existed before the pool: how the existing accounts move
-  is not built (see Not built yet).
+- **Accounts that are not in the pool.** An account that existed before the
+  pool has no pool user (its password cannot be copied: only a hash is
+  stored). Setting a new password for it, from User Management or by the
+  person themselves while still signed in, creates the pool user with that
+  password and the row's role, and links the row. A role change alone for
+  such an account answers `502` "This account is not in the sign-in service
+  yet. Set a new password for it to move it there." (the local change stands).
 - **Accounts that never go to the pool.** Magic-link demo accounts
   (`createDemoUser`), the sandbox link's seeded caseload (`sandboxSeed.ts`) and
   the red-team harness participant (`harnessRunner.service.ts`) are inserted
@@ -299,9 +301,10 @@ Two sets of AWS permissions are involved, both granted by Nathan:
 ## Not built yet
 
 - The pools themselves (ai-therapist-394). The script exists; see Creating a pool.
-- Moving the accounts that exist before a pool does into it. Their passwords
-  cannot be copied (only hashes are stored), so each needs a pool user created
-  and a new password set; nothing does that yet (ai-therapist-396).
+- A bulk move of the accounts that exist before a pool does. One at a time
+  works: a new password moves an account (see Account changes). The first
+  researcher account in a new pool has to be created by hand, because nobody
+  can sign in to User Management before it exists (ai-therapist-398, 399).
 - An authenticator app for participants who want one (optional by decision):
   nothing offers it yet.
 - Rollback rehearsal on stage (ai-therapist-398). The intended rollback is to

@@ -11,6 +11,7 @@ const db = vi.hoisted(() => ({
   getUserById: vi.fn(),
   setSquawkUserId: vi.fn(),
   setCognitoSub: vi.fn(),
+  replaceCognitoSub: vi.fn(),
 }));
 vi.mock('../db/index.js', () => db);
 
@@ -63,9 +64,14 @@ vi.mock('./cognitoAdmin.service.js', () => pool);
 const email = vi.hoisted(() => ({ clearEmailIfIneligible: vi.fn() }));
 vi.mock('./researcherEmail.service.js', () => email);
 
-const { registerAccount, updateAccount, removeAccount, resetAuthenticator, PASSWORD_REJECTED_MESSAGE } = await import(
-  './accounts.service.js'
-);
+const {
+  registerAccount,
+  updateAccount,
+  removeAccount,
+  resetAuthenticator,
+  PASSWORD_REJECTED_MESSAGE,
+  NOT_IN_POOL_MESSAGE,
+} = await import('./accounts.service.js');
 
 const ROW = { userid: 7, username: 'p_one', role: 'participant' };
 
@@ -92,6 +98,7 @@ beforeEach(() => {
   db.deleteUser.mockResolvedValue({ userid: 7, username: 'p_one' });
   db.getUserById.mockResolvedValue({ ...ROW });
   db.setCognitoSub.mockResolvedValue(undefined);
+  db.replaceCognitoSub.mockResolvedValue(undefined);
   db.setSquawkUserId.mockResolvedValue(undefined);
   email.clearEmailIfIneligible.mockResolvedValue(undefined);
   pool.createUser.mockResolvedValue({ sub: 'sub-123' });
@@ -250,11 +257,55 @@ describe('Cognito configured', () => {
       expect(pool.setRole).not.toHaveBeenCalled();
     });
 
-    it('says so when the pool has no such account', async () => {
-      pool.setPassword.mockRejectedValue(new pool.CognitoAdminError('user_not_found'));
-      await expect(updateAccount(7, { password: 'another passphrase' })).rejects.toMatchObject({
-        name: 'AccountSyncError',
-        message: 'This account does not exist in the sign-in service',
+    describe('an account the pool does not have', () => {
+      beforeEach(() => {
+        pool.setPassword.mockRejectedValue(new pool.CognitoAdminError('user_not_found'));
+        pool.setRole.mockRejectedValue(new pool.CognitoAdminError('user_not_found'));
+      });
+
+      it("a new password moves it into the pool with the row's role and links the row", async () => {
+        db.updateUser.mockResolvedValue({ ...ROW, role: 'therapist', cognito_sub: 'stale-sub' });
+        const updated = await updateAccount(7, { password: 'another passphrase' });
+        expect(pool.createUser).toHaveBeenCalledWith('p_one', 'another passphrase', 'therapist');
+        expect(db.replaceCognitoSub).toHaveBeenCalledWith(7, 'sub-123');
+        expect(updated.cognito_sub).toBe('sub-123');
+        // Created with its role: no separate role call, and the row is kept.
+        expect(pool.setRole).not.toHaveBeenCalled();
+        expect(db.deleteUser).not.toHaveBeenCalled();
+      });
+
+      it('a new password and a new role together create it with the new role', async () => {
+        db.updateUser.mockResolvedValue({ ...ROW, role: 'researcher' });
+        await updateAccount(7, { password: 'another passphrase', role: 'researcher' });
+        expect(pool.createUser).toHaveBeenCalledWith('p_one', 'another passphrase', 'researcher');
+        expect(pool.setRole).not.toHaveBeenCalled();
+      });
+
+      it('a role change alone cannot move it: says how to', async () => {
+        await expect(updateAccount(7, { role: 'therapist' })).rejects.toMatchObject({
+          name: 'AccountSyncError',
+          message: NOT_IN_POOL_MESSAGE,
+        });
+        expect(pool.createUser).not.toHaveBeenCalled();
+      });
+
+      it('a refused password or a failed creation is surfaced, and the row is kept', async () => {
+        pool.createUser.mockRejectedValueOnce(new pool.CognitoAdminError('password_rejected'));
+        await expect(updateAccount(7, { password: 'another passphrase' })).rejects.toMatchObject({
+          code: 'password_rejected',
+        });
+        pool.createUser.mockRejectedValueOnce(new pool.CognitoAdminError('failed'));
+        await expect(updateAccount(7, { password: 'another passphrase' })).rejects.toMatchObject({
+          name: 'AccountSyncError',
+          message: 'Sign-in service rejected the change',
+        });
+        expect(db.deleteUser).not.toHaveBeenCalled();
+        expect(db.replaceCognitoSub).not.toHaveBeenCalled();
+      });
+
+      it('keeps the account when the link cannot be stored (the first sign-in links by username)', async () => {
+        db.replaceCognitoSub.mockRejectedValue(new Error('db down'));
+        await expect(updateAccount(7, { password: 'another passphrase' })).resolves.toMatchObject({ userid: 7 });
       });
     });
 
@@ -318,7 +369,7 @@ describe('resetAuthenticator', () => {
     db.getUserById.mockResolvedValueOnce(null);
     await expect(resetAuthenticator(99)).rejects.toThrow('User not found');
     pool.setTotpEnabled.mockRejectedValueOnce(new pool.CognitoAdminError('user_not_found'));
-    await expect(resetAuthenticator(7)).rejects.toThrow('This account does not exist in the sign-in service');
+    await expect(resetAuthenticator(7)).rejects.toThrow(NOT_IN_POOL_MESSAGE);
     pool.setTotpEnabled.mockRejectedValueOnce(new pool.CognitoAdminError('failed'));
     await expect(resetAuthenticator(7)).rejects.toMatchObject({ name: 'AccountSyncError' });
   });
