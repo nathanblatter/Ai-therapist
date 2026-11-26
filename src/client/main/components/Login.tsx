@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router';
-import { Shield, Key, Lock, User } from 'react-feather';
+import { Shield, Key, Lock, User, LogIn } from 'react-feather';
 import { decodeAssertionOptions, encodeAssertion, isCancelled, passkeysSupported } from '../../shared/lib/webauthn';
 import { savePendingDeepLink } from '../../admin/utils/pendingDeepLink';
+import { COGNITO_START, planSignIn } from '../lib/signInMode';
 
-// Errors Squawk's callback can send us back with (?error=).
+// Errors a sign-in provider's callback can send us back with (?error=).
 const CALLBACK_ERRORS: Record<string, string> = {
   access_denied: 'Sign-in was cancelled.',
   state_mismatch: 'This sign-in attempt expired or was already used. Start over.',
@@ -12,6 +13,8 @@ const CALLBACK_ERRORS: Record<string, string> = {
   invalid_grant: 'The sign-in code was rejected. Start over.',
   invalid_request: 'Malformed sign-in response. Start over.',
   no_account: 'That sign-in has no account in this app.',
+  no_role: 'That account has not been given a role yet. Ask the study team.',
+  sign_in_failed: 'Sign-in did not complete. Try again.',
   owner_not_mapped: 'The owner passkey is not mapped to an account here yet.',
   server_error: 'The sign-in service is unavailable. Try again shortly.',
 };
@@ -39,8 +42,9 @@ export default function Login() {
   const params = new URLSearchParams(location.search);
   const loginChallenge = params.get('login_challenge');
   const callbackError = params.get('error');
-  // null = not asked yet; Squawk mode is decided once per page load.
+  // null = not asked yet; the sign-in mode is decided once per page load.
   const [squawk, setSquawk] = useState<SquawkConfig | null>(null);
+  const [cognitoMode, setCognitoMode] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -62,22 +66,34 @@ export default function Login() {
     }
   }, []);
 
-  // Squawk flow (auth-service-33): without a login_challenge the page sends
-  // the browser to /api/auth/squawk/start; Squawk parks the request and comes
-  // back here with one, and the form below completes the ceremony.
+  // Cognito flow (ai-therapist-387): the page hands the browser to the study's
+  // hosted sign-in page and shows no form of its own. Squawk flow
+  // (auth-service-33): without a login_challenge the page sends the browser to
+  // /api/auth/squawk/start; Squawk parks the request and comes back here with
+  // one, and the form below completes the ceremony. See lib/signInMode.ts.
   useEffect(() => {
     if (callbackError) setError(CALLBACK_ERRORS[callbackError] ?? `Sign-in failed (${callbackError}).`);
     let cancelled = false;
-    fetch('/api/auth/squawk/config', { credentials: 'include' })
-      .then((r) => (r.ok ? (r.json() as Promise<SquawkConfig>) : { enabled: false, owner: false }))
-      .catch(() => ({ enabled: false, owner: false }))
-      .then((cfg) => {
-        if (cancelled) return;
-        setSquawk(cfg);
-        if (cfg.enabled && !loginChallenge && !callbackError) {
-          window.location.assign('/api/auth/squawk/start');
-        }
+    const ask = <T,>(url: string, off: T): Promise<T> =>
+      fetch(url, { credentials: 'include' })
+        .then((r) => (r.ok ? (r.json() as Promise<T>) : off))
+        .catch(() => off);
+    Promise.all([
+      ask<{ enabled: boolean }>('/api/auth/cognito/config', { enabled: false }),
+      ask<SquawkConfig>('/api/auth/squawk/config', { enabled: false, owner: false }),
+    ]).then(([cognitoCfg, squawkCfg]) => {
+      if (cancelled) return;
+      const plan = planSignIn({
+        cognitoEnabled: cognitoCfg.enabled === true,
+        squawkEnabled: squawkCfg.enabled === true,
+        loginChallenge,
+        callbackError,
       });
+      setCognitoMode(plan.mode === 'cognito');
+      // In Cognito mode the Squawk form is never shown, whatever Squawk says.
+      setSquawk(plan.mode === 'cognito' ? { enabled: false, owner: false } : squawkCfg);
+      if (plan.redirect) window.location.assign(plan.redirect);
+    });
     return () => {
       cancelled = true;
     };
@@ -265,7 +281,24 @@ export default function Login() {
             </p>
           </div>
 
-          {!mfaRequired ? (
+          {cognitoMode ? (
+            // The password is typed on the study's hosted sign-in page, not here.
+            <div className="space-y-6">
+              {error && (
+                <div className="rounded-lg bg-red-50 border border-red-200 p-4">
+                  <p className="text-sm text-red-800 font-medium">{error}</p>
+                </div>
+              )}
+              <a
+                href={COGNITO_START}
+                className="w-full flex items-center justify-center gap-2 py-3 px-4 border border-transparent text-base font-semibold rounded-lg text-white bg-royal hover:bg-navy focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-royal transition-all shadow-lg"
+              >
+                <LogIn size={18} />
+                {error ? 'Try signing in again' : 'Continue to sign in'}
+              </a>
+              {!error && <p className="text-xs text-gray-500 text-center">Taking you to the secure sign-in page...</p>}
+            </div>
+          ) : !mfaRequired ? (
             // Initial login form
             <form className="space-y-6" onSubmit={squawkMode ? squawkPassword : handleSubmit}>
               <div className="space-y-4">

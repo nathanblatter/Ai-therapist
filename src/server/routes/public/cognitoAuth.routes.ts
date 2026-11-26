@@ -3,7 +3,9 @@
 //   GET /api/auth/cognito/config     {enabled}
 //   GET /api/auth/cognito/start      302 → the pool's hosted sign-in page (PKCE, state, nonce)
 //   GET /api/auth/cognito/callback   ?code&state → exchange, verify, establish the session
-//   GET /api/auth/cognito/logout     ends the app session, then 302 → Cognito's logout
+//
+// Sign-out stays POST /api/auth/logout (auth.routes.ts), which with Cognito
+// configured also returns the hosted page's logout URL for the browser to visit.
 //
 // The app keeps its express session exactly as before: the callback stamps the
 // same fields the legacy login did, after regenerating the session id. The
@@ -180,22 +182,6 @@ export default function cognitoAuthRoutes(): Router {
     }
     log.info({ userid: user.userid, role: user.role }, 'signed in via Cognito');
     res.redirect(302, destinationFor(user.role));
-  });
-
-  // Sign out of both: the app session first, then the hosted page's own
-  // session (otherwise the next "sign in" silently reuses the last account,
-  // which matters on a shared lab computer). Not behind requireCognito, so a
-  // stale link still signs the browser out of the app.
-  router.get('/api/auth/cognito/logout', (req, res) => {
-    const next = cognito.enabled() ? cognito.logoutUrl() : LOGIN_PAGE;
-    req.session.destroy((err) => {
-      if (err) {
-        log.error({ err }, 'Logout error');
-        return res.status(500).json({ error: 'Logout failed' });
-      }
-      res.clearCookie('connect.sid');
-      res.redirect(302, next);
-    });
   });
 
   return router;

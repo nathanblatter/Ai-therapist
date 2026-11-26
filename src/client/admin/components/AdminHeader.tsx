@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { postJson } from '../../shared/http';
+import { afterLogout } from '../../main/lib/signInMode';
 import { HelpCircle, LogOut, Menu, Moon, Shield, Sun } from 'react-feather';
 import { getStoredTheme, setTheme, ADMIN_THEME_STORAGE_KEY } from '../../shared/theme';
 import NotificationBell from './NotificationBell';
@@ -31,8 +32,10 @@ export default function AdminHeader({ onMenuClick, onMfaClick, onNotificationNav
 
   const handleLogout = async () => {
     try {
-      await postJson('/api/auth/logout');
-      window.location.href = '/login';
+      // With Cognito the server names the provider's sign-out page, so the
+      // hosted session ends too (lib/signInMode.ts).
+      const body = await postJson('/api/auth/logout');
+      window.location.href = afterLogout(body);
     } catch (error) {
       console.error('Logout failed:', error);
     }
