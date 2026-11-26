@@ -129,9 +129,12 @@ export default function usersRoutes(): Router {
   router.get('/api/users/audit', requireRole('researcher'), async (req, res) => {
     try {
       const orgId = await orgIdFor(req);
-      if (orgId === null) return res.json({ audit: [] });
+      if (orgId === null) return res.json({ audit: [], available: true });
       const limit = Number.parseInt(String(req.query.limit ?? ''), 10);
-      res.json({ audit: await listAccountAudit(orgId, Number.isFinite(limit) ? limit : 200) });
+      const rows = await listAccountAudit(orgId, Number.isFinite(limit) ? limit : 200);
+      // null: this database has no audit table yet. Say so; an empty list
+      // would read as "nothing has changed".
+      res.json({ audit: rows ?? [], available: rows !== null });
     } catch (error) {
       log.error({ err: error }, 'Error reading the account audit trail');
       res.status(500).json({ error: 'Failed to read the account audit trail' });
@@ -316,7 +319,40 @@ export default function usersRoutes(): Router {
       // address never leaves a half-applied edit behind.
       if (email !== undefined) await validateAccountEmail(userid, email, updates.role);
 
-      let updatedUser = Object.keys(updates).length > 0 ? await updateAccount(userid, updates) : null;
+      // What the audit trail records for this edit: only what actually changed
+      // (the form sends the role and username with every save), never the
+      // password or the address themselves, and each step as it completes.
+      const self = isSelf ? { self: true } : {};
+      const target = { userid: before.userid, username: before.username, organization_id: before.organization_id };
+      const auditAccountChanges = async (extra: Record<string, unknown>) => {
+        if (updates.role !== undefined && updates.role !== before.role) {
+          await audit(req, 'role_changed', target, { from: before.role, to: updates.role, ...extra });
+        }
+        if (updates.username !== undefined && updates.username !== before.username) {
+          await audit(req, 'username_changed', target, {
+            from: before.username,
+            to: updates.username,
+            ...self,
+            ...extra,
+          });
+        }
+        if (updates.password !== undefined) await audit(req, 'password_changed', target, { ...self, ...extra });
+      };
+
+      let updatedUser = null;
+      if (Object.keys(updates).length > 0) {
+        try {
+          updatedUser = await updateAccount(userid, updates);
+        } catch (updateErr) {
+          // The local row changed; only the sign-in service did not follow.
+          // That is still a change to this account, and it is recorded.
+          if (updateErr instanceof Error && updateErr.name === 'AccountSyncError') {
+            await auditAccountChanges({ signInServiceSynced: false });
+          }
+          throw updateErr;
+        }
+        await auditAccountChanges({});
+      }
       if (email !== undefined) {
         const withEmail = await setAccountEmail(userid, email);
         updatedUser = updatedUser ? { ...updatedUser, email: withEmail.email } : withEmail;
@@ -324,24 +360,14 @@ export default function usersRoutes(): Router {
           { userid, by: requestingUserId, email: withEmail.email ?? null },
           'account email address changed by a researcher',
         );
+        if ((withEmail.email ?? null) !== (before.email ?? null)) {
+          await audit(req, 'email_changed', target, { set: Boolean(withEmail.email) });
+        }
       }
       if (!updatedUser) {
         // Unreachable (the empty-update guard above), kept for the type.
         return res.status(400).json({ error: 'No fields to update' });
       }
-
-      // Audit what actually changed (the form sends the role and username
-      // with every save). Never the password or the address themselves.
-      const self = isSelf ? { self: true } : {};
-      const target = { userid: before.userid, username: before.username, organization_id: before.organization_id };
-      if (updates.role !== undefined && updates.role !== before.role) {
-        await audit(req, 'role_changed', target, { from: before.role, to: updates.role });
-      }
-      if (updates.username !== undefined && updates.username !== before.username) {
-        await audit(req, 'username_changed', target, { from: before.username, to: updates.username, ...self });
-      }
-      if (updates.password !== undefined) await audit(req, 'password_changed', target, self);
-      if (email !== undefined) await audit(req, 'email_changed', target, { set: email !== null && email !== '' });
 
       if (isSelf) {
         if (updates.username) req.session.username = updatedUser.username;
@@ -382,12 +408,16 @@ export default function usersRoutes(): Router {
   // (ai-therapist-283 phase 1). Idempotent; participants are refused.
   router.post('/api/users/:userid/provision-email', requireRole('researcher'), async (req, res) => {
     try {
-      if (!(await accountInReach(req, req.params.userid))) {
+      const before = await accountInReach(req, req.params.userid);
+      if (!before) {
         return res.status(404).json({ error: 'User not found' });
       }
       const { user, address } = await provisionStudyAddress(req.params.userid);
       log.info({ userid: user.userid, by: req.session.userId, address }, 'study email address provisioned');
-      await audit(req, 'email_changed', user, { set: true, provisioned: true });
+      // Idempotent: an account that already had this address did not change.
+      if ((before.email ?? null) !== address) {
+        await audit(req, 'email_changed', before, { set: true, provisioned: true });
+      }
       res.json({
         success: true,
         email: address,

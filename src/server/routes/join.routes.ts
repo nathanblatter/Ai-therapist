@@ -59,15 +59,11 @@ function signIn(
   user: { userid: number; username: string; role: string; organization_id?: number | null },
   isSandbox: boolean,
 ): Promise<boolean> {
-  // What belongs to the browser and the person in front of it, not to an
-  // account, crosses the new id, as at login (auth.routes.ts): the consent
-  // they accepted and the anonymous sessions they own.
-  const carried = {
-    ownedSessions: req.session.ownedSessions,
-    consentAccepted: req.session.consentAccepted,
-    consentVersion: req.session.consentVersion,
-    consentAcceptedAt: req.session.consentAcceptedAt,
-  };
+  // The anonymous sessions this browser owns cross the new id, as at login.
+  // Not the consent fields, unlike login: this is a brand-new account, and on
+  // a shared computer the consent in the browser session may be the previous
+  // person's. The new account is asked itself.
+  const carried = { ownedSessions: req.session.ownedSessions };
   return new Promise((resolve) => {
     req.session.regenerate((regenErr) => {
       if (regenErr) {

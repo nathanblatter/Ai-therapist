@@ -395,6 +395,45 @@ describe('account changes are written to the audit trail (ai-therapist-411)', ()
     ]);
   });
 
+  it('an unchanged email and an already-provisioned address record nothing', async () => {
+    dbMocks.getUserById.mockResolvedValue({
+      userid: 5,
+      username: 'ra',
+      role: 'researcher',
+      organization_id: 1,
+      email: 'ra@byuisresearch.com',
+    });
+    dbMocks.findUserByEmail.mockResolvedValue(null);
+    dbMocks.setUserEmail.mockResolvedValue({
+      userid: 5,
+      username: 'ra',
+      role: 'researcher',
+      email: 'ra@byuisresearch.com',
+    });
+    await request(appAs('researcher')).put('/api/users/5').send({ email: 'ra@byuisresearch.com' });
+    await request(appAs('researcher')).post('/api/users/5/provision-email').send({});
+    expect(audited().filter((r) => r.action === 'email_changed')).toEqual([]);
+  });
+
+  it('a change the sign-in service did not follow is still recorded, marked as not synced', async () => {
+    // The local row changed before the provider call failed: that is a real
+    // change to this account, and the route answers 502.
+    dbMocks.updateUser.mockRejectedValue(
+      Object.assign(new Error('Sign-in service rejected the change'), { name: 'AccountSyncError' }),
+    );
+    const res = await request(appAs('researcher'))
+      .put('/api/users/5')
+      .send({ username: 'u5', role: 'therapist', password: 'a long enough passphrase' });
+    expect(res.status).toBe(502);
+    expect(audited()).toEqual([
+      expect.objectContaining({
+        action: 'role_changed',
+        detail: { from: 'participant', to: 'therapist', signInServiceSynced: false },
+      }),
+      expect.objectContaining({ action: 'password_changed', detail: { signInServiceSynced: false } }),
+    ]);
+  });
+
   it('nothing is recorded for a refused change', async () => {
     dbMocks.getUserById.mockResolvedValue({ ...TARGET, organization_id: 2 });
     await request(appAs('researcher')).put('/api/users/5').send({ role: 'therapist' });
@@ -405,6 +444,13 @@ describe('account changes are written to the audit trail (ai-therapist-411)', ()
 });
 
 describe('GET /api/users/audit', () => {
+  it('says the trail is not set up when the database has no audit table, instead of failing', async () => {
+    dbMocks.listAccountAudit.mockResolvedValue(null);
+    const res = await request(appAs('researcher')).get('/api/users/audit');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ audit: [], available: false });
+  });
+
   it('is researcher-only and returns the caller\'s own organisation, not an account called "audit"', async () => {
     dbMocks.listAccountAudit.mockResolvedValue([{ audit_id: 1, action: 'role_changed' }]);
     for (const role of ['therapist', 'caseworker', 'participant']) {
@@ -413,6 +459,7 @@ describe('GET /api/users/audit', () => {
     const res = await request(appAs('researcher')).get('/api/users/audit?limit=25');
     expect(res.status).toBe(200);
     expect(res.body.audit).toEqual([{ audit_id: 1, action: 'role_changed' }]);
+    expect(res.body.available).toBe(true);
     expect(dbMocks.listAccountAudit).toHaveBeenCalledWith(1, 25);
     expect(dbMocks.getUserById).not.toHaveBeenCalled();
   });

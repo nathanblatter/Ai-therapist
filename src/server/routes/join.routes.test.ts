@@ -57,8 +57,14 @@ function makeApp() {
   const session: FakeSession = {
     save: (cb) => cb?.(),
     regenerate: (cb) => {
-      session.regeneratedWithUserId = session.userId ?? null;
-      session.regenerations = ((session.regenerations as number | undefined) ?? 0) + 1;
+      const regeneratedWithUserId = session.userId ?? null;
+      const regenerations = ((session.regenerations as number | undefined) ?? 0) + 1;
+      // As a real regenerate does: everything the old session held is gone.
+      for (const key of Object.keys(session)) {
+        if (key !== 'save' && key !== 'regenerate') delete session[key];
+      }
+      session.regeneratedWithUserId = regeneratedWithUserId;
+      session.regenerations = regenerations;
       cb();
     },
   };
@@ -402,16 +408,20 @@ describe('POST /join-sandbox/:token', () => {
     expect(session.regeneratedWithUserId).toBeNull();
   });
 
-  it('carries what belongs to the browser across the new session id: consent and owned sessions', async () => {
+  it("carries the browser's anonymous sessions across the new id, but not a consent given before the account existed", async () => {
+    // On a shared computer the consent in the browser session may be the
+    // previous person's: a brand-new account is asked itself.
     const { app, session } = makeApp();
     session.consentAccepted = true;
     session.consentVersion = 'v7';
     session.ownedSessions = ['anon-1'];
+    session.orgId = 77; // a previous account's leftover
     await request(app).post('/join-sandbox/raw-tok').send(GOOD_BODY);
     expect(session.userId).toBe(42);
-    expect(session.consentAccepted).toBe(true);
-    expect(session.consentVersion).toBe('v7');
     expect(session.ownedSessions).toEqual(['anon-1']);
+    expect(session.consentAccepted).toBeUndefined();
+    expect(session.consentVersion).toBeUndefined();
+    expect(session.orgId).toBe(9);
   });
 
   it('answers 500 and stamps nothing when the session cannot be regenerated (the account exists)', async () => {

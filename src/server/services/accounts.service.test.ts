@@ -480,6 +480,28 @@ describe('app sessions end with the account change that outdates them (review C5
   });
 });
 
+describe('the provider is told about a role only when it changed', () => {
+  // The edit form sends the role with every save. A needless provider call
+  // would fail every edit (and drop the email step after it) while the
+  // provider is down.
+  it('Squawk: same role sent again makes no role call; a new one does', async () => {
+    squawk.enabled.mockReturnValue(true);
+    db.getSquawkUserId.mockResolvedValue('sq-1');
+    await updateAccount(7, { username: 'p_one', role: 'participant' });
+    expect(squawk.setRole).not.toHaveBeenCalled();
+    await updateAccount(7, { role: 'therapist' });
+    expect(squawk.setRole).toHaveBeenCalledWith('sq-1', 'therapist');
+  });
+
+  it('Cognito: same role sent again makes no role call; a new one does', async () => {
+    cognito.enabled.mockReturnValue(true);
+    await updateAccount(7, { username: 'p_one', role: 'participant' });
+    expect(pool.setRole).not.toHaveBeenCalled();
+    await updateAccount(7, { role: 'therapist' });
+    expect(pool.setRole).toHaveBeenCalledWith('p_one', 'therapist');
+  });
+});
+
 describe('a pool user re-created under the same username (review C7)', () => {
   beforeEach(() => cognito.enabled.mockReturnValue(true));
 

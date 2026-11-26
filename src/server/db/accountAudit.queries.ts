@@ -80,16 +80,23 @@ export interface AccountAuditRow {
   created_at: Date;
 }
 
-/** The newest audit rows of one organisation (researcher review). */
-export async function listAccountAudit(organizationId: number, limit = 200): Promise<AccountAuditRow[]> {
-  const result = await pool.query<AccountAuditRow>(
-    `SELECT audit_id, action, target_user_id, target_username, organization_id,
-            actor_user_id, actor_username, detail, created_at
-       FROM account_audit_log
-      WHERE organization_id = $1
-      ORDER BY created_at DESC, audit_id DESC
-      LIMIT $2`,
-    [organizationId, Math.max(1, Math.min(1000, Math.floor(limit)))],
-  );
-  return result.rows;
+/** The newest audit rows of one organisation (researcher review), or null
+ *  when this database has no audit table yet (migration 132 not applied): the
+ *  caller says so instead of showing an error or an empty trail. */
+export async function listAccountAudit(organizationId: number, limit = 200): Promise<AccountAuditRow[] | null> {
+  try {
+    const result = await pool.query<AccountAuditRow>(
+      `SELECT audit_id, action, target_user_id, target_username, organization_id,
+              actor_user_id, actor_username, detail, created_at
+         FROM account_audit_log
+        WHERE organization_id = $1
+        ORDER BY created_at DESC, audit_id DESC
+        LIMIT $2`,
+      [organizationId, Math.max(1, Math.min(1000, Math.floor(limit)))],
+    );
+    return result.rows;
+  } catch (err) {
+    if ((err as { code?: string } | null)?.code === '42P01') return null;
+    throw err;
+  }
 }

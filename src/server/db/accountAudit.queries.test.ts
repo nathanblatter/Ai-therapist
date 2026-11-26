@@ -57,6 +57,15 @@ describe('insertAccountAudit', () => {
   });
 });
 
+describe('listAccountAudit on a database without the table', () => {
+  it('answers null (the caller says the trail is not set up), and rethrows any other failure', async () => {
+    pool.query.mockRejectedValueOnce(Object.assign(new Error('no such table'), { code: '42P01' }));
+    await expect(listAccountAudit(3)).resolves.toBeNull();
+    pool.query.mockRejectedValueOnce(new Error('db down'));
+    await expect(listAccountAudit(3)).rejects.toThrow('db down');
+  });
+});
+
 describe('listAccountAudit', () => {
   it('reads one organisation, newest first, with a bounded limit', async () => {
     await listAccountAudit(3, 50_000);

@@ -82,8 +82,10 @@ async function endSessions(userid: number | string, why: string): Promise<void> 
     log.error({ err, userid: id }, `could not end app sessions after: ${why}`);
   }
   // A socket copies the role at its handshake and keeps its rooms (the admin
-  // broadcast room for a researcher) until it reconnects: close them, so the
-  // reconnect runs the handshake against the session that now exists or not.
+  // broadcast room for a researcher) for as long as it lives: close them. A
+  // server-side disconnect is final for that page (socket.io-client does not
+  // reconnect from it); the person's next request is unauthenticated anyway
+  // and sends them to sign in.
   try {
     globalThis.io?.in(`user:${id}`).disconnectSockets(true);
   } catch (err) {
@@ -198,7 +200,7 @@ async function updateInPool(userid: number | string, updates: AccountUpdates): P
       }
       await relinkIfPoolUserChanged(updated.userid, username);
     }
-    if (updates.role !== undefined) await cognitoAdmin.setRole(username, updates.role);
+    if (roleChanged(current, updates)) await cognitoAdmin.setRole(username, updates.role!);
   } catch (err) {
     log.error({ err, userid }, 'Cognito account update failed; the local change stands');
     if (isPoolError(err, 'password_rejected')) {
@@ -307,7 +309,9 @@ export async function updateAccount(userid: number | string, updates: AccountUpd
   if (!linked) return updated;
   try {
     if (updates.password !== undefined) await squawk.setPassword(linked, updates.password);
-    if (updates.role !== undefined) await squawk.setRole(linked, updates.role);
+    // Only a real change: the form sends the role with every save, and a
+    // needless call would fail every edit while the provider is down.
+    if (roleChanged(current, updates)) await squawk.setRole(linked, updates.role!);
   } catch (err) {
     log.error({ err, userid }, 'Squawk account update failed');
     throw new AccountSyncError('Sign-in service rejected the change', err);

@@ -120,13 +120,16 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
   const [auditOpen, setAuditOpen] = useState(false);
   const [auditRows, setAuditRows] = useState<AccountAuditRow[] | null>(null);
   const [auditError, setAuditError] = useState<string | null>(null);
+  // false when the server has no audit table yet (migration 132 not applied).
+  const [auditAvailable, setAuditAvailable] = useState(true);
 
   const loadAudit = async () => {
     setAuditError(null);
     try {
-      const data = await getJson<{ audit: AccountAuditRow[] }>('/api/users/audit?limit=100', {
+      const data = await getJson<{ audit: AccountAuditRow[]; available?: boolean }>('/api/users/audit?limit=100', {
         fallback: 'Failed to load account changes',
       });
+      setAuditAvailable(data.available !== false);
       setAuditRows(data.audit ?? []);
     } catch (err: unknown) {
       setAuditError(err instanceof Error ? err.message : String(err));
@@ -1080,7 +1083,11 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
             )}
             {auditRows === null && !auditError && <p className="text-sm text-gray-500">Loading...</p>}
             {auditRows !== null && auditRows.length === 0 && (
-              <p className="text-sm text-gray-500">No account changes have been recorded yet.</p>
+              <p className="text-sm text-gray-500">
+                {auditAvailable
+                  ? 'No account changes have been recorded yet.'
+                  : 'Account changes are not being recorded on this server yet (the audit table has not been set up).'}
+              </p>
             )}
             {auditRows !== null && auditRows.length > 0 && (
               <div className="overflow-x-auto">
