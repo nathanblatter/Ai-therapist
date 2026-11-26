@@ -54,6 +54,7 @@ import { isToolTimeoutError, toolTimeoutMs } from './toolTimeouts.js';
 import { clearVoiceToolOutcomes, reportVoiceToolOutcome, voiceOverlayEvent, withScreenNote } from './toolOverlays.js';
 import { buildRecoverySpeakFirstNudge, type RecoveryCrisisContact } from '../../shared/recoveryPrompt.js';
 import { rememberTurn } from '../utils/recentTurns.js';
+import { participantMicEvidence, type ParticipantMicEvidence } from './recorder.service.js';
 import { noteVoiceHeadsUpSpeech, voiceHeadsUpPending } from './voiceHeadsUp.service.js';
 import {
   clearLiveOpening,
@@ -2204,6 +2205,22 @@ export class SidebandManager {
     // before this one (a split sentence, a safety question) whatever the
     // database does (ai-therapist-373).
     const remembered = rememberTurn(sessionId, 'user', text);
+    // What the server had received of the participant's own microphone track
+    // when this turn closed, stored beside it as evidence and nothing more.
+    // The voice model has produced participant transcripts out of digital
+    // silence (2 of 80 session starts measured 2026-11-25: "a purple", "the
+    // text in"), and the mic track is the only thing on this server that says
+    // whether the microphone was on. It cannot gate the turn: it arrives late
+    // and can be lost (participantMicEvidence), and a real disclosure dropped
+    // is far worse than a phantom kept. So every turn is still stored and
+    // scored exactly as before; a turn recorded with `unmuted_ms: 0` is a
+    // candidate for review, not a verdict. Absent when there is no track.
+    let micAudio: ParticipantMicEvidence | null = null;
+    try {
+      micAudio = participantMicEvidence(sessionId);
+    } catch (err) {
+      console.error(`[Live] Reading the mic evidence failed for ${sessionId.substring(0, 12)}...:`, err);
+    }
 
     const work = (async () => {
       let messageId: string | number | null = null;
@@ -2219,7 +2236,12 @@ export class SidebandManager {
             message_type: 'voice',
             content: text,
             content_redacted: null,
-            metadata: { channel: 'live', start_ms: startMs, end_ms: endMs },
+            metadata: {
+              channel: 'live',
+              start_ms: startMs,
+              end_ms: endMs,
+              ...(micAudio ? { mic_audio: micAudio } : {}),
+            },
           },
         ]);
         messageId = inserted?.[0]?.message_id ?? null;
