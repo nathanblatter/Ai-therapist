@@ -221,7 +221,10 @@ function limiter(limit: number, onLimit: (req: Request, res: Response) => void) 
 export default function cognitoAuthRoutes(): Router {
   const router = Router();
   // Browser navigations: answer with the login page and a reason, not JSON.
+  // One counter each: a sign-in is one start and one callback, and sharing a
+  // counter would halve the room a campus behind one address has.
   const signInLimiter = limiter(SIGN_IN_LIMIT, (_req, res) => loginError(res, 'too_many_attempts'));
+  const callbackLimiter = limiter(SIGN_IN_LIMIT, (_req, res) => loginError(res, 'too_many_attempts'));
   const enrolLimiter = limiter(ENROL_LIMIT, (_req, res) =>
     res.status(429).json({ error: 'Too many attempts. Try again in a few minutes.', code: 'too_many_attempts' }),
   );
@@ -247,7 +250,7 @@ export default function cognitoAuthRoutes(): Router {
   });
 
   // Callback: exchange the code, verify the ID token, map to the local account.
-  router.get('/api/auth/cognito/callback', requireCognito, signInLimiter, async (req, res) => {
+  router.get('/api/auth/cognito/callback', requireCognito, callbackLimiter, async (req, res) => {
     const { code, state, error } = req.query as Record<string, unknown>;
     const stashed = req.session.cognitoAuth;
     delete req.session.cognitoAuth;

@@ -88,12 +88,20 @@ export default function Login() {
     // null = the question went unanswered (network error or a 5xx). That is
     // not "this provider is off": falling back to the app's own form on a
     // Cognito deployment would invite a password into this page.
-    const ask = <T,>(url: string): Promise<T | null> =>
-      // A stalled request must reach the retry screen too, not sit on
-      // "Loading sign-in..." for good.
-      fetch(url, { credentials: 'include', signal: AbortSignal.timeout(CONFIG_TIMEOUT_MS) })
+    // A stalled request must reach the retry screen too, not sit on
+    // "Loading sign-in..." for good. AbortController, not AbortSignal.timeout:
+    // that is missing on iOS 15 and older browsers, and calling it there
+    // throws inside this effect and blanks the whole page.
+    const ask = <T,>(url: string): Promise<T | null> => {
+      const controller = typeof AbortController === 'function' ? new AbortController() : null;
+      const timer = controller ? setTimeout(() => controller.abort(), CONFIG_TIMEOUT_MS) : null;
+      return fetch(url, { credentials: 'include', ...(controller ? { signal: controller.signal } : {}) })
         .then((r) => (r.ok ? (r.json() as Promise<T>) : null))
-        .catch(() => null);
+        .catch(() => null)
+        .finally(() => {
+          if (timer) clearTimeout(timer);
+        });
+    };
     Promise.all([
       ask<{ enabled: boolean }>('/api/auth/cognito/config'),
       ask<SquawkConfig>('/api/auth/squawk/config'),
