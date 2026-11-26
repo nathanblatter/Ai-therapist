@@ -144,7 +144,8 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
     getJson<{ enabled: boolean }>('/api/auth/cognito/config')
       .then((cfg) => setCognitoMode(cfg.enabled === true))
       .catch(() => setCognitoMode(false));
-  }, []);
+    // Once, on mount: fetchUsers is recreated every render.
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const generateSecurePassword = (): string => {
     const length = 16;
