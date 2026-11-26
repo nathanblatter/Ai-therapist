@@ -1,0 +1,664 @@
+{
+  "schema_version": 1,
+  "source": "src/server/services/datasetExport.service.ts (DATASET_FILES)",
+  "files": {
+    "participants.csv": [
+      {
+        "name": "participant_id",
+        "type": "string"
+      },
+      {
+        "name": "enrolled_month",
+        "type": "string"
+      },
+      {
+        "name": "memory_enabled",
+        "type": "bool"
+      },
+      {
+        "name": "study_status",
+        "type": "string"
+      },
+      {
+        "name": "consent_version_first",
+        "type": "string"
+      },
+      {
+        "name": "consent_version_last",
+        "type": "string"
+      },
+      {
+        "name": "n_sessions",
+        "type": "int"
+      },
+      {
+        "name": "n_sessions_ended",
+        "type": "int"
+      },
+      {
+        "name": "total_session_minutes",
+        "type": "float"
+      },
+      {
+        "name": "first_session_at",
+        "type": "timestamp"
+      },
+      {
+        "name": "last_session_at",
+        "type": "timestamp"
+      },
+      {
+        "name": "phq2_first",
+        "type": "int"
+      },
+      {
+        "name": "phq2_last",
+        "type": "int"
+      },
+      {
+        "name": "phq2_delta",
+        "type": "int"
+      },
+      {
+        "name": "gad2_first",
+        "type": "int"
+      },
+      {
+        "name": "gad2_last",
+        "type": "int"
+      },
+      {
+        "name": "gad2_delta",
+        "type": "int"
+      },
+      {
+        "name": "n_crisis_events",
+        "type": "int"
+      },
+      {
+        "name": "any_crisis_flagged",
+        "type": "bool"
+      }
+    ],
+    "sessions.csv": [
+      {
+        "name": "session_pseudo_id",
+        "type": "string"
+      },
+      {
+        "name": "participant_id",
+        "type": "string"
+      },
+      {
+        "name": "is_anonymous",
+        "type": "bool"
+      },
+      {
+        "name": "started_at",
+        "type": "timestamp"
+      },
+      {
+        "name": "ended_at",
+        "type": "timestamp"
+      },
+      {
+        "name": "duration_minutes",
+        "type": "float"
+      },
+      {
+        "name": "status",
+        "type": "string"
+      },
+      {
+        "name": "ended_by",
+        "type": "string"
+      },
+      {
+        "name": "session_type",
+        "type": "string"
+      },
+      {
+        "name": "modality_condition",
+        "type": "string"
+      },
+      {
+        "name": "proactive_offering",
+        "type": "string"
+      },
+      {
+        "name": "theme",
+        "type": "string"
+      },
+      {
+        "name": "language",
+        "type": "string"
+      },
+      {
+        "name": "voice",
+        "type": "string"
+      },
+      {
+        "name": "ai_model",
+        "type": "string"
+      },
+      {
+        "name": "transcription_model",
+        "type": "string"
+      },
+      {
+        "name": "temperature",
+        "type": "float"
+      },
+      {
+        "name": "checkin_mood",
+        "type": "int"
+      },
+      {
+        "name": "had_recording",
+        "type": "bool"
+      },
+      {
+        "name": "recording_duration_s",
+        "type": "float"
+      },
+      {
+        "name": "n_messages",
+        "type": "int"
+      },
+      {
+        "name": "n_user_messages",
+        "type": "int"
+      },
+      {
+        "name": "n_assistant_messages",
+        "type": "int"
+      },
+      {
+        "name": "n_tool_invocations",
+        "type": "int"
+      },
+      {
+        "name": "crisis_flagged",
+        "type": "bool"
+      },
+      {
+        "name": "crisis_severity",
+        "type": "string"
+      },
+      {
+        "name": "crisis_max_risk_score",
+        "type": "int"
+      },
+      {
+        "name": "n_crisis_events",
+        "type": "int"
+      },
+      {
+        "name": "n_crisis_events_auto",
+        "type": "int"
+      },
+      {
+        "name": "n_crisis_events_manual",
+        "type": "int"
+      },
+      {
+        "name": "n_risk_check_steps",
+        "type": "int"
+      },
+      {
+        "name": "llm_tokens_in",
+        "type": "int"
+      },
+      {
+        "name": "llm_tokens_out",
+        "type": "int"
+      }
+    ],
+    "screeners.csv": [
+      {
+        "name": "participant_id",
+        "type": "string"
+      },
+      {
+        "name": "session_pseudo_id",
+        "type": "string"
+      },
+      {
+        "name": "scale",
+        "type": "string"
+      },
+      {
+        "name": "item_scores",
+        "type": "json"
+      },
+      {
+        "name": "score",
+        "type": "int"
+      },
+      {
+        "name": "screen_positive",
+        "type": "bool"
+      },
+      {
+        "name": "administered_at",
+        "type": "timestamp"
+      },
+      {
+        "name": "occasion_index",
+        "type": "int"
+      }
+    ],
+    "moods.csv": [
+      {
+        "name": "participant_id",
+        "type": "string"
+      },
+      {
+        "name": "session_pseudo_id",
+        "type": "string"
+      },
+      {
+        "name": "source",
+        "type": "string"
+      },
+      {
+        "name": "mood",
+        "type": "int"
+      },
+      {
+        "name": "recorded_at",
+        "type": "timestamp"
+      }
+    ],
+    "feedback.csv": [
+      {
+        "name": "participant_id",
+        "type": "string"
+      },
+      {
+        "name": "session_pseudo_id",
+        "type": "string"
+      },
+      {
+        "name": "helpfulness_rating",
+        "type": "int"
+      },
+      {
+        "name": "ease_rating",
+        "type": "int"
+      },
+      {
+        "name": "would_return_rating",
+        "type": "int"
+      },
+      {
+        "name": "has_comments",
+        "type": "bool"
+      },
+      {
+        "name": "submitted_at",
+        "type": "timestamp"
+      }
+    ],
+    "evals.csv": [
+      {
+        "name": "session_pseudo_id",
+        "type": "string"
+      },
+      {
+        "name": "prompt_version",
+        "type": "string"
+      },
+      {
+        "name": "judge_model",
+        "type": "string"
+      },
+      {
+        "name": "safety_protocol_score",
+        "type": "int"
+      },
+      {
+        "name": "empathy_score",
+        "type": "int"
+      },
+      {
+        "name": "modality_fidelity_score",
+        "type": "int"
+      },
+      {
+        "name": "disclaimer_compliance_score",
+        "type": "int"
+      },
+      {
+        "name": "non_directiveness_score",
+        "type": "int"
+      },
+      {
+        "name": "clinical_claims_score",
+        "type": "int"
+      },
+      {
+        "name": "evaluated_at",
+        "type": "timestamp"
+      }
+    ],
+    "crisis_events.csv": [
+      {
+        "name": "session_pseudo_id",
+        "type": "string"
+      },
+      {
+        "name": "participant_id",
+        "type": "string"
+      },
+      {
+        "name": "thread_origin",
+        "type": "bool"
+      },
+      {
+        "name": "event_type",
+        "type": "string"
+      },
+      {
+        "name": "severity",
+        "type": "string"
+      },
+      {
+        "name": "risk_score",
+        "type": "int"
+      },
+      {
+        "name": "trigger_method",
+        "type": "string"
+      },
+      {
+        "name": "occurred_at",
+        "type": "timestamp"
+      }
+    ],
+    "human_ratings.csv": [
+      {
+        "name": "session_pseudo_id",
+        "type": "string"
+      },
+      {
+        "name": "rater_role",
+        "type": "string"
+      },
+      {
+        "name": "rater_seq",
+        "type": "int"
+      },
+      {
+        "name": "rubric_version",
+        "type": "string"
+      },
+      {
+        "name": "safety_protocol_score",
+        "type": "int"
+      },
+      {
+        "name": "empathy_score",
+        "type": "int"
+      },
+      {
+        "name": "modality_fidelity_score",
+        "type": "int"
+      },
+      {
+        "name": "disclaimer_compliance_score",
+        "type": "int"
+      },
+      {
+        "name": "non_directiveness_score",
+        "type": "int"
+      },
+      {
+        "name": "clinical_claims_score",
+        "type": "int"
+      },
+      {
+        "name": "queue_source",
+        "type": "string"
+      },
+      {
+        "name": "stratum",
+        "type": "string"
+      },
+      {
+        "name": "rated_at",
+        "type": "timestamp"
+      }
+    ],
+    "crisis_adjudications.csv": [
+      {
+        "name": "session_pseudo_id",
+        "type": "string"
+      },
+      {
+        "name": "participant_id",
+        "type": "string"
+      },
+      {
+        "name": "thread_origin",
+        "type": "bool"
+      },
+      {
+        "name": "event_type",
+        "type": "string"
+      },
+      {
+        "name": "severity",
+        "type": "string"
+      },
+      {
+        "name": "risk_score",
+        "type": "int"
+      },
+      {
+        "name": "occurred_at",
+        "type": "timestamp"
+      },
+      {
+        "name": "adjudicator_role",
+        "type": "string"
+      },
+      {
+        "name": "verdict",
+        "type": "string"
+      },
+      {
+        "name": "adjudicated_at",
+        "type": "timestamp"
+      }
+    ],
+    "surveys.csv": [
+      {
+        "name": "participant_id",
+        "type": "string"
+      },
+      {
+        "name": "survey_role",
+        "type": "string"
+      },
+      {
+        "name": "finished",
+        "type": "bool"
+      },
+      {
+        "name": "recorded_at",
+        "type": "timestamp"
+      }
+    ],
+    "surveys_scored.csv": [
+      {
+        "name": "participant_id",
+        "type": "string"
+      },
+      {
+        "name": "survey_role",
+        "type": "string"
+      },
+      {
+        "name": "recorded_at",
+        "type": "timestamp"
+      },
+      {
+        "name": "completion_seconds",
+        "type": "int"
+      },
+      {
+        "name": "speeder",
+        "type": "bool"
+      },
+      {
+        "name": "phq2",
+        "type": "int"
+      },
+      {
+        "name": "gad2",
+        "type": "int"
+      },
+      {
+        "name": "phq2_positive",
+        "type": "bool"
+      },
+      {
+        "name": "gad2_positive",
+        "type": "bool"
+      },
+      {
+        "name": "weekly_mood",
+        "type": "int"
+      },
+      {
+        "name": "weekly_stress",
+        "type": "int"
+      },
+      {
+        "name": "weekly_helpfulness",
+        "type": "int"
+      },
+      {
+        "name": "weekly_usage",
+        "type": "string"
+      },
+      {
+        "name": "weekly_alliance_task",
+        "type": "float"
+      },
+      {
+        "name": "weekly_alliance_bond",
+        "type": "float"
+      },
+      {
+        "name": "weekly_alliance_goal",
+        "type": "float"
+      },
+      {
+        "name": "weekly_alliance_total",
+        "type": "float"
+      }
+    ],
+    "semantic_metrics.csv": [
+      {
+        "name": "participant_id",
+        "type": "string"
+      },
+      {
+        "name": "session_pseudo_id",
+        "type": "string"
+      },
+      {
+        "name": "n_embedded_turns",
+        "type": "int"
+      },
+      {
+        "name": "mean_adjacent_similarity",
+        "type": "float"
+      },
+      {
+        "name": "mean_user_adjacent_similarity",
+        "type": "float"
+      },
+      {
+        "name": "first_last_similarity",
+        "type": "float"
+      }
+    ],
+    "acoustic_features.csv": [
+      {
+        "name": "participant_id",
+        "type": "string"
+      },
+      {
+        "name": "session_pseudo_id",
+        "type": "string"
+      },
+      {
+        "name": "status",
+        "type": "string"
+      },
+      {
+        "name": "computed_at",
+        "type": "timestamp"
+      },
+      {
+        "name": "duration_ms",
+        "type": "float"
+      },
+      {
+        "name": "sample_rate",
+        "type": "int"
+      },
+      {
+        "name": "frames",
+        "type": "int"
+      },
+      {
+        "name": "rms_mean",
+        "type": "float"
+      },
+      {
+        "name": "rms_sd",
+        "type": "float"
+      },
+      {
+        "name": "silence_ratio",
+        "type": "float"
+      },
+      {
+        "name": "pause_count",
+        "type": "int"
+      },
+      {
+        "name": "pause_mean_ms",
+        "type": "float"
+      },
+      {
+        "name": "speech_segments_per_min",
+        "type": "float"
+      },
+      {
+        "name": "voiced_fraction",
+        "type": "float"
+      },
+      {
+        "name": "f0_median_hz",
+        "type": "float"
+      },
+      {
+        "name": "f0_iqr_hz",
+        "type": "float"
+      },
+      {
+        "name": "zcr_mean",
+        "type": "float"
+      },
+      {
+        "name": "zcr_sd",
+        "type": "float"
+      }
+    ]
+  }
+}

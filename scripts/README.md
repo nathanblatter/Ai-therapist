@@ -49,6 +49,10 @@ Harness documentation: `src/redteam/README.md` and `docs/redteam.md`.
 | `phase2-power-sim.py` | Phase 2 power simulation (pure numpy) for the pre-registered FGLS analysis. | `docs/phase2-power-sim-results*.csv`, `docs/phase2-power-analysis.md` |
 | `phase2-analysis-plan.py --data <export dir>` | The pre-registered confirmatory analysis, run against a de-identified dataset export (not the live DB). | stdout tables |
 
+The two `phase2-*.py` scripts are the September 2026 first pass. `analysis/` (see
+`analysis/README.md`) is a fuller draft meant to supersede them once the PI ratifies
+`analysis/PREREGISTRATION.md`; until then both exist, and that document lists how they differ.
+
 ## `participant-sim/`
 
 A synthetic Phase 2 participant: `persona.ts` defines the character,
