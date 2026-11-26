@@ -578,6 +578,24 @@ The matching `*.appended` events are **acknowledgements only**. They are
 explicitly not proof that the model consumed the update, spoke it, or that the
 participant heard anything.
 
+**Nothing is appended on the way out.** An append is context for the model's
+next words, so one sent just before `session.close` can never be used, and the
+API answers the close with an `error` of code `context_injection_incomplete`
+for it. The participant's End route (`POST /api/sessions/:id/end`) did exactly
+that until 2026-11-26: it appended its Realtime-era closing note ("the
+participant ended the session from their screen") and closed. The note was
+never spoken and never reached a transcript, and the error was stored in
+`therapy_sessions.sideband_error` and shown to staff as a sideband error on
+every participant-ended voice session (87 of 87 in the measured runs of
+2026-11-25), overwriting any real error on the row and counting the session in
+the Analytics "error sessions" figure. The route now calls
+`sidebandManager.injectClosingNote`, which sends the note only to a backend
+where it is a conversation item (Grok) and nothing to GPT-Live; that the
+participant ended the session is recorded on the session row
+(`ended_by = 'user'`), as before. The same error for a steer that was pending
+when the vendor or the participant ended the call is still recorded: there it
+is true that the steer did not land.
+
 Quiet context is not a privacy boundary. It can still influence later speech, so
 anything appended via `session.thinking.append` must be factual and must contain
 nothing the model can never be allowed to reveal.

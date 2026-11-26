@@ -960,6 +960,31 @@ describe('clinical steers keep the assistant speaking', () => {
     }
   });
 
+  // The participant's End sent its closing note as an instructions append and
+  // closed the session at once: the append was still pending, so the API
+  // answered with context_injection_incomplete, stored as a sideband error on
+  // every participant-ended session (87 of 87 measured, 2026-11-25).
+  it('the participant-ended closing note is not appended to a GPT-Live session: the close is all that is sent', async () => {
+    const sessionId = 's-participant-end';
+    const ws = await attach(sessionId);
+    const before = sentEvents(ws).length;
+
+    const sent = await sidebandManager.injectClosingNote(
+      sessionId,
+      '[The participant ended the session from their screen. The session is now closing.]',
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const closing = sidebandManager.disconnect(sessionId, { graceMs: 0 });
+    await vi.advanceTimersByTimeAsync(0);
+    await closing;
+    warn.mockRestore();
+
+    expect(sent).toBe(false);
+    const after = sentEvents(ws).slice(before);
+    expect(after.map((e) => e.type)).toEqual(['session.close']);
+    expect(JSON.stringify(sentEvents(ws))).not.toContain('ended the session from their screen');
+  });
+
   it('a rejection that names the steer only at the top level of the error event is answered too', async () => {
     const sessionId = 's-steer-rejected-top-level';
     const ws = await attach(sessionId);

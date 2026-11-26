@@ -602,16 +602,17 @@ export default function sessionsRoutes(): Router {
         .catch(() => undefined);
 
       // Cleanly tear down the sideband observer so it doesn't 1006 and churn
-      // through reconnect attempts after the call ends. A closing note is
-      // injected first so the transcript records WHY the conversation stops
-      // (participant-initiated) instead of just going silent.
+      // through reconnect attempts after the call ends. Where the voice backend
+      // keeps a conversation the note can join (Grok), a closing note goes in
+      // first so that conversation records WHY it stops (participant-initiated)
+      // instead of just going silent. A GPT-Live session gets none: an append
+      // sent just before the close can never be used and comes back as a
+      // vendor error on every session (sidebandManager.injectClosingNote).
       try {
         const { sidebandManager } = await import('../../services/sidebandManager.service.js');
-        await sidebandManager.tryInject(
+        await sidebandManager.injectClosingNote(
           sessionId,
-          'system',
           '[The participant ended the session from their screen. The session is now closing.]',
-          false,
         );
         await sidebandManager.disconnect(sessionId);
       } catch (e) {

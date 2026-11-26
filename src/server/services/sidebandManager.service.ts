@@ -2714,6 +2714,35 @@ export class SidebandManager {
   }
 
   /**
+   * The note the participant's own end route leaves just before it closes the
+   * session ("the participant ended the session from their screen"). It dates
+   * from the Realtime API, where it became a conversation item and so told
+   * the vendor-side conversation why it stopped. Returns whether it was sent.
+   *
+   * A GPT-Live session gets nothing. There the only way in is
+   * `session.instructions.append`, context for the model's NEXT words, and
+   * the caller sends `session.close` right after, so there are no next words.
+   * The note was never spoken and never reached a transcript (ours is
+   * assembled from the transcript deltas alone, and "ended by the
+   * participant" is recorded on the session row by the route). What it did
+   * produce: the API answers a close with an `error` of code
+   * `context_injection_incomplete` for every append still pending ("Closing
+   * the session returns errors for appends that are still pending"), and that
+   * error was written to `sideband_error` and shown to staff as a sideband
+   * error on every participant-ended voice session (87 of 87 in the measured
+   * runs of 2026-11-25), replacing whatever real error the row held and
+   * counting the session in the dashboard's error figure.
+   *
+   * A session owned by another voice backend (Grok) still gets the note the
+   * way it always did: there it is a conversation item.
+   */
+  async injectClosingNote(sessionId: string, text: string): Promise<boolean> {
+    const delegate = this.delegateFor(sessionId);
+    if (delegate) return delegate.tryInject(sessionId, 'system', text, false);
+    return false;
+  }
+
+  /**
    * After a clinical steer, make sure the assistant is not left silent
    * (ai-therapist-313; see LIVE_STEER_KEEP_SPEAKING). Armed only when a reply
    * was owed at the moment the steer landed: the assistant was speaking, or
