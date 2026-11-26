@@ -245,3 +245,79 @@ describe('deleteUser and getUserSub', () => {
     await expect(admin.getUserSub('p_one')).rejects.toMatchObject({ code: 'failed' });
   });
 });
+
+describe('authenticator-app codes', () => {
+  it('getTotpEnabled reads the software-token setting of the pool user', async () => {
+    handlers.AdminGetUser = () => ({
+      UserMFASettingList: ['SOFTWARE_TOKEN_MFA'],
+      PreferredMfaSetting: 'SOFTWARE_TOKEN_MFA',
+    });
+    await expect(admin.getTotpEnabled('dr_one')).resolves.toBe(true);
+    expect(calls[0]).toEqual({ name: 'AdminGetUser', input: { UserPoolId: POOL, Username: 'dr_one' } });
+  });
+
+  it('getTotpEnabled is false with no settings, or with another factor only', async () => {
+    await expect(admin.getTotpEnabled('dr_one')).resolves.toBe(false);
+    handlers.AdminGetUser = () => ({ UserMFASettingList: ['SMS_MFA'] });
+    await expect(admin.getTotpEnabled('dr_one')).resolves.toBe(false);
+  });
+
+  it('getTotpEnabled throws for a user the pool does not have (the caller refuses the sign-in)', async () => {
+    handlers.AdminGetUser = () => {
+      throw awsError('UserNotFoundException');
+    };
+    await expect(admin.getTotpEnabled('ghost')).rejects.toMatchObject({ code: 'user_not_found' });
+  });
+
+  it('beginTotpEnrolment sends the access token and returns the secret', async () => {
+    handlers.AssociateSoftwareToken = () => ({ SecretCode: 'JBSWY3DPEHPK3PXP' });
+    await expect(admin.beginTotpEnrolment('ACCESS-1')).resolves.toEqual({ secret: 'JBSWY3DPEHPK3PXP' });
+    expect(calls[0]).toEqual({ name: 'AssociateSoftwareToken', input: { AccessToken: 'ACCESS-1' } });
+  });
+
+  it('beginTotpEnrolment fails without a secret, and keeps AWS text out of the error', async () => {
+    await expect(admin.beginTotpEnrolment('ACCESS-1')).rejects.toMatchObject({ code: 'failed' });
+    handlers.AssociateSoftwareToken = () => {
+      throw awsError('NotAuthorizedException', 'Invalid Access Token: ACCESS-1');
+    };
+    const err: unknown = await admin.beginTotpEnrolment('ACCESS-1').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).not.toContain('ACCESS-1');
+  });
+
+  it('verifyTotpEnrolment is true on SUCCESS and sends the code with the access token', async () => {
+    handlers.VerifySoftwareToken = () => ({ Status: 'SUCCESS' });
+    await expect(admin.verifyTotpEnrolment('ACCESS-1', '123456')).resolves.toBe(true);
+    expect(calls[0].input).toMatchObject({ AccessToken: 'ACCESS-1', UserCode: '123456' });
+  });
+
+  it.each(['CodeMismatchException', 'EnableSoftwareTokenMFAException'])(
+    'verifyTotpEnrolment is false on %s (a wrong code)',
+    async (name) => {
+      handlers.VerifySoftwareToken = () => {
+        throw awsError(name);
+      };
+      await expect(admin.verifyTotpEnrolment('ACCESS-1', '000000')).resolves.toBe(false);
+    },
+  );
+
+  it('verifyTotpEnrolment is false on any status but SUCCESS, and throws on other failures', async () => {
+    handlers.VerifySoftwareToken = () => ({ Status: 'ERROR' });
+    await expect(admin.verifyTotpEnrolment('ACCESS-1', '123456')).resolves.toBe(false);
+    handlers.VerifySoftwareToken = () => {
+      throw awsError('NotAuthorizedException');
+    };
+    await expect(admin.verifyTotpEnrolment('ACCESS-1', '123456')).rejects.toMatchObject({
+      awsName: 'NotAuthorizedException',
+    });
+  });
+
+  it('setTotpEnabled switches the challenge on as the preferred factor, and off', async () => {
+    await admin.setTotpEnabled('dr_one', true);
+    await admin.setTotpEnabled('dr_one', false);
+    expect(calls.map((c) => c.input)).toEqual([
+      { UserPoolId: POOL, Username: 'dr_one', SoftwareTokenMfaSettings: { Enabled: true, PreferredMfa: true } },
+      { UserPoolId: POOL, Username: 'dr_one', SoftwareTokenMfaSettings: { Enabled: false, PreferredMfa: false } },
+    ]);
+  });
+});

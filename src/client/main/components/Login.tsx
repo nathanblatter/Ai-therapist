@@ -4,6 +4,7 @@ import { Shield, Key, Lock, User, LogIn } from 'react-feather';
 import { decodeAssertionOptions, encodeAssertion, isCancelled, passkeysSupported } from '../../shared/lib/webauthn';
 import { savePendingDeepLink } from '../../admin/utils/pendingDeepLink';
 import { COGNITO_START, planSignIn } from '../lib/signInMode';
+import TotpEnrol from './TotpEnrol';
 
 // Errors a sign-in provider's callback can send us back with (?error=).
 const CALLBACK_ERRORS: Record<string, string> = {
@@ -42,6 +43,9 @@ export default function Login() {
   const params = new URLSearchParams(location.search);
   const loginChallenge = params.get('login_challenge');
   const callbackError = params.get('error');
+  // The Cognito callback is holding a staff sign-in until an authenticator
+  // app is set up (ai-therapist-396).
+  const enrolling = params.get('enrol') === 'totp';
   // null = not asked yet; the sign-in mode is decided once per page load.
   const [squawk, setSquawk] = useState<SquawkConfig | null>(null);
   const [cognitoMode, setCognitoMode] = useState(false);
@@ -88,6 +92,7 @@ export default function Login() {
         squawkEnabled: squawkCfg.enabled === true,
         loginChallenge,
         callbackError,
+        enrolling,
       });
       setCognitoMode(plan.mode === 'cognito');
       // In Cognito mode the Squawk form is never shown, whatever Squawk says.
@@ -97,7 +102,7 @@ export default function Login() {
     return () => {
       cancelled = true;
     };
-  }, [loginChallenge, callbackError]);
+  }, [loginChallenge, callbackError, enrolling]);
 
   const squawkMode = squawk?.enabled === true;
 
@@ -281,7 +286,9 @@ export default function Login() {
             </p>
           </div>
 
-          {cognitoMode ? (
+          {cognitoMode && enrolling ? (
+            <TotpEnrol />
+          ) : cognitoMode ? (
             // The password is typed on the study's hosted sign-in page, not here.
             <div className="space-y-6">
               {error && (

@@ -162,7 +162,7 @@ describe('hosted page URLs', () => {
       response_type: 'code',
       client_id: 'client123',
       redirect_uri: 'https://app.test/api/auth/cognito/callback',
-      scope: 'openid',
+      scope: 'openid aws.cognito.signin.user.admin',
       state: 's1',
       nonce: 'n1',
       code_challenge: 'c1',

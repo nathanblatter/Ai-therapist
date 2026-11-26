@@ -111,9 +111,16 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
     mfaStatus: '', // '', 'enabled', 'disabled'
   });
   const [showFilters, setShowFilters] = useState(false);
+  // With Cognito signing people in, authenticator apps live in the pool: this
+  // screen can reset one, and the app's own MFA flag means nothing.
+  const [cognitoMode, setCognitoMode] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     fetchUsers();
+    getJson<{ enabled: boolean }>('/api/auth/cognito/config')
+      .then((cfg) => setCognitoMode(cfg.enabled === true))
+      .catch(() => setCognitoMode(false));
   }, []);
 
   const generateSecurePassword = (): string => {
@@ -192,6 +199,26 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
     try {
       await postJson(`/api/users/${userid}/provision-email`, {}, { fallback: 'Failed to provision email address' });
       await fetchUsers();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const resetAuthenticator = async (userid: number, username: string) => {
+    if (
+      !confirm(`Reset the authenticator app for "${username}"? They will set up a new one the next time they sign in.`)
+    ) {
+      return;
+    }
+    setNotice(null);
+    try {
+      await postJson(
+        `/api/users/${userid}/reset-authenticator`,
+        {},
+        { fallback: 'Failed to reset the authenticator app' },
+      );
+      setError(null);
+      setNotice(`Authenticator app reset for ${username}. They set up a new one at their next sign-in.`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -613,6 +640,9 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
       </div>
 
       {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">{error}</div>}
+      {notice && (
+        <div className="bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded mb-4">{notice}</div>
+      )}
 
       {/* Filters */}
       <div className="mb-4 space-y-4">
@@ -885,7 +915,19 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{user.preferred_language || 'en'}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm">
-                  {user.role === 'therapist' || user.role === 'researcher' ? (
+                  {cognitoMode ? (
+                    STAFF_ROLES.has(user.role) ? (
+                      <button
+                        onClick={() => resetAuthenticator(user.userid, user.username)}
+                        className="text-royal hover:underline text-xs font-medium"
+                        aria-label={`Reset the authenticator app for ${user.username}`}
+                      >
+                        Reset authenticator app
+                      </button>
+                    ) : (
+                      <span className="text-gray-400 text-xs">Not required</span>
+                    )
+                  ) : user.role === 'therapist' || user.role === 'researcher' ? (
                     user.mfa_enabled ? (
                       <span className="flex items-center gap-1 text-green-700">
                         <Shield size={16} className="text-green-600" />

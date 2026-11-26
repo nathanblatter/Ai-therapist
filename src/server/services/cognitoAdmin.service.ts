@@ -16,6 +16,14 @@
 //    scripts/cognito/iam-app-policy.json and nothing more: every action used
 //    here is listed there.
 //
+//  * Authenticator-app codes (TOTP, ai-therapist-396): the pool leaves a second
+//    factor optional, so the hosted page never offers to set one up. Staff
+//    are enrolled by this app instead, with the access token of the sign-in
+//    that found them without one (AssociateSoftwareToken, VerifySoftwareToken:
+//    public operations authorised by that token, not by IAM), then switched on
+//    with AdminSetUserMFAPreference. From then on the hosted page asks for a
+//    code at every sign-in.
+//
 // Status: written against the SDK's types and exercised over a mocked client
 // only. Nothing here has run against a real pool.
 import {
@@ -27,6 +35,9 @@ import {
   AdminListGroupsForUserCommand,
   AdminDeleteUserCommand,
   AdminGetUserCommand,
+  AdminSetUserMFAPreferenceCommand,
+  AssociateSoftwareTokenCommand,
+  VerifySoftwareTokenCommand,
   type AttributeType,
 } from '@aws-sdk/client-cognito-identity-provider';
 import { USER_ROLES } from '../../shared/roles.js';
@@ -231,4 +242,69 @@ export async function createUser(username: string, password: string, role: strin
     });
   }
   return { sub };
+}
+
+// ── Authenticator-app codes (TOTP) ──────────────────────────────────────────
+
+/** Does the pool ask this user for an authenticator code at sign-in? Throws
+ *  `user_not_found` when the pool has no such user. */
+export async function getTotpEnabled(username: string): Promise<boolean> {
+  const out = await call<{ UserMFASettingList?: string[] }>('AdminGetUser', new AdminGetUserCommand(target(username)));
+  return (out.UserMFASettingList ?? []).includes('SOFTWARE_TOKEN_MFA');
+}
+
+/** Start enrolling an authenticator app for the user who holds this access
+ *  token (scope aws.cognito.signin.user.admin). Returns the shared secret to
+ *  show as a QR code. A second call replaces the secret of the first. */
+export async function beginTotpEnrolment(accessToken: string): Promise<{ secret: string }> {
+  const out = await call<{ SecretCode?: string }>(
+    'AssociateSoftwareToken',
+    new AssociateSoftwareTokenCommand({ AccessToken: accessToken }),
+    // The request carries a bearer token: keep AWS's message out of the error.
+    { password: true },
+  );
+  if (!out.SecretCode) {
+    throw new CognitoAdminError('failed', 'AssociateSoftwareToken', 'NoSecretCode', 'the pool returned no secret');
+  }
+  return { secret: out.SecretCode };
+}
+
+/** Check the first code from the authenticator app. False when the code is
+ *  wrong; throws for anything else (an expired token, the pool down). */
+export async function verifyTotpEnrolment(accessToken: string, code: string): Promise<boolean> {
+  try {
+    const out = await call<{ Status?: string }>(
+      'VerifySoftwareToken',
+      new VerifySoftwareTokenCommand({
+        AccessToken: accessToken,
+        UserCode: code,
+        FriendlyDeviceName: 'Authenticator app',
+      }),
+      { password: true },
+    );
+    return out.Status === 'SUCCESS';
+  } catch (err) {
+    if (
+      err instanceof CognitoAdminError &&
+      (err.awsName === 'CodeMismatchException' || err.awsName === 'EnableSoftwareTokenMFAException')
+    ) {
+      return false;
+    }
+    // { password: true } reads a bad parameter as a rejected password; here it
+    // is a malformed code or token, which is a failure, not a wrong code.
+    throw err;
+  }
+}
+
+/** Turn the authenticator-app challenge on (a verified authenticator must
+ *  exist) or off. Off does not erase the registered authenticator; the next
+ *  enrolment replaces its secret. */
+export async function setTotpEnabled(username: string, enabled: boolean): Promise<void> {
+  await call(
+    'AdminSetUserMFAPreference',
+    new AdminSetUserMFAPreferenceCommand({
+      ...target(username),
+      SoftwareTokenMfaSettings: { Enabled: enabled, PreferredMfa: enabled },
+    }),
+  );
 }

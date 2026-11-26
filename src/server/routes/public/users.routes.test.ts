@@ -175,3 +175,25 @@ describe('staff email (ai-therapist-283 phase 1)', () => {
     expect(dbMocks.setUserEmail).toHaveBeenCalledWith(5, 'jane-doe@byuisresearch.com');
   });
 });
+
+describe('POST /api/users/:userid/reset-authenticator (ai-therapist-396)', () => {
+  it('is researcher-only', async () => {
+    for (const role of ['therapist', 'caseworker', 'participant']) {
+      const res = await request(appAs(role)).post('/api/users/7/reset-authenticator');
+      expect(res.status).toBe(403);
+    }
+  });
+
+  it('answers 404 for an unknown account', async () => {
+    dbMocks.getUserById.mockResolvedValue(null);
+    const res = await request(appAs('researcher')).post('/api/users/999/reset-authenticator');
+    expect(res.status).toBe(404);
+  });
+
+  it('answers 502 with the reason when no sign-in service holds authenticators here', async () => {
+    dbMocks.getUserById.mockResolvedValue({ userid: 7, username: 'dr_one', role: 'therapist' });
+    const res = await request(appAs('researcher')).post('/api/users/7/reset-authenticator');
+    expect(res.status).toBe(502);
+    expect(res.body.error).toMatch(/not managed by the sign-in service/);
+  });
+});

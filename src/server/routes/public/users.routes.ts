@@ -4,7 +4,7 @@ import { Router } from 'express';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { orgIdFor } from '../../middleware/org.js';
 import { passwordPolicyError } from '../../utils/passwordPolicy.js';
-import { registerAccount, updateAccount, removeAccount } from '../../services/accounts.service.js';
+import { registerAccount, updateAccount, removeAccount, resetAuthenticator } from '../../services/accounts.service.js';
 import {
   setAccountEmail,
   validateAccountEmail,
@@ -314,6 +314,26 @@ export default function usersRoutes(): Router {
       }
       log.error({ err: error }, 'Error provisioning a study email address');
       res.status(500).json({ error: 'Failed to provision email address' });
+    }
+  });
+
+  // A staff member lost their authenticator app: switch the code challenge
+  // off in the sign-in service so their next sign-in enrols a new one
+  // (ai-therapist-396). Cognito deployments only.
+  router.post('/api/users/:userid/reset-authenticator', requireRole('researcher'), async (req, res) => {
+    try {
+      const user = await resetAuthenticator(req.params.userid);
+      log.info({ userid: user.userid, by: req.session.userId }, 'authenticator app reset by a researcher');
+      res.json({ success: true, user: { userid: user.userid, username: user.username, role: user.role } });
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === 'User not found') {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      if (error instanceof Error && error.name === 'AccountSyncError') {
+        return res.status(502).json({ error: error.message });
+      }
+      log.error({ err: error }, 'Error resetting an authenticator app');
+      res.status(500).json({ error: 'Failed to reset the authenticator app' });
     }
   });
 

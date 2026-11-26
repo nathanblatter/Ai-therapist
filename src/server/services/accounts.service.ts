@@ -159,6 +159,28 @@ async function updateInPool(userid: number | string, updates: AccountUpdates): P
   return updated;
 }
 
+/** Staff reset of a lost authenticator app (ai-therapist-396): switch the
+ *  code challenge off for the account in the pool. The next sign-in then finds
+ *  a staff account without one and makes the person enrol again before the
+ *  app lets them in (cognitoAuth.routes.ts). Only meaningful under Cognito. */
+export async function resetAuthenticator(userid: number | string): Promise<UserRow> {
+  const user = await getUserById(userid);
+  if (!user) throw new Error('User not found');
+  if (provider() !== 'cognito') {
+    throw new AccountSyncError('Authenticator apps are not managed by the sign-in service in this deployment');
+  }
+  try {
+    await cognitoAdmin.setTotpEnabled(user.username, false);
+  } catch (err) {
+    log.error({ err, userid }, 'Cognito authenticator reset failed');
+    if (isPoolError(err, 'user_not_found')) {
+      throw new AccountSyncError('This account does not exist in the sign-in service', err);
+    }
+    throw new AccountSyncError('Sign-in service rejected the change', err);
+  }
+  return user;
+}
+
 /** Update the local row, then mirror password and role changes to the
  *  provider. Usernames cannot change once an account lives in Squawk (they
  *  are its identity): refused up front rather than left to drift. */

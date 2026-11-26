@@ -1,11 +1,29 @@
 // Multi-factor authentication routes (TOTP setup, verify, disable, backup codes).
 // All require an authenticated session.
 import { Router } from 'express';
+import type { Request, Response } from 'express';
 import { requireAuth } from '../../middleware/auth.js';
+import * as cognito from '../../services/cognito.service.js';
 
 import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('mfaRoutes');
+
+/** With Cognito signing people in, this app's own authenticator secret and
+ *  backup codes are checked by nothing (only the legacy login reads them), and
+ *  confirming a change with the local password would be a second password
+ *  check. The authenticator lives in the pool instead: staff enrol at sign-in
+ *  and a researcher resets it from User Management (ai-therapist-396). */
+function refuseUnderCognito(_req: Request, res: Response, next: () => void): void {
+  if (cognito.enabled()) {
+    res.status(409).json({
+      error: 'Two-step sign-in is managed by the study sign-in service, not on this screen.',
+      code: 'managed_by_cognito',
+    });
+    return;
+  }
+  next();
+}
 
 export default function mfaRoutes(): Router {
   const router = Router();
@@ -13,6 +31,15 @@ export default function mfaRoutes(): Router {
   // GET /api/mfa/status - MFA status for the current user
   router.get('/api/mfa/status', requireAuth, async (req, res) => {
     try {
+      if (cognito.enabled()) {
+        // Staff cannot hold a session without an authenticator under Cognito
+        // (cognitoAuth.routes.ts); other roles are not required to have one.
+        const { requiresSecondFactor } = await import('../../../shared/roles.js');
+        return res.json({
+          success: true,
+          mfa: { enabled: requiresSecondFactor(req.session.userRole), backupCodesRemaining: 0, managedBy: 'cognito' },
+        });
+      }
       const { getMFAStatus } = await import('../../services/mfa.service.js');
       const status = await getMFAStatus(req.session.userId!);
       const { secret: _secret, ...statusWithoutSecret } = status;
@@ -24,7 +51,7 @@ export default function mfaRoutes(): Router {
   });
 
   // POST /api/mfa/setup/init - generate secret + QR code
-  router.post('/api/mfa/setup/init', requireAuth, async (req, res) => {
+  router.post('/api/mfa/setup/init', requireAuth, refuseUnderCognito, async (req, res) => {
     try {
       const { generateMFASecret, generateQRCode } = await import('../../services/mfa.service.js');
 
@@ -46,7 +73,7 @@ export default function mfaRoutes(): Router {
   });
 
   // POST /api/mfa/setup/verify - verify token and enable MFA
-  router.post('/api/mfa/setup/verify', requireAuth, async (req, res) => {
+  router.post('/api/mfa/setup/verify', requireAuth, refuseUnderCognito, async (req, res) => {
     const { token } = req.body;
     if (!token) {
       return res.status(400).json({ error: 'Token is required' });
@@ -76,7 +103,7 @@ export default function mfaRoutes(): Router {
   });
 
   // POST /api/mfa/disable - disable MFA (password-confirmed)
-  router.post('/api/mfa/disable', requireAuth, async (req, res) => {
+  router.post('/api/mfa/disable', requireAuth, refuseUnderCognito, async (req, res) => {
     const { password } = req.body;
     if (!password) {
       return res.status(400).json({ error: 'Password is required to disable MFA' });
@@ -100,7 +127,7 @@ export default function mfaRoutes(): Router {
   });
 
   // POST /api/mfa/regenerate-backup-codes - issue fresh backup codes (password-confirmed)
-  router.post('/api/mfa/regenerate-backup-codes', requireAuth, async (req, res) => {
+  router.post('/api/mfa/regenerate-backup-codes', requireAuth, refuseUnderCognito, async (req, res) => {
     const { password } = req.body;
     if (!password) {
       return res.status(400).json({ error: 'Password is required to regenerate backup codes' });

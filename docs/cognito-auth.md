@@ -1,7 +1,8 @@
 # Sign-in through Amazon Cognito
 
-Status (2026-11-25): the server sign-in flow, the login page's Cognito mode
-and the mirroring of account changes to the pool are built and unit-tested.
+Status (2026-11-26): the server sign-in flow, the login page's Cognito mode,
+the mirroring of account changes to the pool and the authenticator-code rule
+for staff are built and unit-tested.
 It is **not enabled anywhere yet**: no user pool exists (ai-therapist-394).
 Nothing here has run against a real pool; the account mirroring in particular
 has only ever talked to a mocked AWS client (see "Unconfirmed until the first
@@ -31,8 +32,8 @@ AWS account, the same account that holds the study data. Decided 2026-11-21 to
 
 1. The browser goes to `GET /api/auth/cognito/start`. The server stores a PKCE
    verifier, a `state` and a `nonce` on the session and redirects to
-   `{COGNITO_DOMAIN}/oauth2/authorize` (`response_type=code`, `scope=openid`,
-   `code_challenge_method=S256`).
+   `{COGNITO_DOMAIN}/oauth2/authorize` (`response_type=code`,
+   `scope=openid aws.cognito.signin.user.admin`, `code_challenge_method=S256`).
 2. The person signs in on the hosted page (password, and a code if their
    account has TOTP). Cognito redirects to
    `GET /api/auth/cognito/callback?code&state`.
@@ -49,7 +50,10 @@ AWS account, the same account that holds the study data. Decided 2026-11-21 to
    username whose row is linked to a different subject is refused
    (`no_account`). If the pool's role differs from `users.role`, the row is
    updated: the pool is the source of roles.
-6. The session is established exactly as the legacy login does it: a fresh
+6. A staff role (therapist, researcher, caseworker) must have an authenticator
+   app switched on in the pool, or the sign-in is held for setup instead of
+   signed in: see "Authenticator codes for staff".
+7. The session is established exactly as the legacy login does it: a fresh
    session id, consent and anonymous-session ownership carried over, account
    fields stamped. Staff land on `/admin`, everyone else on `/`.
 
@@ -74,6 +78,95 @@ Nothing Cognito sends is echoed into the URL.
 With the `COGNITO_*` variables set, the legacy `POST /api/auth/login` answers
 `410` before it looks at the local hash. With them unset (local dev, tests, CI)
 nothing changes.
+
+## Authenticator codes for staff
+
+Built 2026-11-26 (ai-therapist-396) against a mocked AWS client. **Never run
+against a real pool.**
+
+The rule (decided 2026-11-25): therapists, researchers and caseworkers sign in
+with a password and a code from an authenticator app; participants and demo
+accounts are not required to. `requiresSecondFactor()` in `src/shared/roles.ts`
+is the one place the list lives.
+
+Why the app enforces it: a pool can require a second factor for everyone or
+leave it optional for everyone, and while it is optional the hosted page never
+offers to set one up (AWS developer guide, "Adding MFA to a user pool", read
+2026-11-26). So the pool is created with it optional, and this app does the
+rest:
+
+1. In the callback, after the account and role are resolved, a staff sign-in
+   asks the pool (`AdminGetUser`) whether the account has
+   `SOFTWARE_TOKEN_MFA` in `UserMFASettingList`. If it does, the hosted page
+   has already asked for a code at this sign-in (it does so at every sign-in
+   once the factor is on) and the session is established. If the pool cannot
+   be asked, the sign-in is refused (`server_error`): staff are never let in
+   on a password alone because a lookup failed.
+2. If it does not, no app session is created. The browser session is replaced
+   by a short-lived enrolment state (15 minutes, 8 code attempts) holding the
+   access token of that sign-in, and the browser goes to `/login?enrol=totp`.
+3. The login page shows the setup screen
+   (`src/client/main/components/TotpEnrol.tsx`):
+   `POST /api/auth/cognito/totp/begin` calls `AssociateSoftwareToken` with the
+   held access token and returns the secret and a QR code;
+   `POST /api/auth/cognito/totp/verify` calls `VerifySoftwareToken` with the
+   6-digit code, then `AdminSetUserMFAPreference` (enabled, preferred), then
+   establishes the session. The code just entered is the second factor for
+   this sign-in.
+4. From then on the hosted page asks that account for a code every time.
+
+The access token is the only Cognito token the app ever keeps, only for a held
+staff sign-in, only in the server-side session, and it is dropped when the
+session is established or the enrolment expires. It is why sign-in requests
+the `aws.cognito.signin.user.admin` scope: `AssociateSoftwareToken` and
+`VerifySoftwareToken` are authorised by that token, not by IAM.
+
+Lost phone: a researcher presses "Reset authenticator app" on the account in
+User Management (`POST /api/users/:id/reset-authenticator`, researcher only,
+through `accounts.service.ts`). That switches the challenge off in the pool
+(`AdminSetUserMFAPreference`); the person's next sign-in is then held for
+setup again, and the new setup replaces the old secret. There are no backup
+codes: the reset is the recovery path, as for passwords.
+
+The security settings screen (Admin, MFA) says, under Cognito, that the
+sign-in service holds the password and authenticator, and offers nothing to
+set up. The app's own `/api/mfa/setup/*`, `/disable` and
+`/regenerate-backup-codes` answer `409 managed_by_cognito`: nothing reads the
+local secret under Cognito, and confirming with the local password would be a
+second password check. The Squawk passkey card is already hidden when Squawk
+is not configured.
+
+Known limits:
+
+- Between a reset and the person's next sign-in the account is protected by
+  its password alone at the pool, but that sign-in still cannot reach the app
+  without enrolling.
+- An attacker who knows a staff password for an account that has never
+  enrolled (new account, or just reset) can enrol their own authenticator.
+  This is inherent to enrol-at-first-sign-in; keep the window short by having
+  new staff sign in when the account is made, and reset only on request.
+- A researcher can reset their own authenticator while signed in.
+- The ID token may carry `amr`/`acr` claims naming the methods used (AWS says
+  the feature is rolling out and may not be on a given pool). The app does not
+  read them yet; if the stage pool sends them, checking `amr` for a staff
+  sign-in would be a second, independent proof.
+
+### Unconfirmed until the first stage run (authenticator)
+
+1. The app client accepts `aws.cognito.signin.user.admin` in
+   `AllowedOAuthScopes` next to `openid`, and the access token from the code
+   exchange carries it.
+2. `AssociateSoftwareToken` and `VerifySoftwareToken` work with that access
+   token from the server (no IAM), and a wrong code comes back as
+   `CodeMismatchException` or `EnableSoftwareTokenMFAException`.
+3. `AdminSetUserMFAPreference` succeeds right after a successful verify, and
+   `AdminGetUser` then lists `SOFTWARE_TOKEN_MFA`.
+4. The hosted page asks an enrolled account for a code at the next sign-in,
+   and does not ask one that was reset.
+5. After a reset, a new `AssociateSoftwareToken` replaces the old secret (the
+   old authenticator entry stops working).
+6. `AdminGetUser` and `AdminSetUserMFAPreference` are covered by
+   `iam-app-policy.json` as written.
 
 ## Account changes
 
@@ -173,7 +266,8 @@ None of this could be checked without a pool. Check each on stage:
 | `APP_URL` | this deployment's public origin (falls back to `CORS_ORIGIN`) |
 
 Pool side, per app client: callback URL `{APP_URL}/api/auth/cognito/callback`,
-sign-out URL `{APP_URL}/login`, authorization-code grant, scope `openid`,
+sign-out URL `{APP_URL}/login`, authorization-code grant, scopes `openid` and
+`aws.cognito.signin.user.admin`,
 self-sign-up **off** (the first-sign-in match by username relies on it), sign-in
 by username, groups `therapist`, `researcher`, `participant`, `demo`,
 `caseworker`.
@@ -208,14 +302,8 @@ Two sets of AWS permissions are involved, both granted by Nathan:
 - Moving the accounts that exist before a pool does into it. Their passwords
   cannot be copied (only hashes are stored), so each needs a pool user created
   and a new password set; nothing does that yet (ai-therapist-396).
-- Staff TOTP reset (ai-therapist-396). A password reset from User Management
-  works for an account that is in the pool (see Account changes).
-- The security settings screen (Admin, MFA/Security) still shows the app's own
-  TOTP setup and the Squawk passkey card; neither applies under Cognito
-  (ai-therapist-397, with the staff TOTP rule on 396).
-- Requiring TOTP for staff. The pool can only require a second factor for
-  everyone or leave it optional for everyone, so the per-role rule has to be
-  enforced by this app at sign-in; how is open on ai-therapist-396.
+- An authenticator app for participants who want one (optional by decision):
+  nothing offers it yet.
 - Rollback rehearsal on stage (ai-therapist-398). The intended rollback is to
   remove the `COGNITO_*` variables and redeploy; the legacy login works again
   because the local hashes are untouched.

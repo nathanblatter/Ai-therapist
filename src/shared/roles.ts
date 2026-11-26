@@ -42,6 +42,13 @@ export function isStaffCommsRole(role: string | undefined | null): role is Staff
   return isCareTeamRole(role) || role === 'researcher';
 }
 
+/** Roles that must sign in with an authenticator-app code (decided
+ *  2026-11-25, ai-therapist-393): everyone who can read participant data.
+ *  Participants and demo accounts may add one but are not required to. */
+export function requiresSecondFactor(role: string | undefined | null): boolean {
+  return isStaffCommsRole(role);
+}
+
 /**
  * The admin data tier for a role. Therapists and researchers see full content
  * (researchers see the redacted column post-session, unchanged); caseworkers
