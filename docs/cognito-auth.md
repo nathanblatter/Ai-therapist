@@ -93,9 +93,31 @@ by username, groups `therapist`, `researcher`, `participant`, `demo`,
 
 Do not set `COGNITO_*` and `SQUAWK_*` together. Never put either in CI.
 
+## Creating a pool
+
+`scripts/cognito/create-pool.sh <stage|prod> <app-url> <domain-prefix>` creates
+one pool with the settings above, its five role groups, the hosted sign-in
+domain and the app client, then prints the `.env` values. It refuses to run
+outside the study account or when a pool of that name exists, and never changes
+an existing pool. Change the script, not the console, so stage and prod stay
+the same.
+
+As of 2026-11-25 the script has **not been run**: it passes a shell syntax
+check only. The study's `nathan` IAM user has no Cognito permissions, so the
+first run on stage is also the first test of every option in it.
+
+Two sets of AWS permissions are involved, both granted by Nathan:
+
+- **One-time setup**: whoever runs the script needs to administer Cognito in
+  the study account (for example the AWS-managed `AmazonCognitoPowerUser`
+  policy, attached for the setup and removed afterwards).
+- **The running app**: `scripts/cognito/iam-app-policy.json`, limited to the
+  user-management calls the app makes and to that environment's pool ARN. One
+  copy per environment, each naming only its own pool.
+
 ## Not built yet
 
-- The pools themselves, and the script that creates them (ai-therapist-394).
+- The pools themselves (ai-therapist-394). The script exists; see Creating a pool.
 - Account create, password, role and delete mirrored to the pool through
   `accounts.service.ts`; staff password and TOTP reset (ai-therapist-396).
 - The security settings screen (Admin, MFA/Security) still shows the app's own

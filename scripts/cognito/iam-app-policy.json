@@ -1,0 +1,23 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AiTherapistManagesItsOwnPoolUsers",
+      "Effect": "Allow",
+      "Action": [
+        "cognito-idp:AdminCreateUser",
+        "cognito-idp:AdminSetUserPassword",
+        "cognito-idp:AdminGetUser",
+        "cognito-idp:AdminDeleteUser",
+        "cognito-idp:AdminDisableUser",
+        "cognito-idp:AdminEnableUser",
+        "cognito-idp:AdminAddUserToGroup",
+        "cognito-idp:AdminRemoveUserFromGroup",
+        "cognito-idp:AdminListGroupsForUser",
+        "cognito-idp:AdminSetUserMFAPreference",
+        "cognito-idp:AdminUserGlobalSignOut"
+      ],
+      "Resource": "arn:aws:cognito-idp:us-west-1:104181502887:userpool/REPLACE_WITH_POOL_ID"
+    }
+  ]
+}
