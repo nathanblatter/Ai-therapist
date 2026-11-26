@@ -47,10 +47,22 @@ vi.mock('../services/cognito.service.js', () => ({ enabled: mocks.cognitoEnabled
 
 import joinRoutes from './join.routes.js';
 
-type FakeSession = Record<string, unknown> & { save: (cb?: (err?: unknown) => void) => void };
+type FakeSession = Record<string, unknown> & {
+  save: (cb?: (err?: unknown) => void) => void;
+  regenerate: (cb: (err?: unknown) => void) => void;
+};
 
 function makeApp() {
-  const session: FakeSession = { save: (cb) => cb?.() };
+  // regenerate() notes what the session held when it was called: a real one
+  // swaps in an empty session, so the account fields must be stamped after.
+  const session: FakeSession = {
+    save: (cb) => cb?.(),
+    regenerate: (cb) => {
+      session.regeneratedWithUserId = session.userId ?? null;
+      session.regenerations = ((session.regenerations as number | undefined) ?? 0) + 1;
+      cb();
+    },
+  };
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
