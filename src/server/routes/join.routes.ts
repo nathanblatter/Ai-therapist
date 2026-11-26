@@ -59,12 +59,22 @@ function signIn(
   user: { userid: number; username: string; role: string; organization_id?: number | null },
   isSandbox: boolean,
 ): Promise<boolean> {
+  // What belongs to the browser and the person in front of it, not to an
+  // account, crosses the new id, as at login (auth.routes.ts): the consent
+  // they accepted and the anonymous sessions they own.
+  const carried = {
+    ownedSessions: req.session.ownedSessions,
+    consentAccepted: req.session.consentAccepted,
+    consentVersion: req.session.consentVersion,
+    consentAcceptedAt: req.session.consentAcceptedAt,
+  };
   return new Promise((resolve) => {
     req.session.regenerate((regenErr) => {
       if (regenErr) {
         log.error({ err: regenErr }, 'Session regenerate error');
         return resolve(false);
       }
+      Object.assign(req.session, carried);
       req.session.userId = user.userid;
       req.session.username = user.username;
       req.session.userRole = user.role as typeof req.session.userRole;

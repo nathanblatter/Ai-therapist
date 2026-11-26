@@ -6,6 +6,9 @@ import { savePendingDeepLink } from '../../admin/utils/pendingDeepLink';
 import { COGNITO_START, planSignIn } from '../lib/signInMode';
 import TotpEnrol from './TotpEnrol';
 
+/** How long the page waits to learn which sign-in runs before offering a retry. */
+const CONFIG_TIMEOUT_MS = 8000;
+
 // Errors a sign-in provider's callback can send us back with (?error=).
 const CALLBACK_ERRORS: Record<string, string> = {
   access_denied: 'Sign-in was cancelled.',
@@ -86,7 +89,9 @@ export default function Login() {
     // not "this provider is off": falling back to the app's own form on a
     // Cognito deployment would invite a password into this page.
     const ask = <T,>(url: string): Promise<T | null> =>
-      fetch(url, { credentials: 'include' })
+      // A stalled request must reach the retry screen too, not sit on
+      // "Loading sign-in..." for good.
+      fetch(url, { credentials: 'include', signal: AbortSignal.timeout(CONFIG_TIMEOUT_MS) })
         .then((r) => (r.ok ? (r.json() as Promise<T>) : null))
         .catch(() => null);
     Promise.all([
