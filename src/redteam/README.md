@@ -19,6 +19,8 @@ npm run redteam:extended   # slow or expensive scenarios (long chat conversation
 npm run redteam:voice-crawl   # GPT-Live guide CRAWL: one spoken turn at a critical point, seeded history
 npm run redteam:voice-walk    # CRAWL turns under acoustic conditions (synthetic fallback)
 npm run redteam:voice-run     # simulated participant in one full-duplex call
+npm run redteam:voice-opening -- --variations 20   # opening-only GPT-Live starts (silent-start rate, ai-therapist-315)
+npm run redteam:voice-opening-report -- <summary.json> [...]   # per-delivery numbers from those runs
 npm run redteam:replay     # re-drive redacted real sessions and diff judge scores
 ```
 

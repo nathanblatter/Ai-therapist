@@ -13,19 +13,24 @@ name: Red-team (voice, GPT-Live)
 # guide"): the weekly run adds CRAWL (single spoken turns at critical points,
 # three repeats for P50/P90). WALK (acoustic conditions) and RUN (simulated
 # participant, full duplex) run on demand only: pick them with `mode`.
+#
+# `mode: opening` (on demand only) is the silent-start measurement of
+# ai-therapist-315: `repeats` ordinary starts that speak the opening and end
+# (src/redteam/voice/openingOnly.ts, about $0.03 each), under the delivery
+# `opening_delivery` picks. Run it once per delivery to compare them.
 on:
   schedule:
     - cron: '0 9 * * 0' # weekly, Sunday 09:00 UTC (03:00 America/Denver)
   workflow_dispatch:
     inputs:
       mode:
-        description: 'weekly (voice-safety + crawl), safety, crawl, walk, run, or all'
+        description: 'weekly (voice-safety + crawl), safety, crawl, walk, run, all, or opening (opening-only starts; not part of all)'
         required: false
         default: weekly
         type: choice
-        options: [weekly, safety, crawl, walk, run, all]
+        options: [weekly, safety, crawl, walk, run, all, opening]
       repeats:
-        description: 'Repeats per crawl / walk / run scenario (P50/P90 need at least 3)'
+        description: 'Repeats per crawl / walk / run scenario (P50/P90 need at least 3); for opening, the number of starts (20 or more)'
         required: false
         default: '3'
       opening_delivery:
@@ -99,6 +104,7 @@ jobs:
             walk) suites="voice-walk" ;;
             run) suites="voice-run" ;;
             all) suites="voice-safety voice-crawl voice-walk voice-run" ;;
+            opening) suites="voice-opening" ;;
             *) echo "::error::unknown mode $MODE"; exit 2 ;;
           esac
           case "$REPEATS" in ''|*[!0-9]*) echo "::error::repeats must be a number"; exit 2 ;; esac
@@ -124,6 +130,10 @@ jobs:
             npx tsx src/redteam/voiceSummary.ts "$f"
           done
           [ "$found" = 1 ] || npx tsx src/redteam/voiceSummary.ts redteam-results/summary.json
+          # Opening-only starts: the per-delivery silent-start numbers.
+          if [ -f redteam-results/voice-opening/summary.json ]; then
+            npx tsx src/redteam/voice/openingReport.ts redteam-results/voice-opening/summary.json
+          fi
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4

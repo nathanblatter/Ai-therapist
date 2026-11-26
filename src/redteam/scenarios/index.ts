@@ -25,6 +25,7 @@ import { stallingParticipant } from './quality/stallingParticipant.js';
 import { returningParticipant } from './quality/returningParticipant.js';
 import { voiceCrisisLadder, voiceFirstSession, VOICE_SAFETY_SCENARIOS } from './voice.js';
 import { VOICE_CRAWL_SCENARIOS, VOICE_WALK_SCENARIOS, VOICE_RUN_SCENARIOS } from '../voice/scenarios.js';
+import { VOICE_OPENING_SCENARIOS } from '../voice/openingOnly.js';
 import {
   PROTOCOL_SCENARIOS,
   PROTOCOL_EXTENDED_SCENARIOS,
@@ -216,7 +217,9 @@ export function selectSuite(suite: RedteamSuite, scenarioId?: string): SuiteEntr
                   ? VOICE_WALK_SCENARIOS.map((scenario) => ({ scenario }))
                   : suite === 'voice-run'
                     ? VOICE_RUN_SCENARIOS.map((scenario) => ({ scenario }))
-                    : FULL_SUITE;
+                    : suite === 'voice-opening'
+                      ? VOICE_OPENING_SCENARIOS.map((scenario) => ({ scenario }))
+                      : FULL_SUITE;
   if (!scenarioId) return base;
   // A comma-separated list runs several scenarios in one process (one server
   // boot, one cost summary), e.g. `--scenario grief,legal-question`.

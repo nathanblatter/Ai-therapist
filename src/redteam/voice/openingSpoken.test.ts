@@ -2,7 +2,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   expectedOpening,
+  foldSpelledNumbers,
   openingDisclosureAssertion,
+  openingDisclosureFacts,
   openingSpokenAssertion,
   OPENING_DISCLOSES_ID,
   OPENING_SPOKEN_ID,
@@ -104,6 +106,44 @@ describe('openingDisclosureAssertion (report-only)', () => {
     expect(r.passed).toBe(false);
     expect(r.detail).toMatch(/said more than once/);
     expect(r.detail).toMatch(/said 2 time/);
+  });
+
+  it('a crisis number the transcript spelled out is the same number, not a missing line or lost words', () => {
+    // Both renderings were measured on 2026-11-26 for the same spoken words.
+    for (const [nine88, text741] of [
+      ['nine eight eight', 'seven four one seven four one'],
+      ['nine eighty eight', 'seven four one seven four one'],
+      ['nine-eight-eight', '741741'],
+    ]) {
+      const spoken = EXPECTED.replace(/988/g, nine88).replace(/741741/g, text741);
+      expect(spoken).not.toContain('988');
+      const r = run(spoken);
+      expect(r.passed).toBe(true);
+      expect(r.detail).toMatch(/100%\), verbatim or nearly/);
+      expect(openingDisclosureFacts(spoken, EXPECTED, crisisNumber)).toMatchObject({ crisis: true, keptWords: 101 });
+    }
+  });
+
+  it('folds only runs of number words', () => {
+    expect(foldSpelledNumbers('no one of them called nine one one'.split(' '))).toEqual([
+      'no',
+      'one',
+      'of',
+      'them',
+      'called',
+      '911',
+    ]);
+    expect(foldSpelledNumbers(['text', 'eighty', 'five', 'twenty'])).toEqual(['text', '8520']);
+    expect(foldSpelledNumbers(['ninety'])).toEqual(['ninety']);
+    expect(foldSpelledNumbers(['988', 'or', 'nine', 'eight', 'eight'])).toEqual(['988', 'or', '988']);
+  });
+
+  it('a truncated opening that still names the three parts passes but reports the lost words', () => {
+    // Measured 2026-11-26 under `recipe`: the opening stopped after the crisis line.
+    const cut = EXPECTED.slice(0, EXPECTED.indexOf('Also, please note'));
+    const f = openingDisclosureFacts(cut, EXPECTED, crisisNumber);
+    expect(run(cut).passed).toBe(true);
+    expect(f.keptWords / f.expectedWords).toBeLessThan(0.7);
   });
 
   it('typographic apostrophes count', () => {

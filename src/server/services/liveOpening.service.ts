@@ -28,8 +28,8 @@
 // For the ORDINARY opening that two-step recipe is opt-in
 // (LIVE_OPENING_DELIVERY=recipe, see liveOpeningDelivery below); by default it
 // is still step 2 alone as an instructions append, the vendor's channel for a
-// disclosure's exact wording, until a live measurement shows the recipe keeps
-// the disclosure word for word.
+// disclosure's exact wording. The live measurement of 2026-11-26 found the
+// recipe keeps the wording as closely; switching the default is the PI's call.
 //
 // The vendor still does not guarantee speech, so a delivered ordinary opening
 // is watched in either delivery (see "Opening watchdog" below).
@@ -56,11 +56,11 @@ export type LiveOpeningVia = 'instructions' | 'commentary';
  *     disclosure. session.commentary.append may paraphrase the text.").
  *   recipe - the greeting recipe: a `developer` message in `session.input` at
  *     creation plus one `session.commentary.append` at `session.started`, as a
- *     recovery session does. Measured on the 35-word recovery nudge only;
- *     whether it keeps the 110-word disclosure word for word, and how often the
- *     two halves make the model say it twice, is not. Not to be the default
- *     until a paid live measurement (docs/gpt-live.md, "Opening preamble") shows
- *     both.
+ *     recovery session does. Measured on 40 ordinary starts on 2026-11-26
+ *     (docs/gpt-live.md, "Opening preamble"): first word at a median 0.67 s
+ *     against 1.83 s, the disclosure kept as closely as under `instructions`
+ *     and never said twice. Still not the default: changing how the
+ *     IRB-described disclosure is delivered is the PI's decision.
  *
  * The watchdog (re-send at 4 s, on-screen text at 8 s) runs in both modes: it
  * acts only on a start that has not spoken.

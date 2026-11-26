@@ -189,11 +189,12 @@ both.
   from "Deliver a disclosure" (live-conversations, read 2026-11-19): "Use
   session.instructions.append to request specific spoken wording for a
   disclosure. session.commentary.append may paraphrase the text." Its known
-  defect is the silent start (about one in six); the watchdog's commentary
+  defect is the silent start (1 of 9 on 2026-11-18; on 2026-11-26, 2 of 40
+  had said nothing at 4 s and none stayed silent); the watchdog's commentary
   re-send at 4 s and the on-screen text at 8 s now cover it.
 - **`recipe`.** The vendor's greeting recipe, as a recovery session's
-  speak-first nudge already uses. Not to be set in stage or prod until the live
-  measurement below has been paid for and read:
+  speak-first nudge already uses. Measured on 2026-11-26 (below); not to be
+  set in stage or prod before the PI has read that and agreed:
 
 1. At session creation, as a `developer` message in `session.input`
    (`buildLiveSessionConfig`, `speakFirst`). Not on a session seeded with
@@ -242,10 +243,10 @@ quoted above). The text itself still says "Say this phrase exactly", in both
 the developer message and the commentary. The only recorded evidence for
 commentary is the recovery nudge (35 words): the one transcript kept in
 docs/redteam.md is word for word apart from the crisis-line phrase, and 5 of 5
-recovery openings named the crisis line. The ordinary disclosure is about 110
-words and has never been spoken through commentary in a measured session, so
-whether it is kept word for word, paraphrased or truncated is unknown. That is
-why `recipe` is not the default. The voice suites read it on every run:
+recovery openings named the crisis line. The ordinary disclosure is 101
+words; until 2026-11-26 it had never been spoken through commentary in a
+measured session, which is why `recipe` was not made the default (the
+measurement is below: not paraphrased). The voice suites read it on every run:
 `disclaimer-exactly-once-at-start` (gating, most voice scenarios) needs any
 one disclaimer phrase in the opening turn, and `live-opening-discloses-ai`
 (report-only, `voice/openingSpoken.ts`) needs all three parts (that it is an
@@ -265,6 +266,69 @@ exactly" no longer holds); and how many starts the `live_opening` rows show
 greeting before the request (`firstAudioMs` negative or the request skipped).
 For `instructions`, the same numbers are the baseline, plus how many silent
 starts the 4 s commentary re-send rescued.
+
+**Measured 2026-11-26: 40 ordinary starts under each delivery.** Opening-only
+starts (`npm run redteam:voice-opening`, docs/redteam.md), gpt-live-1, a
+local disposable database, the server in-process on the code of that day
+(watchdog on in both arms), in alternating blocks of 10 so neither delivery
+had its own half hour. The microphone sent digital silence, as a participant's
+does while it is off. Times are from `session.started`; the harness asks for
+the opening about 20 ms after it.
+
+| | `instructions` (default) | `recipe` |
+|---|---|---|
+| starts | 40 | 40 |
+| never spoke (30 s) | 0 | 0 |
+| first word after the 8 s bound (text shown on screen) | 0 | 0 |
+| first word only after the watchdog's 4 s re-send | **2** (at 4.49 s and 4.66 s) | 0 |
+| first word: min / P50 / P90 / max | 0.54 / **1.83** / 2.85 / 4.66 s | 0.41 / **0.67** / 1.70 / 2.88 s |
+| first word later than 2 s / later than 3 s | 15 / 3 | 1 / 0 |
+| assistant already speaking when the opening was requested | 0 | 0 |
+| AI, not a therapist or doctor, and the crisis number all spoken | 40 | 40 |
+| disclosure said twice | 0 | 0 |
+| every instructed word, in order | 35 | 31 |
+| one to three words different | 4 | 7 |
+| stopped before the end | 1 (9 words short, mid-sentence) | 2 (after the crisis line; after the microphone note) |
+
+What it shows, and what it does not:
+
+- **No start stayed silent under either delivery**, so the old rate (1 of 9
+  ordinary starts on 2026-11-18) did not reproduce in 40. Zero of 40 still
+  allows a true rate of up to about 7% (95%). The two `instructions` starts
+  that had said nothing at 4 s spoke about 0.5 and 0.6 s after the watchdog's
+  commentary re-send; whether they would have spoken without it cannot be
+  known, and before 2026-11-19 nothing would have re-sent. Both were in the
+  last block of 10. No `recipe` start needed the re-send (2 of 40 against 0
+  of 40 is not a significant difference).
+- **`recipe` speaks sooner**: median 0.67 s against 1.83 s, and 1 start in 40
+  later than 2 s against 15 in 40. Its first word usually comes 0.4 to 0.7 s
+  after `session.started`, which is the startup developer message at work
+  (the commentary is sent at about the same moment); the feared double
+  opening did not happen once.
+- **Commentary did not paraphrase the disclosure.** Under `recipe` the
+  openings that ran to the end kept 97% to 100% of the instructed words, the
+  same as under `instructions`; the differences in both arms are the same
+  small slips ("Lifeline at 988" for "Lifeline crisis line at 988", "using
+  your voice"). All 80 openings said that it is an AI, that it is not a
+  therapist or doctor, and the crisis number.
+- **Openings that stop early** are the one thing `recipe` did slightly worse:
+  2 of 40 against 1 of 40. One `recipe` opening ended after the crisis line
+  (58 of 101 words: no microphone note, no closing sentence) and one after
+  the microphone note; the `instructions` one broke off nine words before the
+  end. Too few to call a difference. The 58-word one was measured before the
+  runner kept listening for 3 more seconds after a pause, so a long pause cut
+  short by the harness cannot be excluded for it; the other two were measured
+  with that in place.
+- The transcript writes the crisis number as "988" or spelled out ("nine
+  eight eight", "nine eighty eight", "seven four one seven four one": 15 of
+  80 openings); it is the same spoken number, and `live-opening-discloses-ai`
+  now folds it (before, a spelled-out number read as a missing crisis line).
+
+The measurement asked for above is therefore met for `recipe` on every point
+except "no opening cut short", which neither delivery meets. The default is
+still `instructions`: the switch is a change to how the IRB-described
+disclosure is delivered and is the PI's to make. If it is made, it is the env
+var on the server and a restart, nothing else.
 
 ### Opening watchdog (ai-therapist-315)
 
@@ -334,13 +398,18 @@ admin broadcasts (`live:opening-silent`, `live:opening-unspoken`) have no
 listener in the admin UI yet, like `live:recovery-silent`: staff see the
 system row in the session's messages, not a live alert.
 
-Not proven without a live session: that the developer message plus commentary
-removes the ordinary silent starts the way it did for recovery (8 of 8 there);
-whether the startup developer message alone makes the model greet before the
-browser asks (handled, but its frequency is unknown); that reflected output
-audio carries no audible energy while the model is silent (the latch assumes
-so; a false latch would only skip the re-send); and verbatim delivery of the
-disclosure through commentary.
+Answered by the 2026-11-26 measurement ("Opening preamble" above): the
+developer message plus commentary had no silent start and no start needing
+the re-send in 40; the assistant was never already speaking when the harness
+asked (it asks about 20 ms after `session.started`; a real browser asks a
+little later, so the "already speaking, send nothing" branch is still
+untested live); the disclosure through commentary was not paraphrased. In the
+two starts that were silent at 4 s the server latched nothing before the
+re-send, so reflected output audio was not mistaken for speech there.
+
+Still not proven: the 8 s branch on a real session (no start in 80 reached
+it; it is unit-tested only), and the same numbers in a real browser on a real network, where the
+opening request comes later than the harness's.
 
 ### Data-channel permissions
 
@@ -1560,7 +1629,7 @@ rollback has something to restore. They are inert.
 | `system_config.features.regrounding_interval_minutes` | number | Default 5. |
 | `system_config.features.voice_heads_up_enabled` | boolean | The one-time spoken heads-up that the conversation continues in writing if the voice drops (section 7, "Saying it before the cut"). Default **off** (absent). Also needs typed chat on (`chat_enabled` not `false`). Not to be switched on in stage or prod without the study owner's word. |
 | `system_config.session_limits` | object | `max_duration_minutes` drives both the phase nudges and auto-termination. |
-| `LIVE_OPENING_DELIVERY` (env) | `instructions` (default) or `recipe` | How the ordinary opening (the AI disclosure) is delivered; see "Opening preamble". `recipe` only after the live measurement described there. |
+| `LIVE_OPENING_DELIVERY` (env) | `instructions` (default) or `recipe` | How the ordinary opening (the AI disclosure) is delivered; see "Opening preamble" for the 2026-11-26 measurement of both. `recipe` only with PI sign-off. |
 | `SIDEBAND_ENABLED` (env) | `'false'` disables | Records the session id only; no server-side tools, transcripts, usage or crisis steering. Diagnostic use only. |
 
 `store: false` is hard-coded in the session config. Storage is what enables
