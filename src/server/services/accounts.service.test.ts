@@ -10,6 +10,7 @@ const db = vi.hoisted(() => ({
   deleteUser: vi.fn(),
   getUserById: vi.fn(),
   setSquawkUserId: vi.fn(),
+  getSquawkUserId: vi.fn(),
   setCognitoSub: vi.fn(),
   replaceCognitoSub: vi.fn(),
   setCognitoTotpEnrolledAt: vi.fn(),
@@ -109,6 +110,7 @@ beforeEach(() => {
   pool.getUserSub.mockResolvedValue(null);
   pool.globalSignOut.mockResolvedValue(undefined);
   db.setSquawkUserId.mockResolvedValue(undefined);
+  db.getSquawkUserId.mockResolvedValue(null);
   email.clearEmailIfIneligible.mockResolvedValue(undefined);
   pool.createUser.mockResolvedValue({ sub: 'sub-123' });
   pool.setPassword.mockResolvedValue(undefined);
@@ -131,6 +133,8 @@ describe('no provider configured', () => {
     db.getUserById.mockClear();
     await updateAccount(7, { password: 'another passphrase' });
     expect(db.getUserById).not.toHaveBeenCalled();
+    // The Squawk link column does not exist on a legacy-mode database.
+    expect(db.getSquawkUserId).not.toHaveBeenCalled();
     expectNoPoolCalls();
     expectNoSquawkCalls();
   });
@@ -518,14 +522,20 @@ describe('both providers configured', () => {
     expect(pool.setRole).toHaveBeenCalledTimes(1);
     expect(pool.deleteUser).toHaveBeenCalledTimes(1);
     expect(db.setSquawkUserId).not.toHaveBeenCalled();
+    expect(db.getSquawkUserId).not.toHaveBeenCalled();
     expectNoSquawkCalls();
   });
 });
 
-describe('only Squawk configured (unchanged)', () => {
+describe('only Squawk configured', () => {
   beforeEach(() => {
     squawk.enabled.mockReturnValue(true);
-    db.getUserById.mockResolvedValue({ ...ROW, squawk_user_id: 'sq-1' });
+    // As in the real database layer: getUserById does not return the link
+    // (it selects no provider column); the link has its own query. The tests
+    // used to put squawk_user_id on the getUserById row, which hid that
+    // nothing was ever mirrored (ai-therapist-408).
+    db.getUserById.mockResolvedValue({ ...ROW });
+    db.getSquawkUserId.mockResolvedValue('sq-1');
     squawk.createPasswordUser.mockResolvedValue({ id: 'sq-1' });
   });
 
@@ -552,6 +562,13 @@ describe('only Squawk configured (unchanged)', () => {
       'Username already exists',
     );
     expect(db.deleteUser).toHaveBeenCalledWith(7);
+  });
+
+  it('an account with no Squawk link is changed locally only, and can be renamed', async () => {
+    db.getSquawkUserId.mockResolvedValue(null);
+    await updateAccount(7, { username: 'renamed', password: 'another passphrase', role: 'therapist' });
+    await removeAccount(7);
+    expectNoSquawkCalls();
   });
 
   it('refuses a rename of a linked account and swallows a failed Squawk delete', async () => {

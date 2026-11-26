@@ -402,6 +402,19 @@ export async function getUserBySquawkId(squawkUserId: string): Promise<UserRow |
   return result.rows[0] ?? null;
 }
 
+/** The Squawk user id an account is linked to, or null. For Squawk
+ *  deployments ONLY: the column comes from migration 106, which prod never
+ *  applied, so this must not run on a path reachable without SQUAWK_*.
+ *  (getUserById deliberately does not select the column, which is why
+ *  password, role and delete changes were never mirrored: ai-therapist-408.) */
+export async function getSquawkUserId(userid: number | string): Promise<string | null> {
+  const result = await pool.query<{ squawk_user_id: string | null }>(
+    'SELECT squawk_user_id FROM users WHERE userid = $1',
+    [userid],
+  );
+  return result.rows[0]?.squawk_user_id ?? null;
+}
+
 /** The local account for a username (Squawk's preferred_username), or null. */
 export async function getUserByUsernameForLogin(username: string): Promise<UserRow | null> {
   const result = await pool.query<UserRow>(
