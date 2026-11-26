@@ -46,6 +46,7 @@ Harness documentation: `src/redteam/README.md` and `docs/redteam.md`.
 |---|---|---|
 | `redaction-evidence.mjs` | Runs synthetic Safe Harbor identifiers through the production batch redactor and checks every one is removed. No DB. Needs `OPENAI_API_KEY`. | `docs/redaction-evidence-<date>.md` |
 | `redaction-signal-check.mjs` | Measures how much affective signal survives redaction on real rows still inside the raw-content window (`SIGNAL_CHECK_LIMIT`, `SIGNAL_CHECK_INCLUDE_DEMO=1`). Writes aggregates only. Needs `DATABASE_URL` + `OPENAI_API_KEY`. | `docs/redaction-signal-check-<date>.md` |
+| `redaction-shape-eval.mjs` | Runs the invented crisis messages in `evals/goldens/redaction-crisis.jsonl` through the production redactor in several request shapes (alone as bare text, as a batch of one, padded with neutral messages) and tallies refused / rejected / accepted. No DB, synthetic text only, real billed calls. Needs `OPENAI_API_KEY`; `--out` must point outside the repo. | `docs/redaction-shape-eval-<date>.md` (written by hand from the tally) |
 | `phase2-power-sim.py` | Phase 2 power simulation (pure numpy) for the pre-registered FGLS analysis. | `docs/phase2-power-sim-results*.csv`, `docs/phase2-power-analysis.md` |
 | `phase2-analysis-plan.py --data <export dir>` | The pre-registered confirmatory analysis, run against a de-identified dataset export (not the live DB). | stdout tables |
 
