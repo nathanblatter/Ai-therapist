@@ -188,6 +188,12 @@ export interface AssertionSpec {
   run: (ctx: AssertionContext) => Promise<AssertionResult>;
 }
 
+export interface VoiceBeatExpectation {
+  delegate?: 'required' | 'forbidden' | 'optional';
+  crisis?: boolean;
+  disclosedIn?: 'history';
+}
+
 export interface Beat {
   id: string;
   personaGoal: string;
@@ -205,8 +211,14 @@ export interface Beat {
   /** GPT-Live voice evaluation (src/redteam/voice): what this turn should do
    *  at the voice/backend boundary. `delegate` follows the guide's
    *  required | forbidden | optional; `crisis` marks a crisis turn for the
-   *  latency and silence-during-delegation breakdown. */
-  voice?: { delegate?: 'required' | 'forbidden' | 'optional'; crisis?: boolean };
+   *  latency and silence-during-delegation breakdown. `disclosedIn: 'history'`
+   *  says the disclosure that makes it one is in the CRAWL history seeded as
+   *  text into the vendor's session, not in the words spoken: the server's
+   *  records never held it (voice/sessionInput.ts), so a vendor cut on this
+   *  turn is expected to get the crisis hand-off wording only once the server
+   *  itself has scored or flagged the call high (textHandoffChecks.ts
+   *  handoffExpectsCrisis). */
+  voice?: VoiceBeatExpectation;
 }
 
 /** A fresh account a multi-session scenario runs as. Created per run with a

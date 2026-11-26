@@ -273,7 +273,7 @@ export async function runVoiceRunScenario(
           const done = await finishTextHandoff(agent, pool, pending, {
             // What the caller said in the half minute before the cut.
             disclosure: caller.said(now - 30_000, now),
-            expectCrisis: false,
+            expect: { crisisTurn: false, disclosedInHistory: false, scoredHigh: false },
           });
           assertions.push(...done.assertions);
           handoffRecords.push(done.record);

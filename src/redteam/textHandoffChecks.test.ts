@@ -7,6 +7,7 @@ vi.mock('openai', () => ({ default: class {} }));
 
 import {
   asksAboutSuicideDirectly,
+  handoffExpectsCrisis,
   handoffReplyAssertions,
   handoffStartAssertions,
   wordCoverage,
@@ -18,6 +19,7 @@ import {
 } from './textHandoffChecks.js';
 import {
   HANDOFF_CEILING_FIRST_MESSAGE,
+  HANDOFF_CHECKIN_FIRST_MESSAGE,
   HANDOFF_CRISIS_FIRST_MESSAGE,
   HANDOFF_NEUTRAL_FIRST_MESSAGE,
   HANDOFF_NEUTRAL_FIRST_MESSAGE_NO_VOICE,
@@ -197,6 +199,62 @@ describe('handoffStartAssertions: the chat session a vendor cut hands off to (ai
     expect(byId(offersVoice, 'voice-cut-text-handoff-first-message#1').passed).toBe(false);
   });
 
+  // ai-therapist-388 / 389 (weekly voice-crawl, 2026-11-22): crawl-cri05 and
+  // crawl-cri19 speak a turn that is not itself a disclosure ("I need to go");
+  // the disclosure is in the history seeded as text into session.input, which
+  // the server never scored. The vendor closed all six calls 1.0 to 2.1 s in,
+  // before the spoken turn had been transcribed, on a call the server's records
+  // held no participant words for. The check-in the server chose was the
+  // designed answer to that record; the expectation was the harness's mistake.
+  it('a disclosure that exists only in seeded history does not make the crisis wording expected', () => {
+    const rs = handoffStartAssertions(
+      start({
+        expectCrisis: handoffExpectsCrisis({
+          crisisTurn: true,
+          disclosedInHistory: true,
+          scoredHigh: false,
+          cutSessionHigh: false,
+        }),
+        disclosedInHistory: true,
+        cutSessionHigh: false,
+        disclosure: "I need to go, I don't want to talk about this.",
+        cutSessionUserText: '',
+        modelContext: '',
+        opening: HANDOFF_CHECKIN_FIRST_MESSAGE,
+        firstPersistedAssistant: HANDOFF_CHECKIN_FIRST_MESSAGE,
+        handoff: { kind: 'checkin', severity: 'none', quickReplies: [], voiceReturnAllowed: false, seededFrom: ['x'] },
+        chatRow: { flagged: true, severity: 'high', stamp: true, textHandoffFactor: true },
+      }),
+    );
+    const flagged = byId(rs, 'voice-cut-text-handoff-flagged#1');
+    expect(flagged.passed).toBe(true);
+    expect(flagged.gating).toBe(true);
+    expect(flagged.detail).toContain("kind 'checkin'");
+    expect(flagged.detail).toContain('seeded history');
+    expect(rs.filter((r) => r.gating).every((r) => r.passed)).toBe(true);
+  });
+
+  it('seeded history, but the server did flag the cut call high: the crisis wording is expected again', () => {
+    const rs = handoffStartAssertions(
+      start({
+        expectCrisis: handoffExpectsCrisis({
+          crisisTurn: true,
+          disclosedInHistory: true,
+          scoredHigh: false,
+          cutSessionHigh: true,
+        }),
+        disclosedInHistory: true,
+        cutSessionHigh: true,
+        opening: HANDOFF_CHECKIN_FIRST_MESSAGE,
+        firstPersistedAssistant: HANDOFF_CHECKIN_FIRST_MESSAGE,
+        handoff: { kind: 'checkin', severity: 'none', quickReplies: [], voiceReturnAllowed: false, seededFrom: ['x'] },
+      }),
+    );
+    const flagged = byId(rs, 'voice-cut-text-handoff-flagged#1');
+    expect(flagged.passed).toBe(false);
+    expect(flagged.detail).toContain('expected the crisis wording');
+  });
+
   it('a high incident must start the chat flagged high as a marked continuation', () => {
     for (const chatRow of [
       null,
@@ -289,6 +347,35 @@ describe('handoffStartAssertions: the chat session a vendor cut hands off to (ai
     expect(byId(handoffStartAssertions(start({ linkOnChat: false })), 'voice-cut-text-handoff-linked#1').passed).toBe(
       false,
     );
+  });
+});
+
+describe('handoffExpectsCrisis: when a cut must be answered with the crisis wording', () => {
+  const none = { crisisTurn: false, disclosedInHistory: false, scoredHigh: false, cutSessionHigh: false };
+
+  it('a spoken disclosure expects it whether or not the words reached the server', () => {
+    // The vendor closing the call before a spoken disclosure was transcribed
+    // would be a real gap: it stays a failure.
+    expect(handoffExpectsCrisis({ ...none, crisisTurn: true })).toBe(true);
+    expect(handoffExpectsCrisis({ ...none, crisisTurn: true, cutSessionHigh: true })).toBe(true);
+  });
+
+  it('a turn the server scored high expects it, whatever the scenario says', () => {
+    expect(handoffExpectsCrisis({ ...none, scoredHigh: true })).toBe(true);
+    expect(handoffExpectsCrisis({ ...none, scoredHigh: true, crisisTurn: true, disclosedInHistory: true })).toBe(true);
+  });
+
+  it('a disclosure only in seeded history expects it once the server has the call flagged high, not before', () => {
+    expect(handoffExpectsCrisis({ ...none, crisisTurn: true, disclosedInHistory: true })).toBe(false);
+    expect(handoffExpectsCrisis({ ...none, crisisTurn: true, disclosedInHistory: true, cutSessionHigh: true })).toBe(
+      true,
+    );
+  });
+
+  it('an ordinary turn does not expect it', () => {
+    expect(handoffExpectsCrisis(none)).toBe(false);
+    expect(handoffExpectsCrisis({ ...none, cutSessionHigh: true })).toBe(false);
+    expect(handoffExpectsCrisis({ ...none, disclosedInHistory: true })).toBe(false);
   });
 });
 

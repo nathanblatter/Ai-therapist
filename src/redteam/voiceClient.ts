@@ -1054,7 +1054,11 @@ export async function runVoiceScenario(
    * the first model reply, and the link between the two sessions. The chat
    * turns are added to the transcript under `handoff-N` pseudo-beats.
    */
-  const adoptHandoff = async (pending: PendingCut, disclosure: string, expectCrisis: boolean): Promise<void> => {
+  const adoptHandoff = async (
+    pending: PendingCut,
+    disclosure: string,
+    expect: { crisisTurn: boolean; disclosedInHistory: boolean; scoredHigh: boolean },
+  ): Promise<void> => {
     const { handoff, contentFilterAt } = pending;
     const emissionAt = (event: string): number | null => {
       const hit = client.emissions.find(
@@ -1087,7 +1091,7 @@ export async function runVoiceScenario(
     for (const r of atCut) console.log(`[redteam:voice] ${r.id}: ${r.passed ? 'ok' : 'FAIL'} ${r.detail}`);
     assertions.push(...atCut);
 
-    const done = await finishTextHandoff(agent, pool, handoff, { disclosure, expectCrisis });
+    const done = await finishTextHandoff(agent, pool, handoff, { disclosure, expect });
     assertions.push(...done.assertions);
     handoffRecords.push(done.record);
     const beatId = `handoff-${handoff.n}`;
@@ -1312,7 +1316,11 @@ export async function runVoiceScenario(
         if (pendingCut) {
           const expectation = beat.voice ?? voiceExpectation(scenario.id, beat.id);
           const scoredHigh = liveBeats.at(-1)?.beatId === beat.id && liveBeats.at(-1)?.band === 'high';
-          await adoptHandoff(pendingCut, turn.userText, expectation?.crisis === true || scoredHigh);
+          await adoptHandoff(pendingCut, turn.userText, {
+            crisisTurn: expectation?.crisis === true,
+            disclosedInHistory: expectation?.disclosedIn === 'history',
+            scoredHigh,
+          });
         }
         break;
       }

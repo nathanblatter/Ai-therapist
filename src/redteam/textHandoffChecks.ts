@@ -105,8 +105,11 @@ export interface HandoffStartInput {
    *  or shortly after (the turn the vendor cut on may still have been with
    *  the assessor). */
   cutSessionHigh: boolean;
-  /** The scenario expects the crisis wording here (an explicit-intent beat). */
+  /** The crisis wording is expected here (handoffExpectsCrisis). */
   expectCrisis: boolean;
+  /** The scenario's disclosure is only in the seeded CRAWL history (named in
+   *  the detail when the crisis wording is not expected because of it). */
+  disclosedInHistory?: boolean;
   /** What the participant last said, as transcribed. */
   disclosure: string;
   /** Participant turns the server persisted for the cut session, joined. */
@@ -120,6 +123,41 @@ export interface HandoffStartInput {
   /** Hand-off link rows found on each session. */
   linkOnChat: boolean;
   linkOnVoice: boolean;
+}
+
+/** What decides whether a cut must be answered with the crisis wording. */
+export interface HandoffCrisisExpectation {
+  /** The scenario marks the spoken turn as a crisis turn (`voice.crisis`). */
+  crisisTurn: boolean;
+  /** ...but its disclosure is only in the history seeded as text into the
+   *  vendor's session (`voice.disclosedIn: 'history'`). */
+  disclosedInHistory: boolean;
+  /** The server scored this turn high. */
+  scoredHigh: boolean;
+  /** The cut session's row is flagged high. */
+  cutSessionHigh: boolean;
+}
+
+/**
+ * Must the server have chosen the crisis wording for this cut?
+ *
+ * - A turn the server scored high: yes.
+ * - A crisis turn whose disclosure was SPOKEN: yes, whether or not the words
+ *   reached the server before the vendor closed the call. A participant who
+ *   says it aloud and gets the calm wording is a product failure, whatever the
+ *   cause.
+ * - A crisis turn whose disclosure exists only in the seeded history: only
+ *   when the server has the call flagged high. Seeded turns go to the vendor
+ *   and never through the risk pipeline (voice/sessionInput.ts), so the
+ *   server's record of such a call holds no disclosure, and the calm wording is
+ *   the designed answer to that record. In a real call the same disclosure was
+ *   spoken, scored and flagged, which is the case the flag condition keeps
+ *   (ai-therapist-388 / 389; services/textHandoff.service.test.ts pins it).
+ */
+export function handoffExpectsCrisis(e: HandoffCrisisExpectation): boolean {
+  if (e.scoredHigh) return true;
+  if (!e.crisisTurn) return false;
+  return e.disclosedInHistory ? e.cutSessionHigh : true;
 }
 
 /**
@@ -200,6 +238,10 @@ export function handoffStartAssertions(input: HandoffStartInput): AssertionResul
         ? 'the start response carried no hand-off block'
         : `server chose kind '${kind}', incident risk '${severity}'` +
           (kindOk ? '' : ' where the participant had just disclosed (expected the crisis wording)') +
+          (input.disclosedInHistory && !input.expectCrisis
+            ? ' (the disclosure is only in the seeded history, which the server never scored, and the cut call is ' +
+              'not flagged high: the crisis wording is not expected)'
+            : '') +
           `; chat row crisis_flagged=${String(row?.flagged ?? null)}, severity=${String(row?.severity ?? null)}, ` +
           `continuation stamp ${row?.stamp ? 'present' : 'absent'}` +
           `${row?.stamp && !row.textHandoffFactor ? ' (without the text_handoff factor)' : ''}` +
@@ -435,7 +477,7 @@ export async function finishTextHandoff(
   agent: Agent,
   pool: DbLike,
   pending: PendingHandoff,
-  opts: { disclosure: string; expectCrisis: boolean },
+  opts: { disclosure: string; expect: Omit<HandoffCrisisExpectation, 'cutSessionHigh'> },
 ): Promise<{ assertions: AssertionResult[]; record: HandoffRecord; firstMessage: string; reply: string }> {
   const { n, cutSessionId, reason, cutAt, requestedAt } = pending;
   const result = await pending.started;
@@ -554,7 +596,8 @@ export async function finishTextHandoff(
     opening: asString(body['opening']),
     handoff,
     cutSessionHigh,
-    expectCrisis: opts.expectCrisis,
+    expectCrisis: handoffExpectsCrisis({ ...opts.expect, cutSessionHigh }),
+    disclosedInHistory: opts.expect.disclosedInHistory,
     disclosure: opts.disclosure,
     cutSessionUserText,
     modelContext,

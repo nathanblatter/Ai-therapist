@@ -266,6 +266,105 @@ describe('prepareTextHandoff: routing', () => {
   });
 });
 
+// ai-therapist-388 / 389: the timeline of a vendor cut against the scoring of
+// the participant's last turn. The eval finding (a check-in after "the
+// participant had just disclosed") was the harness expecting the server to know
+// a disclosure that was only ever seeded as text into the vendor's session;
+// these pin what a real call gets at each point of the race.
+describe('prepareTextHandoff: a cut against the scoring of the last turn (ai-therapist-388)', () => {
+  /** The disclosure turn's risk row, as the assessor writes it. */
+  const assessedHigh = { session_id: 'live_A', severity: 'high', risk_score: 90 };
+
+  it('the cut lands while the disclosure is with the assessor and the score arrives inside the wait: crisis', async () => {
+    arrange({});
+    // Nothing on record until the wait resolves; the row is written by the
+    // work the wait was waiting for.
+    let landed = false;
+    sideband.waitForUserTurnsScored.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      landed = true;
+      return true;
+    });
+    pq.getParticipantAssessedRisk.mockImplementation(async () => (landed ? [assessedHigh] : []));
+    paging.resolveIncidentPeak.mockImplementation(async () =>
+      landed ? { severity: 'high', riskScore: 90 } : { severity: 'none', riskScore: null },
+    );
+    const result = await start();
+    expect(result!.payload).toMatchObject({ kind: 'crisis', severity: 'high' });
+    expect(result!.firstMessage).toBe(HANDOFF_CRISIS_FIRST_MESSAGE);
+    // The risk is read only after the wait, never before it.
+    expect(sideband.waitForUserTurnsScored.mock.invocationCallOrder[0]).toBeLessThan(
+      pq.getParticipantAssessedRisk.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('the cut lands while the disclosure is with the assessor and the wait runs out: unknown, worded as a crisis', async () => {
+    arrange({ scored: false });
+    const result = await start();
+    expect(result!.payload).toMatchObject({ kind: 'crisis', severity: 'unknown', voiceReturnAllowed: false });
+    expect(result!.firstMessage).toBe(HANDOFF_CRISIS_FIRST_MESSAGE);
+  });
+
+  it('the cut lands after the disclosure scored high with no flag event (an assessed row alone): crisis', async () => {
+    arrange({ participantPeak: { severity: 'high', riskScore: 90 } });
+    pq.getParticipantAssessedRisk.mockResolvedValue([assessedHigh]);
+    const result = await start();
+    expect(result!.payload).toMatchObject({ kind: 'crisis', severity: 'high' });
+    expect(q.markTextHandoffContinuation).toHaveBeenCalledWith(
+      'chat_new',
+      expect.objectContaining({ severity: 'high', riskScore: 90 }),
+    );
+  });
+
+  it('a call flagged high minutes earlier, cut on a later turn that scored nothing ("I need to go"): crisis', async () => {
+    arrange({
+      rows: { live_A: row('live_A', { status: 'active', crisis_flagged: true, crisis_severity: 'high' }) },
+      peak: { severity: 'high', riskScore: 85 },
+      turns: [
+        turn('live_A', 'user', 'I have been thinking about how I would kill myself.'),
+        turn('live_A', 'assistant', "I'm really glad you told me."),
+        turn('live_A', 'user', "I need to go, I don't want to talk about this."),
+      ],
+    });
+    // The last turn was scored (none) and adds no event of its own.
+    const result = await start();
+    expect(result!.payload).toMatchObject({
+      kind: 'crisis',
+      severity: 'high',
+      quickReplies: ['Yes', 'No', 'Not sure'],
+    });
+    expect(result!.firstMessage).toBe(HANDOFF_CRISIS_FIRST_MESSAGE);
+    expect(result!.guidance).toContain('I have been thinking about how I would kill myself.');
+  });
+
+  it('what the eval saw: no participant words on record for the cut call, a high flag in another session: check-in', async () => {
+    // crawl-cri05 / crawl-cri19: the vendor closed the call on its seeded
+    // text before the spoken turn was transcribed. Nothing was pending, nothing
+    // was scored, and the harness account had been flagged high in an earlier
+    // scenario's session inside the look-back.
+    arrange({
+      callPeak: { severity: 'none', riskScore: null },
+      participantPeak: { severity: 'high', riskScore: 85 },
+      turns: [],
+    });
+    const result = await start();
+    expect(result!.payload).toMatchObject({ kind: 'checkin', severity: 'none', participantSeverity: 'high' });
+    expect(result!.firstMessage).toBe(HANDOFF_CHECKIN_FIRST_MESSAGE);
+    expect(result!.payload.voiceReturnAllowed).toBe(false);
+    expect(q.markTextHandoffContinuation).toHaveBeenCalledWith(
+      'chat_new',
+      expect.objectContaining({ severity: 'high' }),
+    );
+  });
+
+  it('an unflagged call with nothing risky anywhere: neutral, no flag', async () => {
+    arrange({});
+    const result = await start();
+    expect(result!.payload).toMatchObject({ kind: 'neutral', severity: 'none' });
+    expect(q.markTextHandoffContinuation).not.toHaveBeenCalled();
+  });
+});
+
 // PR #77 review, item 1 (the 2-hour rule): the WORDING follows this call's own
 // chain of linked sessions; the participant-wide look-back only decides the
 // flag (and the check-in wording when nothing in the call was risky).
