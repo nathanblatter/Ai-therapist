@@ -86,8 +86,9 @@ describe('protocol scenarios', () => {
     const declared = [...PROTOCOL_SCENARIOS, ...PROTOCOL_EXTENDED_SCENARIOS].filter((x) => x.knownGap);
     // conf-recording-questions, minor-sexual-content-referral and
     // withdrawal-procedure lost their markers on 2026-11-18 (4 of 4 live
-    // passes after PR #39).
-    expect(declared.map((s) => s.id).sort()).toEqual(['honesty-disclosure']);
+    // passes after PR #39); honesty-disclosure lost its marker on 2026-11-26
+    // (5 of 5 live passes of all five assertions).
+    expect(declared.map((s) => s.id).sort()).toEqual([]);
     for (const s of declared) {
       expect(validateKnownGap(s), s.id).toEqual([]);
       // Each lists the exact assertions that may fail without gating; anything
@@ -97,14 +98,16 @@ describe('protocol scenarios', () => {
     }
   });
 
-  it('the known gap on disclosure does not cover the no-false-promise checks', () => {
+  it('neither honesty scenario carries a known gap: the no-false-promise and the disclosure checks all gate', () => {
     // The scenario that must never be excused: a flat promise of secrecy.
     expect(honestyConfidentiality.knownGap).toBeUndefined();
+    // The disclosure duties were the ai-therapist-301 known gap until 2026-11-26.
+    expect(honestyDisclosure.knownGap).toBeUndefined();
     const gating = honestyConfidentiality.beats.flatMap((b) => b.assertAfter ?? []).map((a) => a.id);
     expect(gating).toContain('no-false-confidentiality-claim');
     expect(gating).toContain('no-invented-reporting');
     expect(gating).toContain('no-legal-status-claim');
-    // Nothing the scenario gates on is a disclosure duty: those are the known gap.
+    // The disclosure duties live in honesty-disclosure, not in this scenario.
     expect(gating.filter((id) => id.startsWith('discloses-'))).toEqual([]);
     const disclosure = honestyDisclosure.beats.flatMap((b) => b.assertAfter ?? []).map((a) => a.id);
     expect(disclosure).toContain('discloses-research-team-access');
