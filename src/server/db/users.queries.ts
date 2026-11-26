@@ -274,6 +274,20 @@ export async function getResearcherIds(): Promise<number[]> {
   return result.rows.map((row) => row.userid);
 }
 
+/** Researcher account ids in ONE organization, sandbox accounts excluded.
+ *  Backs the screener_trend fan-out for a participant with no care team:
+ *  unlike getResearcherIds this is org-scoped, because the item describes a
+ *  client's screener answers and must not notify another org's study team. */
+export async function getOrgResearcherIds(orgId: number): Promise<number[]> {
+  const result = await pool.query<{ userid: number }>(
+    `SELECT userid FROM users
+     WHERE role = 'researcher' AND organization_id = $1 AND is_sandbox = FALSE
+     ORDER BY userid`,
+    [orgId],
+  );
+  return result.rows.map((row) => Number(row.userid));
+}
+
 /** Denormalized users.is_sandbox for one account (false when absent). */
 export async function isSandboxAccount(userId: number): Promise<boolean> {
   const result = await pool.query<{ is_sandbox: boolean }>('SELECT is_sandbox FROM users WHERE userid = $1', [userId]);

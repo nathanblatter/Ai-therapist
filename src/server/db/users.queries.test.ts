@@ -8,7 +8,7 @@ vi.mock('../config/db.js', () => ({
   pool: { query: queryMock, connect: vi.fn(), on: vi.fn() },
 }));
 
-import { getAllUsers, createUser, ResearchOrgCaseworkerError } from './users.queries.js';
+import { getAllUsers, createUser, getOrgResearcherIds, ResearchOrgCaseworkerError } from './users.queries.js';
 
 beforeEach(() => {
   queryMock.mockReset().mockResolvedValue({ rows: [] });
@@ -79,5 +79,15 @@ describe('createUser research-org caseworker invariant', () => {
     await createUser('p1', 'twelvechars!', 'participant');
     expect(queryMock).toHaveBeenCalledTimes(1);
     expect(queryMock.mock.calls[0][0]).toMatch(/INSERT INTO users/);
+  });
+});
+
+describe('getOrgResearcherIds', () => {
+  it('is scoped to one organization and leaves sandbox accounts out', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ userid: '90' }, { userid: 91 }] });
+    await expect(getOrgResearcherIds(5)).resolves.toEqual([90, 91]);
+    const [sql, params] = queryMock.mock.calls[0];
+    expect(sql).toContain(`role = 'researcher' AND organization_id = $1 AND is_sandbox = FALSE`);
+    expect(params).toEqual([5]);
   });
 });

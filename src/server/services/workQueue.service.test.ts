@@ -33,6 +33,10 @@ vi.mock('../db/index.js', () => ({
   getCareTeam: getCareTeamMock,
   getIrbStudyOrgId: getIrbStudyOrgIdMock,
   getResearcherIds: getResearcherIdsMock,
+  // screener_trend producer (covered in workQueue.screenerTrend.test.ts).
+  listScreenerTrendReadings: vi.fn().mockResolvedValue([]),
+  expireScreenerTrendItems: vi.fn().mockResolvedValue([]),
+  getOrgResearcherIds: vi.fn().mockResolvedValue([]),
   // Transitive imports of utils/adminBroadcast.js:
   getTherapistIdsForClient: vi.fn(),
   getCaseworkerIdsForClient: vi.fn(),

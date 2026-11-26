@@ -1132,7 +1132,8 @@ if (isEntrypoint) {
     }
 
     // Work-queue scheduler: hourly digest sweep + daily 06:00 America/Denver
-    // work-item sweep (inactivity / screener_worsening / message_unread_stale).
+    // work-item sweep (inactivity / screener_worsening / screener_trend /
+    // message_unread_stale).
     // Never runs in harness children (SOCKET_PG_ADAPTER=off marker) — a
     // redteam child sweeping the shared DB would spam real queues.
     if (process.env.SOCKET_PG_ADAPTER !== 'off') {

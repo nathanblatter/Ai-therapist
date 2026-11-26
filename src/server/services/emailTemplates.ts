@@ -31,6 +31,8 @@ export function kindLabel(kind: string): string {
       return 'client inactivity reminder';
     case 'screener_worsening':
       return 'screener trend alert';
+    case 'screener_trend':
+      return 'self-report screening trend';
     case 'message_unread_stale':
       return 'unanswered message reminder';
     case 'note_shared':

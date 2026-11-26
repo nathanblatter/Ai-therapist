@@ -122,6 +122,44 @@ describe('GET /admin/api/work-items', () => {
   });
 });
 
+describe('screener_trend items follow the same scoping as every kind', () => {
+  const TREND = {
+    ...ITEM,
+    item_type: 'screener_trend',
+    severity: 'warning',
+    title: 'PHQ-2 rose from 2 to 4 across the last two administrations.',
+    detail: { scale: 'phq2', scores: [2, 4] },
+    source_table: 'scale_responses',
+    source_id: 'screener_trend:42:phq2:9',
+  };
+
+  it('members read through the caseload-scoped query; researchers through the org-scoped one', async () => {
+    dbMocks.listWorkItemsForMember.mockResolvedValue([TREND]);
+    const member = await request(appAs('therapist', 7)).get('/admin/api/work-items');
+    expect(member.body.items[0].item_type).toBe('screener_trend');
+    expect(dbMocks.listWorkItemsForMember).toHaveBeenCalledWith(7, expect.anything());
+    expect(dbMocks.listWorkItemsForOrg).not.toHaveBeenCalled();
+
+    await request(appAs('researcher', 3, 1)).get('/admin/api/work-items');
+    expect(dbMocks.listWorkItemsForOrg).toHaveBeenCalledWith(1, expect.anything());
+  });
+
+  it('a clinician off the caseload gets 404 on ack and resolve', async () => {
+    dbMocks.getWorkItemById.mockResolvedValue(TREND);
+    dbMocks.ackWorkItem.mockResolvedValue(null);
+    dbMocks.resolveWorkItem.mockResolvedValue(null);
+    dbMocks.isAssigned.mockResolvedValue(false);
+    expect((await request(appAs('therapist', 70)).post('/admin/api/work-items/5/ack')).status).toBe(404);
+    expect((await request(appAs('therapist', 70)).post('/admin/api/work-items/5/resolve').send({})).status).toBe(404);
+  });
+
+  it('participants can never read them', async () => {
+    dbMocks.listWorkItemsForMember.mockResolvedValue([TREND]);
+    expect((await request(appAs('participant', 42)).get('/admin/api/work-items')).status).toBe(403);
+    expect(dbMocks.listWorkItemsForMember).not.toHaveBeenCalled();
+  });
+});
+
 describe('POST /admin/api/work-items/:itemId/ack', () => {
   it('acks a visible open item and emits the update', async () => {
     const res = await request(appAs('caseworker', 8)).post('/admin/api/work-items/5/ack');
