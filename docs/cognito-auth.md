@@ -74,7 +74,10 @@ a crisis page (`/admin#session=...`) is saved before the page leaves, exactly
 as under Squawk.
 
 Refusals redirect to `/login?error=<code>` with one of `state_mismatch`,
-`sign_in_failed`, `invalid_token`, `no_role`, `no_account`, `server_error`.
+`sign_in_failed`, `invalid_token`, `no_role`, `no_account`, `server_error`,
+`too_many_attempts`. Sign-in starts and callbacks are limited to 300 per
+address in 15 minutes (a campus can sit behind one address), the enrolment
+calls to 40.
 Nothing Cognito sends is echoed into the URL.
 
 With the `COGNITO_*` variables set, the legacy `POST /api/auth/login` answers
@@ -180,8 +183,6 @@ Known limits:
 - The SDK version in use has no `AdminDeleteSoftwareToken`, so a reset does
   not erase the old secret at the pool; it stops being asked for, and the
   next enrolment replaces it.
-- `/api/auth/cognito/start` is not rate-limited and writes a session row per
-  request.
 - The ID token may carry `amr`/`acr` claims naming the methods used (AWS says
   the feature is rolling out and may not be on a given pool). The app does not
   read them yet; if the stage pool sends them, checking `amr` for a staff
