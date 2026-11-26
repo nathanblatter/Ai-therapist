@@ -3714,15 +3714,42 @@ describe('ordinary opening: delivery and watchdog (ai-therapist-315)', () => {
     expect(commentary(wsLoud)).toHaveLength(1);
   });
 
-  it('participant speech first stands it down', async () => {
+  it('a participant who speaks first and is answered: no re-send, nothing shown', async () => {
     const sessionId = 's-open-barge';
     const ws = await startOrdinary(sessionId);
     await vi.advanceTimersByTimeAsync(1_000);
     await fire(sessionId, userDelta('Hi, is anyone there?', 0));
+    await vi.advanceTimersByTimeAsync(4_000);
+    await settle();
+    expect(commentary(ws)).toHaveLength(1); // past the first bound, no re-send over the answer
+    await fire(sessionId, { type: 'session.output_transcript.delta', delta: 'Hi!', start_ms: 0, end_ms: 200 });
     await vi.advanceTimersByTimeAsync(60_000);
     await settle();
     expect(commentary(ws)).toHaveLength(1);
     expect(unspokenEmits()).toHaveLength(0);
+  });
+
+  it('a participant transcript on a start that never speaks (the vendor transcribing silence): shown at 8 s', async () => {
+    const sessionId = 's-open-phantom';
+    const ws = await startOrdinary(sessionId);
+    await vi.advanceTimersByTimeAsync(600);
+    await fire(sessionId, userDelta('a purple', 0));
+    await vi.advanceTimersByTimeAsync(7_399);
+    await settle();
+    expect(unspokenEmits()).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    await settle();
+    expect(commentary(ws)).toHaveLength(1); // still no re-send
+    expect(unspokenEmits()).toEqual([['session:opening-unspoken', { sessionId }]]);
+    expect(broadcastMock).toHaveBeenCalledWith(
+      expect.anything(),
+      'live:opening-unspoken',
+      expect.objectContaining({ sessionId }),
+      sessionId,
+    );
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    await settle();
+    expect(unspokenEmits()).toHaveLength(1);
   });
 
   it('a risk steer in the first seconds takes priority', async () => {
