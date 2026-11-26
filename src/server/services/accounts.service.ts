@@ -70,12 +70,31 @@ function provider(): 'cognito' | 'squawk' | null {
  *  role or had its authenticator reset must not keep one. Never throws: the
  *  account change it follows has already happened. */
 async function endSessions(userid: number | string, why: string): Promise<void> {
+  // The stored session holds the numeric id; a route parameter such as "05"
+  // would match nothing.
+  const id = Number(userid);
+  if (!Number.isInteger(id)) return;
   try {
-    const ended = await deleteSessionsForUser(userid);
-    if (ended > 0) log.info({ userid, ended }, `app sessions ended: ${why}`);
+    const ended = await deleteSessionsForUser(id);
+    if (ended > 0) log.info({ userid: id, ended }, `app sessions ended: ${why}`);
   } catch (err) {
-    log.error({ err, userid }, `could not end app sessions after: ${why}`);
+    log.error({ err, userid: id }, `could not end app sessions after: ${why}`);
   }
+  // A socket copies the role at its handshake and keeps its rooms (the admin
+  // broadcast room for a researcher) until it reconnects: close them, so the
+  // reconnect runs the handshake against the session that now exists or not.
+  try {
+    globalThis.io?.in(`user:${id}`).disconnectSockets(true);
+  } catch (err) {
+    log.warn({ err, userid: id }, 'could not close the sockets of an account whose sessions ended');
+  }
+}
+
+/** Did this update change the account's role? The User Management form sends
+ *  the role with every save, so "a role was sent" is not "the role changed";
+ *  ending sessions on every save signed people out for fixing an email. */
+function roleChanged(before: { role?: string } | null, updates: AccountUpdates): boolean {
+  return updates.role !== undefined && before !== null && before.role !== updates.role;
 }
 
 function isPoolError(err: unknown, code: cognitoAdmin.CognitoAdminErrorCode): boolean {
@@ -161,10 +180,8 @@ async function updateInPool(userid: number | string, updates: AccountUpdates): P
     throw new Error('Username cannot be changed');
   }
   const updated = await updateUser(userid, updates as Record<string, string>);
-  if (updates.role !== undefined) {
-    await clearEmailIfIneligible(userid, updates.role);
-    await endSessions(userid, 'role change');
-  }
+  if (updates.role !== undefined) await clearEmailIfIneligible(userid, updates.role);
+  if (roleChanged(current, updates)) await endSessions(updated.userid, 'role change');
   if (updates.password === undefined && updates.role === undefined) return updated;
   const username = current?.username ?? updated.username;
   try {
@@ -272,18 +289,17 @@ export async function resetAuthenticator(userid: number | string): Promise<UserR
 export async function updateAccount(userid: number | string, updates: AccountUpdates): Promise<UserRow> {
   const via = provider();
   if (via === 'cognito') return updateInPool(userid, updates);
-  const current = via === 'squawk' ? await getUserById(userid) : null;
-  const linked = current?.squawk_user_id ?? null;
+  // The row as it is now: Squawk's link, and the role to compare a sent role with.
+  const current = via === 'squawk' || updates.role !== undefined ? await getUserById(userid) : null;
+  const linked = via === 'squawk' ? (current?.squawk_user_id ?? null) : null;
   if (linked && updates.username !== undefined && updates.username !== current?.username) {
     throw new Error('Username cannot be changed');
   }
   const updated = await updateUser(userid, updates as Record<string, string>);
   // Leaving the staff roles drops the account's email (participants are
   // anonymous; ai-therapist-283).
-  if (updates.role !== undefined) {
-    await clearEmailIfIneligible(userid, updates.role);
-    await endSessions(userid, 'role change');
-  }
+  if (updates.role !== undefined) await clearEmailIfIneligible(userid, updates.role);
+  if (roleChanged(current, updates)) await endSessions(updated.userid, 'role change');
   if (!linked) return updated;
   try {
     if (updates.password !== undefined) await squawk.setPassword(linked, updates.password);
@@ -300,7 +316,7 @@ export async function updateAccount(userid: number | string, updates: AccountUpd
  *  registered again. An account the pool never had is not an error. */
 async function removeFromPool(userid: number | string): Promise<UserRow> {
   const deleted = await deleteUser(userid);
-  await endSessions(userid, 'account deleted');
+  await endSessions(deleted.userid ?? userid, 'account deleted');
   try {
     await cognitoAdmin.deleteUser(deleted.username);
   } catch (err) {
@@ -321,7 +337,7 @@ export async function removeAccount(userid: number | string): Promise<UserRow> {
   if (via === 'cognito') return removeFromPool(userid);
   const current = via === 'squawk' ? await getUserById(userid) : null;
   const deleted = await deleteUser(userid);
-  await endSessions(userid, 'account deleted');
+  await endSessions(deleted.userid ?? userid, 'account deleted');
   if (current?.squawk_user_id) {
     try {
       await squawk.deleteUser(current.squawk_user_id);

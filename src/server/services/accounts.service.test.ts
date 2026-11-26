@@ -124,6 +124,12 @@ describe('no provider configured', () => {
     expect(db.createUser).toHaveBeenCalledWith('p_one', 'a long passphrase', 'participant');
     expect(db.updateUser).toHaveBeenCalledTimes(1);
     expect(db.deleteUser).toHaveBeenCalledTimes(1);
+    // One read, for the role comparison that decides whether sessions end
+    // (getUserById selects no provider column, so it is safe on a database
+    // without migrations 106, 129 or 131). An update that sends no role reads nothing.
+    expect(db.getUserById).toHaveBeenCalledTimes(1);
+    db.getUserById.mockClear();
+    await updateAccount(7, { password: 'another passphrase' });
     expect(db.getUserById).not.toHaveBeenCalled();
     expectNoPoolCalls();
     expectNoSquawkCalls();
@@ -411,21 +417,32 @@ describe('resetAuthenticator', () => {
 });
 
 describe('app sessions end with the account change that outdates them (review C5)', () => {
-  it.each([
+  const modes: [string, () => void][] = [
     ['no provider', () => {}],
     ['Cognito', () => cognito.enabled.mockReturnValue(true)],
-  ])("a role change ends the account's sessions (%s)", async (_label, setUp) => {
+  ];
+
+  it.each(modes)("a role change ends the account's sessions (%s)", async (_label, setUp) => {
     setUp();
+    db.updateUser.mockResolvedValue({ ...ROW, role: 'therapist' });
     await updateAccount(7, { role: 'therapist' });
     expect(db.deleteSessionsForUser).toHaveBeenCalledWith(7);
   });
 
-  it.each([
-    ['no provider', () => {}],
-    ['Cognito', () => cognito.enabled.mockReturnValue(true)],
-  ])("a deletion ends the account's sessions (%s)", async (_label, setUp) => {
+  // The User Management form sends the role with every save. Ending sessions
+  // whenever a role was SENT signed a researcher out for fixing their own
+  // email, and a participant out mid-session for a corrected username.
+  it.each(modes)('saving the same role again ends nothing (%s)', async (_label, setUp) => {
     setUp();
-    await removeAccount(7);
+    await updateAccount(7, { username: 'p_one', role: 'participant' });
+    await updateAccount(7, { role: 'participant', password: 'another passphrase' });
+    expect(db.deleteSessionsForUser).not.toHaveBeenCalled();
+  });
+
+  it.each(modes)("a deletion ends the account's sessions (%s)", async (_label, setUp) => {
+    setUp();
+    await removeAccount('07');
+    // By the row's id, not the route parameter: "07" matches no stored session.
     expect(db.deleteSessionsForUser).toHaveBeenCalledWith(7);
   });
 
@@ -437,8 +454,25 @@ describe('app sessions end with the account change that outdates them (review C5
 
   it('a failed session cleanup does not fail the change', async () => {
     db.deleteSessionsForUser.mockRejectedValue(new Error('db down'));
+    db.updateUser.mockResolvedValue({ ...ROW, role: 'therapist' });
     await expect(updateAccount(7, { role: 'therapist' })).resolves.toMatchObject({ userid: 7 });
     await expect(removeAccount(7)).resolves.toMatchObject({ userid: 7 });
+  });
+
+  it("also closes the account's open sockets, which hold the role they connected with", async () => {
+    const disconnectSockets = vi.fn();
+    const inRoom = vi.fn(() => ({ disconnectSockets }));
+    const g = globalThis as unknown as { io?: unknown };
+    const before = g.io;
+    g.io = { in: inRoom };
+    try {
+      db.updateUser.mockResolvedValue({ ...ROW, role: 'therapist' });
+      await updateAccount(7, { role: 'therapist' });
+      expect(inRoom).toHaveBeenCalledWith('user:7');
+      expect(disconnectSockets).toHaveBeenCalledWith(true);
+    } finally {
+      g.io = before;
+    }
   });
 });
 

@@ -402,6 +402,18 @@ describe('POST /join-sandbox/:token', () => {
     expect(session.regeneratedWithUserId).toBeNull();
   });
 
+  it('carries what belongs to the browser across the new session id: consent and owned sessions', async () => {
+    const { app, session } = makeApp();
+    session.consentAccepted = true;
+    session.consentVersion = 'v7';
+    session.ownedSessions = ['anon-1'];
+    await request(app).post('/join-sandbox/raw-tok').send(GOOD_BODY);
+    expect(session.userId).toBe(42);
+    expect(session.consentAccepted).toBe(true);
+    expect(session.consentVersion).toBe('v7');
+    expect(session.ownedSessions).toEqual(['anon-1']);
+  });
+
   it('answers 500 and stamps nothing when the session cannot be regenerated (the account exists)', async () => {
     const { app, session } = makeApp();
     session.regenerate = (cb) => cb(new Error('store down'));
