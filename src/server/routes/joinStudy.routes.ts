@@ -249,6 +249,11 @@ export default function joinStudyRoutes(): Router {
         if (error instanceof Error && error.message === 'Username already exists') {
           return res.status(409).json({ error: 'Username already exists' });
         }
+        // The sign-in provider refused the password itself (accounts.service
+        // has already undone the account): the person can choose another.
+        if (error instanceof Error && (error as { code?: string }).code === 'password_rejected') {
+          return res.status(400).json({ error: error.message });
+        }
         throw error;
       }
 
