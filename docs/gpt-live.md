@@ -1217,6 +1217,14 @@ Seen in these runs and not addressed here:
 - A high turn scored twice 1.4 s apart sent the high steer twice. (Since
   fixed: see "One spoken sentence, one high steer" below.)
 
+**Re-measured 2026-11-26** (`main` at 24ed60a, 8 CRAWL passive turns and 13
+RUN calls): no steer left a session silent (`STEER SILENCE UNRESOLVED` 0 of
+21 steered replies; the watch prompted in 12 of the 21 sessions), and the greeting
+never replaced a reply, though a greeting word was spliced into 3 of 21. The
+CRAWL scenario's marker was removed; the RUN scenarios still fail for other
+reasons and keep theirs. Numbers and the per-scenario table are in
+`docs/redteam.md`, "Re-measured 2026-11-26".
+
 ### A delegation must not leave the participant waiting (ai-therapist-348)
 
 Found in a stage test on 2026-11-18. In a recovery session the participant
