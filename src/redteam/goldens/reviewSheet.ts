@@ -58,7 +58,13 @@ function renderHistory(turns: GoldenTurn[]): string {
 }
 
 function renderChecks(checks: TextCheck[]): string {
-  return checks.map((c) => `${c.phrase !== undefined ? `"${c.phrase}"` : `/${c.regex}/`} (${c.why})`).join('\n');
+  return checks
+    .map(
+      (c) =>
+        `${c.phrase !== undefined ? `"${c.phrase}"` : `/${c.regex}/`} (${c.why}` +
+        `${c.scope === 'asserted' ? '; counts only when asserted, not after a negation or refusal' : ''})`,
+    )
+    .join('\n');
 }
 
 /** Reviewer columns already filled in an existing sheet, by row id. */
