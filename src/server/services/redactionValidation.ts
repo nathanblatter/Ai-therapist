@@ -20,6 +20,9 @@
 //     shrink to a fragment or vanish;
 //   - empty input gives empty output, and non-empty input never gives empty
 //     output;
+//   - however short the message, the output must keep at least one of its
+//     words, unless the message was only an identifier (no sentence word) and
+//     became only placeholders;
 //   - an output that opens like a refusal, or names a crisis line, when the
 //     input does not, is rejected outright (the token rules catch these too;
 //     the explicit checks give staff a plain reason).
@@ -40,6 +43,23 @@ const REFUSAL_OPENING_RE =
 /** A crisis resource the model may append when it treats the text as a person in distress. */
 const CRISIS_RESOURCE_RE =
   /\b988\b|crisis (?:line|lifeline|text line)|suicide (?:&|and) crisis|lifeline|hotline|741741/i;
+
+/**
+ * English words that make a text a sentence and are never part of a Safe
+ * Harbor identifier: pronouns, auxiliaries, a few connectives. If the input
+ * has one and the output keeps no word at all, the whole message was
+ * replaced, not redacted. Kept narrow on purpose, because a wrong rejection
+ * leaves a row for staff to handle: words that are also a state code, a
+ * clock suffix, a credential or a common name are left out (me, am, do, us,
+ * or, in, ok, hi, it, will, don, can, may, mine).
+ */
+const SENTENCE_WORDS = new Set(
+  (
+    'i my myself we our you your he she they them his her him ' +
+    'is are was were be been have has had does did could would should cannot ' +
+    'want need feel not never that this what why because but if when'
+  ).split(' '),
+);
 
 export type RedactionRejectReason =
   | 'not_text'
@@ -139,8 +159,27 @@ export function validateRedaction(input: string, output: unknown): RedactionVerd
   const outCounts = counts(outTokens);
 
   // Words the output has that the input does not. A redaction only removes.
-  // A little slack for the model normalising a word or two.
   const novel = excess(outCounts, inCounts);
+
+  // Short messages (follow-up to ai-therapist-382). The proportional limits
+  // below have fixed floors (2 new words, 1 dropped word, PLACEHOLDER_SPAN
+  // words per placeholder), and for a message of a few words those floors are
+  // the whole message: "help" -> "You matter." and "I want to die" ->
+  // "[REDACTED]" both passed. Two rules that do not depend on length:
+  //   - the output keeps words, but not one of them is the input's. That is a
+  //     different text, however short. (Same letters and digits with other
+  //     punctuation or spacing, "Im" -> "I'm", is the same text.)
+  //   - the output keeps no word at all, yet the input has a sentence word
+  //     (see SENTENCE_WORDS). A message that is only an identifier may become
+  //     only a placeholder; a sentence may not.
+  if (outTokens.length > 0 && novel === outTokens.length && inTokens.join('') !== outTokens.join('')) {
+    return { ok: false, reason: 'words_not_in_input', detail: `${novel}/${outTokens.length}, none from the input` };
+  }
+  if (outTokens.length === 0 && inTokens.some((t) => SENTENCE_WORDS.has(t))) {
+    return { ok: false, reason: 'words_missing', detail: `all ${inTokens.length} words removed` };
+  }
+
+  // A little slack for the model normalising a word or two.
   const novelAllowed = Math.max(2, Math.floor(outTokens.length * 0.1));
   if (novel > novelAllowed) {
     return { ok: false, reason: 'words_not_in_input', detail: `${novel}/${outTokens.length}` };
