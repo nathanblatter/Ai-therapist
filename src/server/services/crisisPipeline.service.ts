@@ -219,18 +219,28 @@ function locateInMemory(turn: ParticipantTurn, rows: HistoryRow[]): string | num
 }
 
 /** stitchSplitTurnParts over a history from memory: the turn is found there
- *  even without a stored id, and stand-in ids are never passed on. */
+ *  even without a stored id, and stand-in ids are never passed on.
+ *  `sentenceKeys`: this turn and the parts joined to it, stand-in ids
+ *  included (they stay inside this process; see sentenceKeysOf). */
 function stitchFromMemory(
   turn: ParticipantTurn,
   rows: HistoryRow[],
-): { content: string; priorMessageIds: Array<string | number> } {
+): { content: string; priorMessageIds: Array<string | number>; sentenceKeys: string[] } {
   const id = locateInMemory(turn, rows);
-  if (id == null) return { content: turn.content, priorMessageIds: [] };
+  if (id == null) return { content: turn.content, priorMessageIds: [], sentenceKeys: sentenceKeysOf(turn, []) };
   const parts = stitchSplitTurnParts({ ...turn, messageId: id }, rows);
   return {
     content: parts.content,
     priorMessageIds: parts.priorMessageIds.filter((p) => !String(p).startsWith(MEMORY_ID_PREFIX)),
+    sentenceKeys: sentenceKeysOf({ ...turn, messageId: id }, parts.priorMessageIds),
   };
+}
+
+/** What identifies a turn, and the earlier turn(s) it was joined to, as parts
+ *  of one spoken sentence: their message ids (or this process's stand-in ids).
+ *  Empty when the turn has no id of either kind. */
+function sentenceKeysOf(turn: ParticipantTurn, priorMessageIds: Array<string | number>): string[] {
+  return [...(turn.messageId == null ? [] : [turn.messageId]), ...priorMessageIds].map(String);
 }
 
 export type CrisisSeverity = 'none' | 'low' | 'medium' | 'high';
@@ -347,6 +357,11 @@ export async function runCrisisPipeline(
           ? stitchSplitTurnParts(turn, history)
           : stitchFromMemory(turn, history)
         : { content: turn.content, priorMessageIds: [] };
+    // This turn and the parts it was joined to (one spoken sentence, one high
+    // steer; see steerHighOncePerSentence). Not for the check-in.
+    const fromMemory = (stitched as { sentenceKeys?: string[] }).sentenceKeys;
+    const sentenceKeys =
+      turn.source === 'checkin' ? [] : (fromMemory ?? sentenceKeysOf(turn, stitched.priorMessageIds));
     const scoredTurn = stitched.content === turn.content ? turn : { ...turn, content: stitched.content };
 
     // Unchanged for the check-in: the age gate has never read it, and whether
@@ -450,27 +465,33 @@ export async function runCrisisPipeline(
         // turn stating an attempt or a plan (it never carries the voice
         // heads-up); every other turn makes the call it always made.
         const steerAcute = severity === 'high' ? (risk.acute ?? null) : null;
-        if (steerAcute) {
-          await maybeSteerSession(
-            turn.sessionId,
-            risk.riskScore,
-            severity,
-            forceSteer,
-            subject ? subjectGuidance(subject, 'realtime') : null,
-            subject,
-            steerAcute,
-          );
-        } else if (subject) {
-          await maybeSteerSession(
-            turn.sessionId,
-            risk.riskScore,
-            severity,
-            forceSteer,
-            subjectGuidance(subject, 'realtime'),
-            subject,
-          );
+        const steer = (): Promise<boolean> =>
+          steerAcute
+            ? maybeSteerSession(
+                turn.sessionId,
+                risk.riskScore,
+                severity,
+                forceSteer,
+                subject ? subjectGuidance(subject, 'realtime') : null,
+                subject,
+                steerAcute,
+              )
+            : subject
+              ? maybeSteerSession(
+                  turn.sessionId,
+                  risk.riskScore,
+                  severity,
+                  forceSteer,
+                  subjectGuidance(subject, 'realtime'),
+                  subject,
+                )
+              : maybeSteerSession(turn.sessionId, risk.riskScore, severity, forceSteer);
+        // A high turn's steer is sent once per spoken sentence, however many
+        // times the sentence is scored. Every other steer is sent as before.
+        if (severity === 'high') {
+          await steerHighOncePerSentence(turn.sessionId, sentenceKeys, subject, forceSteer, steer);
         } else {
-          await maybeSteerSession(turn.sessionId, risk.riskScore, severity, forceSteer);
+          await steer();
         }
       } else if (shouldSteer(turn.sessionId, risk.riskScore, forceSteer)) {
         // Chat: same shared cooldown, but the guidance is returned for the
@@ -841,6 +862,7 @@ const earlyPages = new Map<string, EarlyPage[]>();
 export function _resetEarlyPageStateForTests(): void {
   earlyPages.clear();
   flaggedTurns.clear();
+  highSteers.clear();
 }
 
 /** This session's early pages that can still stand for a page: those inside
@@ -957,6 +979,115 @@ function respondToHighVerdict(
     console.error('[CrisisPipeline] responding to a high verdict failed; the pipeline pages as before:', err);
     return { pageRequested: false };
   }
+}
+
+// ---- one spoken sentence, one high steer -----------------------------------
+//
+// Seen live on 2026-11-21: a high turn scored twice 1.4 s apart sent the high
+// steer twice, and the second append cut off the reply the first had started
+// (an instructions append interrupts the voice model every time).
+//
+// A sentence is scored more than once on purpose. The 900 ms turn gap can
+// close a turn before the participant's last words arrive; those words come
+// as a turn of their own and are scored joined to the part(s) before them
+// (stitchSplitTurnParts), so the whole sentence is read. Both scorings of
+// "I have been thinking about how I would kill myself" + " you know?" are
+// high, and a high turn forces its steer past the shared cooldown
+// (`forceSteer`), so nothing stood between the second scoring and a second
+// steer. The scoring stays; the steer is sent once.
+//
+// The same sentence: turns that share a part, by message id (a turn scored
+// again under the same id, or a later part joined to it). Held back only when
+//   - an earlier scoring of the sentence DELIVERED a high steer (one that was
+//     held for a socket, stopped by the cooldown, or threw does not count: the
+//     later scoring then steers), and
+//   - it was about the same person (the steer for someone else's crisis, or
+//     for thoughts of harming someone, is a different text).
+// So a sentence whose first part scored medium still gets its high steer when
+// the whole of it scores high, and a new sentence (the assistant has spoken
+// in between, or more than SPLIT_TURN_WINDOW_MS has passed) is steered like
+// any other high turn. Two scorings in flight at once are covered: the later
+// one waits for the earlier one's delivery before deciding.
+//
+// Only the realtime risk steer (maybeSteerSession) passes through here. The
+// flag, the page, the crisis card, the safety protocol of a first high flag
+// and the risk-check requirement are decided exactly as before.
+
+interface HighSteer {
+  keys: Set<string>;
+  subject: 'third_party' | 'harm_to_others' | null;
+  /** Settles true when the steer reached the sideband. Never rejects. */
+  delivered: Promise<boolean>;
+}
+
+const HIGH_STEERS_PER_SESSION = 4;
+const HIGH_STEERS_MAX_SESSIONS = 2000;
+const highSteers = new Map<string, HighSteer[]>();
+
+function forgetHighSteer(sessionId: string, entry: HighSteer): void {
+  const rest = (highSteers.get(sessionId) ?? []).filter((e) => e !== entry);
+  if (rest.length > 0) highSteers.set(sessionId, rest);
+  else highSteers.delete(sessionId);
+}
+
+/**
+ * Send a high turn's realtime steer unless this sentence already has one.
+ * `steer` is the call the pipeline would have made (it resolves true when the
+ * steer was delivered); it is called at most once, and a rejection passes to
+ * the caller as it always did. A turn with no id is steered as before.
+ */
+async function steerHighOncePerSentence(
+  sessionId: string,
+  sentenceKeys: string[],
+  subject: 'third_party' | 'harm_to_others' | null,
+  forced: boolean,
+  steer: () => Promise<boolean>,
+): Promise<void> {
+  // An unforced high steer (a context-wake turn in a session already flagged
+  // high) is on the ordinary cooldown, which already holds a repeat back. It
+  // is recorded below so that a forced one for the same sentence is not sent
+  // after it.
+  while (forced && sentenceKeys.length > 0) {
+    const earlier = (highSteers.get(sessionId) ?? []).find(
+      (e) => e.subject === subject && sentenceKeys.some((k) => e.keys.has(k)),
+    );
+    if (!earlier) break;
+    if (await earlier.delivered) {
+      for (const key of sentenceKeys) earlier.keys.add(key);
+      console.log(
+        `[CrisisPipeline] ${sessionId.substring(0, 12)}...: the high steer for this sentence has been delivered; ` +
+          'not sent again for a second scoring of it',
+      );
+      return;
+    }
+    forgetHighSteer(sessionId, earlier);
+  }
+  if (sentenceKeys.length === 0) {
+    await steer();
+    return;
+  }
+  // Recorded before anything is awaited, so a second scoring that reaches
+  // this point while the steer is still on its way waits for it above.
+  const steering = (async () => steer())();
+  const entry: HighSteer = {
+    keys: new Set(sentenceKeys),
+    subject,
+    delivered: steering.then(
+      (delivered) => delivered === true,
+      () => false,
+    ),
+  };
+  const list = [...(highSteers.get(sessionId) ?? []), entry].slice(-HIGH_STEERS_PER_SESSION);
+  highSteers.delete(sessionId);
+  highSteers.set(sessionId, list);
+  if (highSteers.size > HIGH_STEERS_MAX_SESSIONS) {
+    for (const id of highSteers.keys()) {
+      if (highSteers.size <= HIGH_STEERS_MAX_SESSIONS / 2) break;
+      highSteers.delete(id);
+    }
+  }
+  if (!(await entry.delivered)) forgetHighSteer(sessionId, entry);
+  await steering;
 }
 
 // ---- one turn, one flag (ai-therapist-373) -----------------------------------

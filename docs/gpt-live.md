@@ -1068,7 +1068,8 @@ Seen in these runs and not addressed here:
 - The watch can prompt while a delegated answer is about to be spoken (one
   call on `main`: the prompt went out 0.1 s after the backend finished, and
   the vendor's `content_filter` error named that prompt's event id).
-- A high turn scored twice 1.4 s apart sent the high steer twice.
+- A high turn scored twice 1.4 s apart sent the high steer twice. (Since
+  fixed: see "One spoken sentence, one high steer" below.)
 
 ### A delegation must not leave the participant waiting (ai-therapist-348)
 
@@ -1320,6 +1321,47 @@ turn(s) persisted immediately before it (no assistant turn between, within
 `crisisPipeline.service.ts`. The age check reads the same joined text. After:
 8 of 8 explicit-intent and attempt disclosures scored high. The 900 ms gap
 itself is unchanged.
+
+#### One spoken sentence, one high steer (seen 2026-11-21)
+
+The joining above means a sentence can be scored twice on purpose: once when
+its first part closes as a turn, and again, as the whole sentence, when the
+rest arrives ("... how I would kill myself" and then " you know?"). When both
+scorings are high, both used to steer: a high turn forces its steer past the
+3-minute cooldown (`forceSteer` in `runCrisisPipeline`), so the second scoring
+sent the high steer again about a second after the first, and that append cut
+off the reply the first one had started. This is the "scored twice 1.4 s
+apart" seen in the 2026-11-21 runs; it was found by reading the code and
+reproduced in a unit test, not re-measured live.
+
+The scoring is unchanged. The realtime high steer is now sent once per
+sentence (`steerHighOncePerSentence` in `crisisPipeline.service.ts`). "The
+same sentence" is the pipeline's own definition: turns that share a part, by
+message id (a later part joined to an earlier one, or a turn scored again
+under the same id). The second steer is held back only when an earlier
+scoring of the sentence delivered a high steer about the same person. So:
+
+- a first part that scored medium, then the whole sentence scoring high: the
+  high steer is sent;
+- an earlier steer that was held for a socket, stopped by the cooldown or
+  failed: the later scoring steers;
+- a later part about someone else (a third party, or harm to others): its own
+  steer is sent;
+- a new sentence (the assistant has spoken in between, or more than 4 s have
+  passed): steered like any other high turn;
+- two scorings in flight together: the later one waits for the earlier
+  delivery before deciding.
+
+Nothing else moves: the flag, the page, the crisis card, the safety protocol
+of a first high flag, the risk-check requirement and every steer text are
+decided as before, and a second part that escalates the sentence (a stated
+time, a score in the critical range) still flags and pages for what it adds.
+One fewer `risk_steering` row is written for such a sentence, because one
+fewer steer is sent. Tests: `crisisPipeline.sameSentenceSteer.test.ts`.
+
+Still two appends on a first high flag, by design and not changed here: the
+risk steer and the safety protocol (`executeHighRiskResponse`) are different
+texts sent for the same turn, like the two appends of a medium turn above.
 
 ### Muting the assistant's voice (speaker button, 2026-11-19)
 

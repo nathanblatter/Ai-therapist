@@ -508,6 +508,12 @@ export function _suppressedSteeringCountForTests(): number {
  * we intervene?" would silently overcount while the live conversation was never
  * steered at all. Now recorded as an undelivered risk_steering action (once per
  * session) so delivery rate is measurable rather than assumed.
+ *
+ * Resolves true when the risk steer itself reached the sideband on this call
+ * (not when it was held for a socket, stopped by the cooldown, or failed; the
+ * voice heads-up sent on its own does not count). The pipeline uses it to
+ * send one spoken sentence's high steer once (crisisPipeline, "one spoken
+ * sentence, one high steer").
  */
 export async function maybeSteerSession(
   sessionId: string,
@@ -528,9 +534,10 @@ export async function maybeSteerSession(
    *  heads-up: emergency help opens that reply (base prompt), and a sentence
    *  about the voice dropping must not come before it. */
   acute: Exclude<AcuteStage, 'none'> | null = null,
-): Promise<void> {
+): Promise<boolean> {
+  let delivered = false;
   try {
-    if (riskScore < STEER_MIN_SCORE) return;
+    if (riskScore < STEER_MIN_SCORE) return false;
 
     // Sideband gate FIRST so the shared cooldown is only consumed when there is
     // actually a live connection to inject into (preserves realtime behavior).
@@ -571,7 +578,7 @@ export async function maybeSteerSession(
           reason: 'no_sideband',
         });
       }
-      return;
+      return false;
     }
 
     // The voice heads-up (voiceHeadsUp.service): at the first medium or high
@@ -582,7 +589,7 @@ export async function maybeSteerSession(
     if (!shouldSteer(sessionId, riskScore, force)) {
       // No risk steer on this turn (the cooldown): the heads-up goes alone.
       if (headsUp) await sendVoiceHeadsUpAlone(sessionId, riskScore, severity, sidebandManager);
-      return;
+      return false;
     }
 
     const guidance = guidanceOverride ?? steeringGuidance(riskScore, severity);
@@ -595,6 +602,7 @@ export async function maybeSteerSession(
       attach ? `${guidance} ${VOICE_HEADS_UP_GUIDANCE}` : guidance,
       false,
     );
+    delivered = true;
     if (attach) {
       markVoiceHeadsUpRequested(sessionId, {
         severity,
@@ -626,8 +634,11 @@ export async function maybeSteerSession(
       );
     }
     console.log(`Risk steering injected for session ${sessionId} (score ${riskScore}, ${severity})`);
+    return true;
   } catch (error) {
     console.error('Error steering session:', error);
+    // True when the steer left and only the record of it failed.
+    return delivered;
   }
 }
 

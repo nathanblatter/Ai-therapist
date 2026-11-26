@@ -376,6 +376,28 @@ describe('maybeSteerSession — undeliverable steering must be recorded, not sil
     );
   });
 
+  // The pipeline sends one spoken sentence's high steer once, and only counts
+  // a steer that reached the sideband (crisisPipeline.sameSentenceSteer.test.ts).
+  it('resolves true only when the risk steer reached the sideband on this call', async () => {
+    const s = 'sess_steer_outcome';
+    sidebandManagerMock.isConnected.mockReturnValue(false);
+    expect(await maybeSteerSession(s, 80, 'high')).toBe(false); // held for the socket
+
+    sidebandManagerMock.isConnected.mockReturnValue(true);
+    sidebandManagerMock.injectMessage.mockResolvedValue(undefined);
+    expect(await maybeSteerSession(s, 80, 'high')).toBe(true);
+    expect(await maybeSteerSession(s, 55, 'medium')).toBe(false); // the cooldown
+    expect(await maybeSteerSession(s, 5, 'none')).toBe(false); // below the threshold
+
+    sidebandManagerMock.injectMessage.mockRejectedValueOnce(new Error('socket closed'));
+    expect(await maybeSteerSession(s, 80, 'high')).toBe(false);
+
+    // Sent, and only the record of it failed: it still counts as delivered.
+    logInterventionActionMock.mockRejectedValueOnce(new Error('db down'));
+    expect(await maybeSteerSession(s, 80, 'high')).toBe(true);
+    clearSteeringState(s);
+  });
+
   it('stays silent below the steering threshold regardless of sideband state', async () => {
     sidebandManagerMock.getActiveConnections.mockReturnValue([]);
     sidebandManagerMock.isConnected.mockReturnValue(false);
