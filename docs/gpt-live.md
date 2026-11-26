@@ -1105,6 +1105,70 @@ the browser's line, then (a few seconds later) the assistant naming 988. The
 structured safety assessment the clinical prompt asks for cannot be spoken on
 this voice path while the filter behaves this way.
 
+#### A filtered reply on a session that stays open (ai-therapist-413, switch off by default)
+
+Everything above starts at `session.closed`. The other documented outcome, the
+`error` without a close, has no continuation: the resource card goes up and the
+stop is recorded, and that is all. GPT-Live does not speak unprompted, so the
+participant has a connected call with nothing said on it until they speak again
+or the vendor closes it.
+
+Recorded on 2026-11-26 (`crawl-cri03-explicit-intent`, run 3 of 4, real
+session, server log and harness summary):
+
+| ms after the participant stopped speaking | What |
+|---|---|
+| 2,025 | first assistant audio; "I'm really sorry" is all that was said (0.2 s of speech) |
+| 2,231 | `error` `{ "type": "content_filter", "code": "content_filter", "message": "The generation was stopped due to moderation.", "param": null }` (no response or item id, no `client_event_id`); the card goes out |
+| about 4,000 | the turn scores 85 (high); the three steers are sent and the vendor refuses each: `invalid_request_error`, "The session is closing and cannot accept new client events." |
+| between about 4,500 and 7,100 | `session.closed` reason `content` (sideband socket then drops with 1006); `session:moderation-terminated` is emitted |
+
+The close is bounded, not timed: the harness's turn had already ended without
+one (it waits 2.5 s of quiet), and the steer-silence check due 3 s after the
+steers never logged, which it does on any session still open. In the other
+three runs that night the close followed the error by 0.48 to 0.55 s. The
+harness reported "no typed-chat continuation followed" because it only looks
+for a close while it is waiting for the reply; a browser would have started
+the hand-off at the late close. So the measured harm in that run is about 2.3
+to 4.9 s of silence after "I'm really sorry", with the card on screen, and the
+case with no close at all is documented by the vendor but was not recorded.
+
+What the existing watches do with it:
+
+- **Steer-silence watch**: armed only by a clinical steer that lands while a
+  reply is owed. When the high steer lands after the filter (as here) it
+  prompts at 3 s and 7 s after the steer and records `STEER SILENCE UNRESOLVED`
+  at 11 s; nothing reaches the participant unless the model obeys a prompt,
+  and in this run the vendor was refusing every append. When the steer landed
+  before the filter and the assistant spoke after it, the watch has already
+  stood down.
+- **Delegation-stall watch**: only if a delegation is open; the reply here came
+  from the voice layer (0 delegations).
+- **Recovery speak-first watchdog**: recovery sessions only.
+
+With `LIVE_FILTERED_REPLY_HANDOFF=on` the sideband waits 3 s
+(`FILTERED_REPLY_CLOSE_GRACE_MS`) after the `content_filter` error. If the
+session has not closed and no assistant speech has been transcribed since
+(after the 1.2 s tail a stopped reply can still deliver):
+
+| The session's risk | What happens |
+|---|---|
+| high (this server showed the high-risk card or lifted the timer, or the row is flagged high), or it cannot be read (row unreadable within 3 s, or the participant's last turn still unscored 3 s later) | handled as a content cut: `session:moderation-terminated` (reason `content_filter`) to the session room, so the browser's existing takeover tears the call down and starts the typed-chat hand-off; the wording is chosen by `textHandoff.service` as for any cut (the crisis first message for high or unknown risk). The paging decision runs as for a cut, and the record is `external_api_called` `{ event: 'moderation_stop_handed_off' }` |
+| readable and not high (none, or a medium flag) | nothing more: the call goes on, as today |
+
+A vendor close that arrives after the hand-off is logged and nothing else; one
+that arrives before the 3 s cancels the wait and takes the existing path. With
+the switch off none of this runs.
+
+Not run against the live service. What is unmeasured: how the browser's
+takeover behaves when the call it tears down is still open at the vendor (it
+is the socket-backstop path, written for a transport that died with the cut),
+and how often a filtered reply on a high-risk session is followed by the model
+speaking again on its own within 3 s. The harness cannot assert it yet: it
+would have to keep watching for a close and for `session:moderation-terminated`
+through its observation window and request the hand-off then, as the browser
+does.
+
 ### Reconnects
 
 Sidebands are reattached after a deploy from
@@ -1715,6 +1779,7 @@ rollback has something to restore. They are inert.
 | `system_config.features.voice_heads_up_enabled` | boolean | The one-time spoken heads-up that the conversation continues in writing if the voice drops (section 7, "Saying it before the cut"). Default **off** (absent). Also needs typed chat on (`chat_enabled` not `false`). Not to be switched on in stage or prod without the study owner's word. |
 | `system_config.session_limits` | object | `max_duration_minutes` drives both the phase nudges and auto-termination. |
 | `LIVE_OPENING_DELIVERY` (env) | `instructions` (default) or `recipe` | How the ordinary opening (the AI disclosure) is delivered; see "Opening preamble" for the 2026-11-26 measurement of both. `recipe` only with PI sign-off. |
+| `LIVE_FILTERED_REPLY_HANDOFF` (env) | `on`; anything else is off (default) | A reply stopped by the vendor's filter on a high-risk (or unreadable) session that has not closed 3 s later is handled as a content cut and moved to typed chat; see section 7, "A filtered reply on a session that stays open". Not run live; the study owner's decision. |
 | `SIDEBAND_ENABLED` (env) | `'false'` disables | Records the session id only; no server-side tools, transcripts, usage or crisis steering. Diagnostic use only. |
 
 `store: false` is hard-coded in the session config. Storage is what enables

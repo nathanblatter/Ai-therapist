@@ -144,6 +144,47 @@ export const STEER_TALKING_CEILING_MS = 8_000;
 export const STEER_UNRESOLVED_AFTER_MS = 4_000;
 
 /**
+ * A reply the vendor's filter stopped, on a session it then leaves open
+ * (ai-therapist-413).
+ *
+ * The typed-chat hand-off (ai-therapist-356) starts at `session.closed` with
+ * reason `content`. The vendor documents a second outcome ("Others cut off
+ * assistant audio for the remainder of its current speech and emit an `error`
+ * event without ending the session"), and a close can also arrive late: in
+ * one of four explicit-intent runs on 2026-11-26 the reply stopped after "I'm
+ * really sorry" and the close followed about 2.3 to 4.9 s later instead of
+ * the usual 0.5 s, during which the vendor refused every steer ("The session
+ * is closing and cannot accept new client events"). GPT-Live does not speak
+ * unprompted, so until a close arrives the participant has a connected call
+ * and nothing said on it.
+ *
+ * With LIVE_FILTERED_REPLY_HANDOFF=on the sideband waits
+ * FILTERED_REPLY_CLOSE_GRACE_MS after the `content_filter` error. If by then
+ * the session has not closed and the assistant has not spoken again, and the
+ * session is at high risk or its risk cannot be read, it is handled exactly as
+ * a content cut: `session:moderation-terminated` to the browser (which tears
+ * the call down and starts the typed-chat hand-off, wording chosen by
+ * textHandoff.service as for any cut), the paging decision and the record. A
+ * session that is readable and not at high risk is left alone: the filter also
+ * stops ordinary phrases, and a calm call must not be ended for one.
+ *
+ * Off by default (an env var, not a system_config flag, for the reason given
+ * at liveOpeningDelivery): ending a voice call from our side is a change to
+ * what a participant experiences, and it has not been run against the live
+ * service.
+ */
+export function liveFilteredReplyHandoff(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.LIVE_FILTERED_REPLY_HANDOFF?.trim().toLowerCase() === 'on';
+}
+/**
+ * How long the vendor gets to close the session itself, and the model to speak
+ * again, after a filtered reply. The same wait as the first steer-silence
+ * check: long enough for the usual close (0.5 to 0.7 s after the error), and a
+ * vendor close that arrives after it finds the hand-off already made.
+ */
+export const FILTERED_REPLY_CLOSE_GRACE_MS = STEER_RESUME_CHECK_MS[0];
+
+/**
  * A delegated question must never leave the participant waiting on an answer
  * that is not coming (ai-therapist-348).
  *
@@ -713,6 +754,10 @@ export class SidebandManager {
   private delegates: VoiceSidebandDelegate[] = [];
   /** Sessions that have ended. Never re-attach: the live session id is gone. */
   private endedSessions = new Set<string>();
+  /** Pending "did the session close after that filtered reply" checks (ai-therapist-413), by session. */
+  private filteredReplyWatches = new Map<string, NodeJS.Timeout>();
+  /** Sessions handed off after a filtered reply on an open session: a late vendor close must not do it twice. */
+  private filteredReplyHandoffs = new Set<string>();
   /** Monotonic attach counter per session, so reconnects mint distinct row ids. */
   private attachSeqs = new Map<string, number>();
   /**
@@ -1176,8 +1221,14 @@ export class SidebandManager {
     }
   }
 
-  private async handleModerationTermination(sessionId: string, cause: 'content_filter' | 'expired'): Promise<void> {
+  private async handleModerationTermination(
+    sessionId: string,
+    cause: 'content_filter' | 'expired',
+    /** The vendor stopped the reply but has not closed the session (checkFilteredReply). */
+    opts: { sessionStillOpen?: boolean } = {},
+  ): Promise<void> {
     const short = sessionId.substring(0, 12);
+    const stillOpen = cause === 'content_filter' && opts.sessionStillOpen === true;
     const announce = (): void => {
       global.io?.to(`session:${sessionId}`).emit('session:moderation-terminated', {
         sessionId,
@@ -1245,10 +1296,14 @@ export class SidebandManager {
     }
 
     console.error(
-      cause === 'content_filter'
-        ? `[Live] MODERATION TERMINATION for ${short}... — OpenAI's safety filter ended this session. ` +
+      stillOpen
+        ? `[Live] FILTERED REPLY ON AN OPEN SESSION for ${short}... — OpenAI's safety filter stopped the reply and ` +
+            `the session had not closed ${FILTERED_REPLY_CLOSE_GRACE_MS} ms later. Handling it as a content cut: ` +
+            'moving the participant to typed chat and alerting the study team.'
+        : cause === 'content_filter'
+          ? `[Live] MODERATION TERMINATION for ${short}... — OpenAI's safety filter ended this session. ` +
             'Surfacing crisis resources to the participant and alerting the study team.'
-        : `[Live] VENDOR CEILING for ${short}... — the session expired during an active high crisis flag. ` +
+          : `[Live] VENDOR CEILING for ${short}... — the session expired during an active high crisis flag. ` +
             'Surfacing crisis resources and asking the client to reconnect.',
     );
 
@@ -1268,7 +1323,11 @@ export class SidebandManager {
     try {
       const { logInterventionAction } = await import('./crisisDetection.service.js');
       await logInterventionAction(sessionId, 'external_api_called', {
-        event: cause === 'content_filter' ? 'moderation_terminated_session' : 'session_expired_in_crisis',
+        event: stillOpen
+          ? 'moderation_stop_handed_off'
+          : cause === 'content_filter'
+            ? 'moderation_terminated_session'
+            : 'session_expired_in_crisis',
         vendor: 'openai',
         crisisFlaggedAtTermination: flagged,
         ...(stateSource !== 'database' ? { crisisStateSource: stateSource } : {}),
@@ -1290,6 +1349,128 @@ export class SidebandManager {
         sessionId,
       );
     }
+  }
+
+  /**
+   * Start (or restart) the wait after a filtered reply (ai-therapist-413; see
+   * liveFilteredReplyHandoff). Does nothing with the switch off.
+   */
+  private armFilteredReplyWatch(sessionId: string): void {
+    if (!liveFilteredReplyHandoff()) return;
+    const state = this.sessions.get(sessionId);
+    if (!state || state.finalized || this.filteredReplyHandoffs.has(sessionId)) return;
+    const filteredAt = Date.now();
+    // One wait per session: a second stop means the assistant spoke again and
+    // was stopped again, so the wait starts over from that stop.
+    this.clearFilteredReplyWatch(sessionId);
+    const timer = setTimeout(() => {
+      this.filteredReplyWatches.delete(sessionId);
+      void this.checkFilteredReply(sessionId, filteredAt).catch((err) =>
+        console.error(`[Live] Filtered-reply check failed for ${sessionId.substring(0, 12)}...:`, err),
+      );
+    }, FILTERED_REPLY_CLOSE_GRACE_MS);
+    timer.unref?.();
+    this.filteredReplyWatches.set(sessionId, timer);
+  }
+
+  private clearFilteredReplyWatch(sessionId: string): void {
+    const timer = this.filteredReplyWatches.get(sessionId);
+    if (timer) clearTimeout(timer);
+    this.filteredReplyWatches.delete(sessionId);
+  }
+
+  /**
+   * Nothing left to do about a filtered reply: the session closed or was ended
+   * (the close has its own handling), it was already handed off, or the
+   * assistant has spoken again. Fragments of the stopped reply can still
+   * arrive for a moment after the error, as after a steer, so "again" starts
+   * after the same tail.
+   */
+  private filteredReplyOver(sessionId: string, filteredAt: number): boolean {
+    const state = this.sessions.get(sessionId);
+    return (
+      !state ||
+      state.finalized ||
+      this.endedSessions.has(sessionId) ||
+      this.filteredReplyHandoffs.has(sessionId) ||
+      state.lastAssistantDeltaAt > filteredAt + STEER_INTERRUPT_TAIL_MS
+    );
+  }
+
+  /**
+   * The session's risk as far as this server can tell now. `high`: it handled
+   * the session as high risk itself, or the row is flagged high. `unknown`:
+   * the row could not be read in time or is missing, which is not "calm".
+   * Never throws.
+   */
+  private async filteredReplyRisk(sessionId: string): Promise<'high' | 'unknown' | 'calm'> {
+    if (await this.sessionKnownHighRisk(sessionId)) return 'high';
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const read = pool.query<{ crisis_flagged: boolean | null; crisis_severity: string | null }>(
+        'SELECT crisis_flagged, crisis_severity FROM therapy_sessions WHERE session_id = $1',
+        [sessionId],
+      );
+      // A read that outlives the wait must not surface as an unhandled rejection.
+      read.catch(() => undefined);
+      const result = await Promise.race([
+        read,
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), FILTERED_REPLY_CLOSE_GRACE_MS);
+        }),
+      ]);
+      const row = result?.rows[0];
+      if (!row) return 'unknown';
+      return row.crisis_flagged === true && row.crisis_severity === 'high' ? 'high' : 'calm';
+    } catch {
+      return 'unknown';
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * FILTERED_REPLY_CLOSE_GRACE_MS after a `content_filter` error: if the
+   * session is still open and silent, and at high or unknown risk, hand it off
+   * as a content cut (see liveFilteredReplyHandoff).
+   */
+  private async checkFilteredReply(sessionId: string, filteredAt: number): Promise<void> {
+    if (this.filteredReplyOver(sessionId, filteredAt)) return;
+    const short = sessionId.substring(0, 12);
+    let risk = await this.filteredReplyRisk(sessionId);
+    const scoring = this.userTurnWork.get(sessionId);
+    if (risk === 'calm' && scoring && scoring.size > 0) {
+      // The participant's last words are still being assessed, and they are
+      // what the stopped reply was answering. Wait for the score, once and
+      // bounded; a turn still unscored after that is not known to be calm.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const scored = await Promise.race([
+        Promise.allSettled([...scoring]).then(() => true),
+        new Promise<boolean>((resolve) => {
+          timer = setTimeout(() => resolve(false), FILTERED_REPLY_CLOSE_GRACE_MS);
+        }),
+      ]);
+      clearTimeout(timer);
+      risk = scored ? await this.filteredReplyRisk(sessionId) : 'unknown';
+    }
+    // The vendor may have closed the session, or the assistant spoken, while
+    // the risk was being read.
+    if (this.filteredReplyOver(sessionId, filteredAt)) return;
+    if (risk === 'calm') {
+      console.log(
+        `[Live] Filtered reply on ${short}...: the session stayed open and is not at high risk; nothing further done.`,
+      );
+      return;
+    }
+    this.filteredReplyHandoffs.add(sessionId);
+    if (this.filteredReplyHandoffs.size > 1000) {
+      for (const id of this.filteredReplyHandoffs) {
+        if (this.filteredReplyHandoffs.size <= 500) break;
+        if (id === sessionId) continue;
+        this.filteredReplyHandoffs.delete(id);
+      }
+    }
+    await this.handleModerationTermination(sessionId, 'content_filter', { sessionStillOpen: true });
   }
 
   /**
@@ -2069,7 +2250,16 @@ export class SidebandManager {
         // prevented. Treated as its own event class so the participant gets
         // crisis resources instead of a generic end screen (see the client), the
         // study team is told, and the frequency is measurable.
-        if (event.reason === 'content') {
+        this.clearFilteredReplyWatch(sessionId);
+        if (event.reason === 'content' && this.filteredReplyHandoffs.has(sessionId)) {
+          // The vendor closed a session that was already handed off after its
+          // filtered reply (checkFilteredReply): the participant is in typed
+          // chat and the study team was told then. Not announced, paged or
+          // recorded a second time.
+          console.log(
+            `[Live] ${sessionId.substring(0, 12)}... closed by the vendor after its filtered reply was handed off.`,
+          );
+        } else if (event.reason === 'content') {
           await this.handleModerationTermination(sessionId, 'content_filter');
         } else if (event.reason === 'expired') {
           // The vendor's 60-minute ceiling (ai-therapist-281). For a session
@@ -2111,6 +2301,9 @@ export class SidebandManager {
         if (err?.code === 'content_filter') {
           emitCrisisResources(sessionId, { reason: 'vendor_moderation_stop' });
           void this.recordModerationStop(sessionId);
+          // If the session then stays open and silent (ai-therapist-413).
+          // Does nothing unless LIVE_FILTERED_REPLY_HANDOFF=on.
+          this.armFilteredReplyWatch(sessionId);
         }
         await this.logError(sessionId, err);
         if (global.io) {

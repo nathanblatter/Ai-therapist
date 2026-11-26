@@ -113,6 +113,8 @@ import {
   STEER_RESUME_CHECK_MS,
   STEER_TALKING_CEILING_MS,
   STEER_UNRESOLVED_AFTER_MS,
+  FILTERED_REPLY_CLOSE_GRACE_MS,
+  liveFilteredReplyHandoff,
   DELEGATION_STALL_MS,
   DELEGATION_STALL_UNKNOWN_MS,
   RECONNECT_GAP_SETTLE_MS,
@@ -3521,6 +3523,271 @@ describe('vendor moderation and crisis resources', () => {
 
     expect(emit).not.toHaveBeenCalledWith('session:crisis-emergency', expect.anything());
     expect(emit).not.toHaveBeenCalledWith('session:moderation-terminated', expect.anything());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A filtered reply on a session the vendor leaves open (ai-therapist-413)
+// ---------------------------------------------------------------------------
+
+describe('filtered reply on an open session (ai-therapist-413, LIVE_FILTERED_REPLY_HANDOFF)', () => {
+  // The `error` exactly as the sideband logged it in the explicit-intent run
+  // of 2026-11-26 whose reply stopped after "I'm really sorry".
+  const CONTENT_FILTER = {
+    type: 'error',
+    error: {
+      type: 'content_filter',
+      code: 'content_filter',
+      message: 'The generation was stopped due to moderation.',
+      param: null,
+    },
+  };
+  const CLOSED_CONTENT = { type: 'session.closed', reason: 'content', usage: { seconds: 15 } };
+  const REPLY = { type: 'session.output_transcript.delta', delta: "I'm really sorry", start_ms: 0, end_ms: 200 };
+
+  let emit: ReturnType<typeof vi.fn>;
+
+  /** Let the check run to its end: it reads risk through dynamic imports, which fake timers do not drive. */
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 3; i++) {
+      await vi.dynamicImportSettled();
+      await flush();
+    }
+  }
+
+  /** What the session row says about risk; `null` makes the read fail. */
+  function crisisRow(row: { crisis_flagged: boolean; crisis_severity: string | null } | null) {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (typeof sql === 'string' && sql.includes('crisis_flagged') && sql.trim().startsWith('SELECT')) {
+        if (!row) throw new Error('db down');
+        return { rows: [row], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+  }
+  const HIGH = { crisis_flagged: true, crisis_severity: 'high' };
+  const CALM = { crisis_flagged: false, crisis_severity: null };
+
+  const announcements = () => emit.mock.calls.filter((c: unknown[]) => c[0] === 'session:moderation-terminated');
+  /** Intervention records written with this event name, whatever the query's shape. */
+  const recorded = (event: string) =>
+    queryMock.mock.calls.filter((c: unknown[]) => JSON.stringify(c).includes(event)).length;
+
+  beforeEach(async () => {
+    const { clearCrisisResourceState } = await import('./crisisResources.js');
+    clearCrisisResourceState();
+    sb.filteredReplyWatches.clear();
+    sb.filteredReplyHandoffs.clear();
+    process.env.LIVE_FILTERED_REPLY_HANDOFF = 'on';
+    emit = vi.fn();
+    (global as { io?: unknown }).io = { to: vi.fn(() => ({ emit })) };
+  });
+
+  afterEach(() => {
+    delete process.env.LIVE_FILTERED_REPLY_HANDOFF;
+  });
+
+  it('the switch is off unless the env var says on', () => {
+    expect(liveFilteredReplyHandoff({})).toBe(false);
+    expect(liveFilteredReplyHandoff({ LIVE_FILTERED_REPLY_HANDOFF: '' })).toBe(false);
+    expect(liveFilteredReplyHandoff({ LIVE_FILTERED_REPLY_HANDOFF: 'true' })).toBe(false);
+    expect(liveFilteredReplyHandoff({ LIVE_FILTERED_REPLY_HANDOFF: 'off' })).toBe(false);
+    expect(liveFilteredReplyHandoff({ LIVE_FILTERED_REPLY_HANDOFF: ' On ' })).toBe(true);
+  });
+
+  it('high-risk session, reply filtered, no close: handed off as a content cut once the grace has passed', async () => {
+    const sessionId = 's-filtered-high';
+    await attach(sessionId);
+    crisisRow(HIGH);
+
+    await fire(sessionId, REPLY);
+    await vi.advanceTimersByTimeAsync(200);
+    await fire(sessionId, CONTENT_FILTER);
+    await vi.advanceTimersByTimeAsync(FILTERED_REPLY_CLOSE_GRACE_MS - 1);
+    // The vendor still has time to close the session itself.
+    expect(announcements()).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await settle();
+
+    // The same announcement a content close makes: the browser's existing
+    // takeover tears the call down and starts the typed-chat hand-off.
+    expect(announcements()).toHaveLength(1);
+    expect(announcements()[0][1]).toMatchObject({ sessionId, reason: 'content_filter' });
+    expect(recorded('moderation_stop_handed_off')).toBe(1);
+    expect(recorded('moderation_terminated_session')).toBe(0);
+  });
+
+  it('risk that cannot be read is not calm: handed off', async () => {
+    const sessionId = 's-filtered-unknown';
+    await attach(sessionId);
+    crisisRow(null);
+
+    await fire(sessionId, CONTENT_FILTER);
+    await vi.advanceTimersByTimeAsync(FILTERED_REPLY_CLOSE_GRACE_MS);
+    await settle();
+
+    expect(announcements()).toHaveLength(1);
+  });
+
+  it('calm session, reply filtered, no close: the call is left alone', async () => {
+    const sessionId = 's-filtered-calm';
+    await attach(sessionId);
+    crisisRow(CALM);
+
+    await fire(sessionId, REPLY);
+    await fire(sessionId, CONTENT_FILTER);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+
+    expect(announcements()).toHaveLength(0);
+    expect(recorded('moderation_stop_handed_off')).toBe(0);
+    // Today's handling of the stop itself is unchanged: the resource card went out.
+    expect(emit).toHaveBeenCalledWith(
+      'session:crisis-emergency',
+      expect.objectContaining({ reason: 'vendor_moderation_stop' }),
+    );
+    expect(sb.sessions.has(sessionId)).toBe(true);
+  });
+
+  it('a medium flag is not treated as a crisis cut', async () => {
+    const sessionId = 's-filtered-medium';
+    await attach(sessionId);
+    crisisRow({ crisis_flagged: true, crisis_severity: 'medium' });
+
+    await fire(sessionId, CONTENT_FILTER);
+    await vi.advanceTimersByTimeAsync(FILTERED_REPLY_CLOSE_GRACE_MS);
+    await settle();
+
+    expect(announcements()).toHaveLength(0);
+  });
+
+  it('the turn the reply was answering is still being scored: waits for it, then hands off when it scores high', async () => {
+    const sessionId = 's-filtered-scoring';
+    await attach(sessionId);
+    let row: { crisis_flagged: boolean; crisis_severity: string | null } = CALM;
+    queryMock.mockImplementation(async (sql: string) => {
+      if (typeof sql === 'string' && sql.includes('crisis_flagged') && sql.trim().startsWith('SELECT')) {
+        return { rows: [row], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+    let scored: () => void = () => undefined;
+    runCrisisPipelineMock.mockImplementation(
+      () =>
+        new Promise<{ severity: string }>((resolve) => {
+          scored = () => resolve({ severity: 'high' });
+        }),
+    );
+
+    await fire(sessionId, userDelta('I have been thinking about how I would kill myself', 0, 2_000));
+    await vi.advanceTimersByTimeAsync(TURN_GAP_MS + 100);
+    await fire(sessionId, CONTENT_FILTER);
+    await vi.advanceTimersByTimeAsync(FILTERED_REPLY_CLOSE_GRACE_MS);
+    await settle();
+    // Calm on the row so far, but the participant's last words are unscored.
+    expect(announcements()).toHaveLength(0);
+
+    row = HIGH;
+    scored();
+    await settle();
+
+    expect(announcements()).toHaveLength(1);
+  });
+
+  it('the usual sequence (close half a second after the error) is announced once, by the close', async () => {
+    const sessionId = 's-filtered-then-closed';
+    await attach(sessionId);
+    crisisRow(HIGH);
+
+    await fire(sessionId, CONTENT_FILTER);
+    await vi.advanceTimersByTimeAsync(600);
+    await fire(sessionId, CLOSED_CONTENT);
+    await settle();
+    expect(announcements()).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(FILTERED_REPLY_CLOSE_GRACE_MS * 3);
+    await settle();
+
+    expect(announcements()).toHaveLength(1);
+    expect(recorded('moderation_terminated_session')).toBe(1);
+    expect(recorded('moderation_stop_handed_off')).toBe(0);
+  });
+
+  it('a vendor close that arrives after the hand-off does not announce, page or record it a second time', async () => {
+    const sessionId = 's-filtered-late-close';
+    await attach(sessionId);
+    crisisRow(HIGH);
+
+    await fire(sessionId, REPLY);
+    await fire(sessionId, CONTENT_FILTER);
+    await vi.advanceTimersByTimeAsync(FILTERED_REPLY_CLOSE_GRACE_MS);
+    await settle();
+    expect(announcements()).toHaveLength(1);
+
+    // The late close of the recorded run (2.3 to 4.9 s after the error).
+    await vi.advanceTimersByTimeAsync(1_500);
+    await fire(sessionId, CLOSED_CONTENT);
+    await settle();
+
+    expect(announcements()).toHaveLength(1);
+    expect(recorded('moderation_stop_handed_off')).toBe(1);
+    expect(recorded('moderation_terminated_session')).toBe(0);
+  });
+
+  it('the assistant spoke again before the grace ran out: no hand-off', async () => {
+    const sessionId = 's-filtered-resumed';
+    await attach(sessionId);
+    crisisRow(HIGH);
+
+    await fire(sessionId, CONTENT_FILTER);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await fire(sessionId, { type: 'session.output_transcript.delta', delta: 'I am here', start_ms: 0, end_ms: 300 });
+    await vi.advanceTimersByTimeAsync(FILTERED_REPLY_CLOSE_GRACE_MS);
+    await settle();
+
+    expect(announcements()).toHaveLength(0);
+  });
+
+  it('a fragment of the stopped reply that trails the error does not count as speaking again', async () => {
+    const sessionId = 's-filtered-tail';
+    await attach(sessionId);
+    crisisRow(HIGH);
+
+    await fire(sessionId, CONTENT_FILTER);
+    await vi.advanceTimersByTimeAsync(300);
+    await fire(sessionId, REPLY);
+    await vi.advanceTimersByTimeAsync(FILTERED_REPLY_CLOSE_GRACE_MS);
+    await settle();
+
+    expect(announcements()).toHaveLength(1);
+  });
+
+  it('switch off (the default): a filtered reply on a high-risk open session is handled as it is today', async () => {
+    delete process.env.LIVE_FILTERED_REPLY_HANDOFF;
+    const sessionId = 's-filtered-switch-off';
+    await attach(sessionId);
+    crisisRow(HIGH);
+
+    await fire(sessionId, REPLY);
+    await fire(sessionId, CONTENT_FILTER);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+
+    expect(emit).toHaveBeenCalledWith(
+      'session:crisis-emergency',
+      expect.objectContaining({ reason: 'vendor_moderation_stop' }),
+    );
+    expect(recorded('moderation_stopped_generation')).toBe(1);
+    expect(announcements()).toHaveLength(0);
+    expect(recorded('moderation_stop_handed_off')).toBe(0);
+    expect(sb.filteredReplyWatches.size).toBe(0);
+
+    // And a close still takes the existing path.
+    await fire(sessionId, CLOSED_CONTENT);
+    await settle();
+    expect(announcements()).toHaveLength(1);
+    expect(recorded('moderation_terminated_session')).toBe(1);
   });
 });
 
