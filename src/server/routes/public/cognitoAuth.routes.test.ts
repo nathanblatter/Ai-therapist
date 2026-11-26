@@ -1,7 +1,7 @@
 // Cognito sign-in routes (ai-therapist-387): start stashes PKCE, state and
 // nonce; the callback establishes the app session for the local account the
 // token maps to, takes the role from the pool's role group, and refuses
-// anything it cannot pin to one account and one role; logout ends both sessions.
+// anything it cannot pin to one account and one role.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import session from 'express-session';
@@ -284,20 +284,6 @@ describe('GET /api/auth/cognito/callback', () => {
     const { agent, state } = await started();
     const res = await agent.get('/api/auth/cognito/callback').query({ code: 'c1', state });
     expect(res.headers.location).toBe('/login?error=server_error');
-    expect((await agent.get('/test/session')).body.userId).toBeNull();
-  });
-});
-
-describe('GET /api/auth/cognito/logout', () => {
-  it('ends the app session and sends the browser to the hosted logout', async () => {
-    const app = makeApp();
-    const agent = request.agent(app);
-    await agent.post('/test/seed');
-    const res = await agent.get('/api/auth/cognito/logout');
-    expect(res.status).toBe(302);
-    const url = new URL(res.headers.location);
-    expect(url.origin + url.pathname).toBe('https://study-test.auth.us-west-1.amazoncognito.com/logout');
-    expect(url.searchParams.get('logout_uri')).toBe('https://app.test/login');
     expect((await agent.get('/test/session')).body.userId).toBeNull();
   });
 });

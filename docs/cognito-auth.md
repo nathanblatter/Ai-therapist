@@ -1,10 +1,10 @@
 # Sign-in through Amazon Cognito
 
-Status (2026-11-25): the server sign-in flow is built and unit-tested. It is
-**not enabled anywhere yet**: no user pool exists, the login page does not
-start this flow, and account changes are not mirrored to a pool. Those are
-ai-therapist-394, 397 and 396. Until then stage signs in through Squawk
-(docs/squawk-auth.md) and prod through the legacy login.
+Status (2026-11-25): the server sign-in flow and the login page's Cognito mode
+are built and unit-tested. It is **not enabled anywhere yet**: no user pool
+exists, and account changes are not mirrored to a pool (ai-therapist-394 and
+396). Nothing here has run against a real pool. Until then stage signs in
+through Squawk (docs/squawk-auth.md) and prod through the legacy login.
 
 ## Why
 
@@ -51,10 +51,19 @@ AWS account, the same account that holds the study data. Decided 2026-11-21 to
    session id, consent and anonymous-session ownership carried over, account
    fields stamped. Staff land on `/admin`, everyone else on `/`.
 
-`GET /api/auth/cognito/logout` destroys the app session and then redirects to
-`{COGNITO_DOMAIN}/logout`, which ends the hosted page's own session and returns
-the browser to `/login`. Without that second step the next "sign in" on a
-shared computer would silently reuse the last account.
+Sign-out stays `POST /api/auth/logout`. With Cognito configured its answer
+also carries `redirect`, the hosted page's `{COGNITO_DOMAIN}/logout` URL; the
+browser goes there next, which ends the hosted page's own session and returns
+to `/login`. Without that second step the next "sign in" on a shared computer
+would silently reuse the last account.
+
+The login page asks `/api/auth/cognito/config` and `/api/auth/squawk/config`
+and picks a mode in `src/client/main/lib/signInMode.ts`. In Cognito mode it
+shows no form: it hands the browser to `/api/auth/cognito/start`, or, when a
+callback sent it back with `?error=`, shows the reason and a button to try
+again (never an automatic redirect, which would loop). The staff deep link from
+a crisis page (`/admin#session=...`) is saved before the page leaves, exactly
+as under Squawk.
 
 Refusals redirect to `/login?error=<code>` with one of `state_mismatch`,
 `sign_in_failed`, `invalid_token`, `no_role`, `no_account`, `server_error`.
@@ -89,8 +98,9 @@ Do not set `COGNITO_*` and `SQUAWK_*` together. Never put either in CI.
 - The pools themselves, and the script that creates them (ai-therapist-394).
 - Account create, password, role and delete mirrored to the pool through
   `accounts.service.ts`; staff password and TOTP reset (ai-therapist-396).
-- The login page starting this flow, the sign-out button calling the logout
-  route, and the security settings screen (ai-therapist-397).
+- The security settings screen (Admin, MFA/Security) still shows the app's own
+  TOTP setup and the Squawk passkey card; neither applies under Cognito
+  (ai-therapist-397, with the staff TOTP rule on 396).
 - Requiring TOTP for staff. The pool can only require a second factor for
   everyone or leave it optional for everyone, so the per-role rule has to be
   enforced by this app at sign-in; how is open on ai-therapist-396.

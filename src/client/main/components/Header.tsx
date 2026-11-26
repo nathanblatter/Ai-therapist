@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { Menu, X, ChevronUp, ChevronDown, MessageSquare } from 'react-feather';
 import CopyButton from '../../shared/components/CopyButton';
+import { afterLogout } from '../lib/signInMode';
 
 interface HeaderProps {
   sessionId: string | null;
@@ -139,7 +140,11 @@ const Header = ({
       });
 
       if (response.ok) {
-        navigate('/login');
+        // With Cognito the server names the provider's sign-out page, so the
+        // hosted session ends too; otherwise this stays an in-app navigation.
+        const next = afterLogout(await response.json().catch(() => null));
+        if (next === '/login') navigate('/login');
+        else window.location.assign(next);
       }
     } catch (error) {
       console.error('Logout failed:', error);

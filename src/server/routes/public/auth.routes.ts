@@ -6,7 +6,7 @@ import { verifyCredentials } from '../../db/index.js';
 import { passwordPolicyError } from '../../utils/passwordPolicy.js';
 import { registerAccount } from '../../services/accounts.service.js';
 import { enabled as squawkEnabled } from '../../services/squawk.service.js';
-import { enabled as cognitoEnabled } from '../../services/cognito.service.js';
+import { enabled as cognitoEnabled, logoutUrl as cognitoLogoutUrl } from '../../services/cognito.service.js';
 
 import { createLogger } from '../../utils/logger.js';
 
@@ -172,7 +172,10 @@ export default function authRoutes(): Router {
         log.error({ err }, 'Logout error');
         return res.status(500).json({ error: 'Logout failed' });
       }
-      res.json({ success: true });
+      // With Cognito configured the hosted page keeps its own session; send
+      // the browser there next so the following sign-in asks for credentials
+      // again (shared lab computers) instead of reusing the last account.
+      res.json(cognitoEnabled() ? { success: true, redirect: cognitoLogoutUrl() } : { success: true });
     });
   });
 
