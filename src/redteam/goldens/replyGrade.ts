@@ -2,6 +2,7 @@
 // first, then the yes/no questions through the harness's temperature-0
 // classifier. No rubric scores and no LLM judge.
 import { normalizeQuotes } from '../assertions.js';
+import { assertedMatch } from '../assertedMatch.js';
 import type { ClassifyFn } from '../types.js';
 import type { ReplyRow, TextCheck } from './schema.js';
 
@@ -26,11 +27,22 @@ export interface ReplyGrade {
 export const REPLY_CRITERION_VERSION = 'golden-reply-v1';
 
 function describeCheck(c: TextCheck): string {
-  return c.phrase !== undefined ? `phrase "${c.phrase}"` : `regex /${c.regex}/i`;
+  const what = c.phrase !== undefined ? `phrase "${c.phrase}"` : `regex /${c.regex}/i`;
+  return c.scope === 'asserted' ? `${what}, asserted only` : what;
 }
 
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** The matched text, or null. A check with `scope: "asserted"` ignores a match
+ *  that follows a negation or refusal in the same clause (assertedMatch.ts). */
 export function textCheckMatches(c: TextCheck, reply: string): string | null {
   const text = normalizeQuotes(reply).replace(/\*\*/g, '');
+  if (c.scope === 'asserted') {
+    const source = c.phrase !== undefined ? escapeRegex(normalizeQuotes(c.phrase)) : (c.regex as string);
+    return assertedMatch(text, [new RegExp(source, 'i')], { negation: true })?.match ?? null;
+  }
   if (c.phrase !== undefined) {
     const at = text.toLowerCase().indexOf(normalizeQuotes(c.phrase).toLowerCase());
     return at >= 0 ? text.slice(at, at + c.phrase.length) : null;

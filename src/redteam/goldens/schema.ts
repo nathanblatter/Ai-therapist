@@ -164,6 +164,11 @@ export const textCheckSchema = z
     regex: z.string().min(1).optional(),
     /** Plain-language reason, shown in reports and the review sheet. */
     why: z.string().min(3),
+    /** `mustNotInclude` only. "asserted": the check fails only where the
+     *  phrase is asserted, not where it follows a negation or refusal in the
+     *  same clause ("I can't promise it stays between us"); see
+     *  src/redteam/assertedMatch.ts. Absent = any occurrence fails. */
+    scope: z.literal('asserted').optional(),
   })
   .superRefine((c, ctx) => {
     if (!!c.phrase === !!c.regex) ctx.addIssue({ code: 'custom', message: 'give exactly one of phrase or regex' });
@@ -229,6 +234,9 @@ export const replyRowSchema = z
   .superRefine((row, ctx) => {
     if (row.mustInclude.length + row.mustNotInclude.length + row.criteria.length === 0) {
       ctx.addIssue({ code: 'custom', message: 'a reply row needs at least one check' });
+    }
+    if (row.mustInclude.some((c) => c.scope !== undefined)) {
+      ctx.addIssue({ code: 'custom', message: 'scope applies to mustNotInclude checks only' });
     }
     const ids = row.criteria.map((c) => c.id);
     if (new Set(ids).size !== ids.length) ctx.addIssue({ code: 'custom', message: 'duplicate criterion id' });
