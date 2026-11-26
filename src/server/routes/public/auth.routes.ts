@@ -6,6 +6,7 @@ import { verifyCredentials } from '../../db/index.js';
 import { passwordPolicyError } from '../../utils/passwordPolicy.js';
 import { registerAccount } from '../../services/accounts.service.js';
 import { enabled as squawkEnabled } from '../../services/squawk.service.js';
+import { enabled as cognitoEnabled } from '../../services/cognito.service.js';
 
 import { createLogger } from '../../utils/logger.js';
 
@@ -38,6 +39,14 @@ export default function authRoutes(): Router {
       return res
         .status(410)
         .json({ error: 'Sign in through the login page; password login moved to Squawk', code: 'use_squawk' });
+    }
+
+    // Same with Cognito configured: the password lives in the study's user
+    // pool and is typed on its hosted page (/api/auth/cognito/start).
+    if (cognitoEnabled()) {
+      return res
+        .status(410)
+        .json({ error: 'Sign in through the login page; password login moved to Cognito', code: 'use_cognito' });
     }
 
     try {

@@ -23,6 +23,7 @@ import configRoutes from './routes/public/config.routes.js';
 import voicesRoutes from './routes/public/voices.routes.js';
 import authRoutes from './routes/public/auth.routes.js';
 import squawkAuthRoutes from './routes/public/squawkAuth.routes.js';
+import cognitoAuthRoutes from './routes/public/cognitoAuth.routes.js';
 import magicLinkRoutes from './routes/public/magicLink.routes.js';
 import demoRoutes from './routes/demo.routes.js';
 import { canAdminAccessSessionLive } from './middleware/caseload.js';
@@ -709,6 +710,9 @@ app.use(authRoutes());
 // Sign-in through Squawk (auth-service-33): start/callback + ceremony
 // proxies for the login page, passkey registration for signed-in users.
 app.use(squawkAuthRoutes());
+// Sign-in through the study's Cognito user pool (ai-therapist-387): hosted
+// sign-in page, callback, and sign-out of both sessions.
+app.use(cognitoAuthRoutes());
 
 // Magic-link demo access (/demo/:token) — auto-provisions a capped demo account.
 app.use(magicLinkRoutes());

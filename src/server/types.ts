@@ -34,6 +34,9 @@ declare module 'express-session' {
     /** In-flight Squawk authorization (auth-service-33): PKCE verifier and
      *  state, written by /api/auth/squawk/start, consumed by the callback. */
     squawkAuth?: { state: string; verifier: string; startedAt: number };
+    /** In-flight Cognito sign-in (ai-therapist-387): PKCE verifier, state and
+     *  nonce, written by /api/auth/cognito/start, consumed by the callback. */
+    cognitoAuth?: { state: string; verifier: string; nonce: string; startedAt: number };
   }
 }
 
