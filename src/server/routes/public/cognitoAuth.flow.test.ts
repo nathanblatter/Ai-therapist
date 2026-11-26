@@ -20,6 +20,8 @@ vi.stubEnv('APP_URL', 'https://app.test');
 
 const users = new Map<number, Record<string, unknown>>();
 const dbMocks = vi.hoisted(() => ({
+  getCognitoTotpEnrolledAt: vi.fn(),
+  setCognitoTotpEnrolledAt: vi.fn(),
   getUserByCognitoSub: vi.fn(),
   getUserById: vi.fn(),
   getUserByUsernameForCognito: vi.fn(),
@@ -27,6 +29,7 @@ const dbMocks = vi.hoisted(() => ({
   syncRoleFromCognito: vi.fn(),
 }));
 vi.mock('../../db/index.js', () => dbMocks);
+vi.mock('../../services/researcherEmail.service.js', () => ({ clearEmailIfIneligible: vi.fn() }));
 
 const cognito = await import('../../services/cognito.service.js');
 const admin = await import('../../services/cognitoAdmin.service.js');
@@ -38,7 +41,14 @@ const jwk = pair.publicKey.export({ format: 'jwk' }) as { kty: string; n: string
 const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
 
 /** What the stand-in hosted page "signed in": set per test. */
-let hosted: { username: string; group: string; nonce?: string; signWith?: typeof pair.privateKey };
+let hosted: {
+  username: string;
+  group: string;
+  nonce?: string;
+  signWith?: typeof pair.privateKey;
+  /** When the hosted page authenticated the person (seconds); default now. */
+  authTime?: number;
+};
 let tokenBodies: URLSearchParams[] = [];
 /** The pool: which usernames have the authenticator challenge on. */
 const totpOn = new Set<string>();
@@ -52,6 +62,7 @@ function mintIdToken(nonce: string): string {
     aud: 'flowclient',
     token_use: 'id',
     nonce: hosted.nonce ?? nonce,
+    auth_time: hosted.authTime ?? now,
     'cognito:username': hosted.username,
     'cognito:groups': [hosted.group],
     iat: now,
@@ -79,6 +90,13 @@ beforeEach(() => {
   dbMocks.setCognitoSub.mockImplementation(async (id: number, sub: string) => {
     const u = users.get(Number(id));
     if (u) u.cognito_sub = sub;
+  });
+  dbMocks.getCognitoTotpEnrolledAt.mockImplementation(
+    async (id: number) => (users.get(Number(id))?.cognito_totp_enrolled_at as Date | undefined) ?? null,
+  );
+  dbMocks.setCognitoTotpEnrolledAt.mockImplementation(async (id: number, at: Date | null) => {
+    const u = users.get(Number(id));
+    if (u) u.cognito_totp_enrolled_at = at;
   });
   hosted = { username: 'dr_flow', group: 'therapist' };
   tokenBodies = [];
@@ -198,6 +216,28 @@ describe('Cognito sign-in, end to end over the real token verifier', () => {
       name: 'AdminSetUserMFAPreference',
       input: { Username: 'dr_flow', SoftwareTokenMfaSettings: { Enabled: true, PreferredMfa: true } },
     });
+  });
+
+  it('a hosted-page sign-in from before the enrolment cannot ride in on it afterwards', async () => {
+    // The attacker authenticated at the hosted page (password only) while the
+    // account had no authenticator. The owner then enrols through the app.
+    const stale = Math.floor(Date.now() / 1000) - 600;
+    const owner = request.agent(makeApp());
+    await signIn(owner, 'owner-code');
+    await owner.post('/api/auth/cognito/totp/begin');
+    await owner.post('/api/auth/cognito/totp/verify').send({ code: '123456' });
+    expect(users.get(1)?.cognito_totp_enrolled_at).toBeInstanceOf(Date);
+
+    hosted = { username: 'dr_flow', group: 'therapist', authTime: stale };
+    const attacker = request.agent(makeApp());
+    const res = await signIn(attacker, 'attacker-code');
+    expect(new URL(res.headers.location).pathname).toBe('/logout');
+    expect((await attacker.get('/test/session')).body).toEqual({ userId: null, userRole: null, held: false });
+
+    // The owner's next real sign-in (authenticated now, with a code) is fine.
+    hosted = { username: 'dr_flow', group: 'therapist', authTime: Math.floor(Date.now() / 1000) + 5 };
+    const again = request.agent(makeApp());
+    expect((await signIn(again, 'owner-code-2')).headers.location).toBe('/admin');
   });
 
   it('once enrolled, the next staff sign-in goes straight in', async () => {

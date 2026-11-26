@@ -18,6 +18,7 @@ import { pool } from './config/db.js';
 import { releaseOnEnd } from './config/dbHeldClient.js';
 import { adminPageGuard } from './middleware/auth.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { loggableUrl } from './utils/logUrl.js';
 import { insertMessagesBatch, getSidebandConnectionsByIds, getSessionAccessInfo } from './db/index.js';
 import configRoutes from './routes/public/config.routes.js';
 import voicesRoutes from './routes/public/voices.routes.js';
@@ -333,6 +334,13 @@ app.use(
     redact: {
       paths: ['req.headers.cookie', 'req.headers.authorization', 'res.headers["set-cookie"]'],
       censor: '[redacted]',
+    },
+    // A sign-in callback's query carries a live code: log the path only.
+    serializers: {
+      req: (req: { url?: string; query?: unknown }) => {
+        const url = loggableUrl(req.url);
+        return url === req.url ? req : { ...req, url, query: undefined };
+      },
     },
   }),
 );

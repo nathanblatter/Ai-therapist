@@ -49,6 +49,9 @@ export default function Login() {
   // null = not asked yet; the sign-in mode is decided once per page load.
   const [squawk, setSquawk] = useState<SquawkConfig | null>(null);
   const [cognitoMode, setCognitoMode] = useState(false);
+  // The provider config could not be read: the sign-in mode is unknown, and
+  // an unknown mode shows no form (it might be a Cognito deployment).
+  const [configFailed, setConfigFailed] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -78,15 +81,22 @@ export default function Login() {
   useEffect(() => {
     if (callbackError) setError(CALLBACK_ERRORS[callbackError] ?? `Sign-in failed (${callbackError}).`);
     let cancelled = false;
-    const ask = <T,>(url: string, off: T): Promise<T> =>
+    // null = the question went unanswered (network error or a 5xx). That is
+    // not "this provider is off": falling back to the app's own form on a
+    // Cognito deployment would invite a password into this page.
+    const ask = <T,>(url: string): Promise<T | null> =>
       fetch(url, { credentials: 'include' })
-        .then((r) => (r.ok ? (r.json() as Promise<T>) : off))
-        .catch(() => off);
+        .then((r) => (r.ok ? (r.json() as Promise<T>) : null))
+        .catch(() => null);
     Promise.all([
-      ask<{ enabled: boolean }>('/api/auth/cognito/config', { enabled: false }),
-      ask<SquawkConfig>('/api/auth/squawk/config', { enabled: false, owner: false }),
+      ask<{ enabled: boolean }>('/api/auth/cognito/config'),
+      ask<SquawkConfig>('/api/auth/squawk/config'),
     ]).then(([cognitoCfg, squawkCfg]) => {
       if (cancelled) return;
+      if (!cognitoCfg || !squawkCfg) {
+        setConfigFailed(true);
+        return;
+      }
       const plan = planSignIn({
         cognitoEnabled: cognitoCfg.enabled === true,
         squawkEnabled: squawkCfg.enabled === true,
@@ -211,14 +221,16 @@ export default function Login() {
 
       const data = await response.json();
 
-      // Debug logging
-      console.log('Login response:', data);
-      console.log('MFA required?', data.mfaRequired);
-      console.log('Success?', data.success);
+      // This deployment signs in through Cognito after all (the config said
+      // otherwise a moment ago): drop the password and go to the hosted page.
+      if (response.status === 410 && data.code === 'use_cognito') {
+        setPassword('');
+        window.location.assign(COGNITO_START);
+        return;
+      }
 
       // Check if MFA is required
       if (data.mfaRequired) {
-        console.log('Setting MFA required to true');
         setMfaRequired(true);
         setLoading(false);
         return;
@@ -290,7 +302,20 @@ export default function Login() {
             </p>
           </div>
 
-          {squawk === null ? (
+          {configFailed ? (
+            <div className="space-y-6">
+              <div className="rounded-lg bg-red-50 border border-red-200 p-4">
+                <p className="text-sm text-red-800 font-medium">Sign-in could not be loaded. Check your connection.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="w-full flex justify-center py-3 px-4 border border-transparent text-base font-semibold rounded-lg text-white bg-royal hover:bg-navy focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-royal transition-all shadow-lg"
+              >
+                Try again
+              </button>
+            </div>
+          ) : squawk === null ? (
             // Which sign-in runs here is not known yet. Show no form until it
             // is: under Cognito a password must never be typed into this page,
             // and the form would otherwise flash before the browser leaves.

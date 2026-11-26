@@ -57,3 +57,13 @@ export async function deleteUserSession(sid: string, orgId: number): Promise<str
   );
   return result.rows[0]?.sid ?? null;
 }
+
+/**
+ * End every app session an account holds (it was deleted, its role changed,
+ * or its authenticator was reset): a session carries the role it was given at
+ * sign-in for up to 24 hours otherwise. Returns how many rows went.
+ */
+export async function deleteSessionsForUser(userid: number | string): Promise<number> {
+  const result = await pool.query("DELETE FROM user_sessions WHERE sess->>'userId' = $1", [String(userid)]);
+  return result.rowCount ?? 0;
+}

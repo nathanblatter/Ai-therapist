@@ -37,6 +37,7 @@ import {
   AdminDeleteUserCommand,
   AdminGetUserCommand,
   AdminSetUserMFAPreferenceCommand,
+  AdminUserGlobalSignOutCommand,
   AssociateSoftwareTokenCommand,
   VerifySoftwareTokenCommand,
   type AttributeType,
@@ -325,4 +326,10 @@ export async function setTotpEnabled(username: string, enabled: boolean): Promis
       SoftwareTokenMfaSettings: { Enabled: enabled, PreferredMfa: enabled },
     }),
   );
+}
+
+/** Revoke the refresh tokens the pool has issued to this user (the app keeps
+ *  none, but the hosted page's own session rides on them). */
+export async function globalSignOut(username: string): Promise<void> {
+  await call('AdminUserGlobalSignOut', new AdminUserGlobalSignOutCommand(target(username)));
 }

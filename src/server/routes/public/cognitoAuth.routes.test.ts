@@ -14,6 +14,8 @@ vi.stubEnv('COGNITO_DOMAIN', 'https://study-test.auth.us-west-1.amazoncognito.co
 vi.stubEnv('APP_URL', 'https://app.test');
 
 const dbMocks = vi.hoisted(() => ({
+  getCognitoTotpEnrolledAt: vi.fn(),
+  setCognitoTotpEnrolledAt: vi.fn(),
   getUserByCognitoSub: vi.fn(),
   getUserById: vi.fn(),
   getUserByUsernameForCognito: vi.fn(),
@@ -42,6 +44,8 @@ const adminMocks = vi.hoisted(() => ({
 }));
 vi.mock('../../services/cognitoAdmin.service.js', () => adminMocks);
 vi.mock('../../services/mfa.service.js', () => ({ generateQRCode: vi.fn() }));
+const emailMocks = vi.hoisted(() => ({ clearEmailIfIneligible: vi.fn() }));
+vi.mock('../../services/researcherEmail.service.js', () => emailMocks);
 
 const { CognitoError } = await import('../../services/cognito.service.js');
 const { default: cognitoAuthRoutes } = await import('./cognitoAuth.routes.js');
@@ -111,6 +115,7 @@ beforeEach(() => {
   dbMocks.getUserByCognitoSub.mockResolvedValue(row());
   dbMocks.getUserByUsernameForCognito.mockResolvedValue(null);
   adminMocks.getTotpEnabled.mockResolvedValue(true);
+  dbMocks.getCognitoTotpEnrolledAt.mockResolvedValue(null);
 });
 
 describe('GET /api/auth/cognito/config', () => {
@@ -229,6 +234,8 @@ describe('GET /api/auth/cognito/callback', () => {
     const { agent, state } = await started();
     const res = await agent.get('/api/auth/cognito/callback').query({ code: 'c1', state });
     expect(dbMocks.syncRoleFromCognito).toHaveBeenCalledWith(7, 'therapist');
+    // The same rule a role change in User Management applies.
+    expect(emailMocks.clearEmailIfIneligible).toHaveBeenCalledWith(7, 'therapist');
     expect(res.headers.location).toBe('/admin');
     expect((await agent.get('/test/session')).body.userRole).toBe('therapist');
   });
@@ -298,6 +305,18 @@ describe('GET /api/auth/cognito/callback', () => {
     const { agent, state } = await started();
     const res = await agent.get('/api/auth/cognito/callback').query({ code: 'c1', state });
     expect(res.headers.location).toBe('/login?error=server_error');
+    expect((await agent.get('/test/session')).body.userId).toBeNull();
+  });
+});
+
+describe('pool username and local username', () => {
+  it('refuses a row found by its subject whose username no longer matches the pool username', async () => {
+    // Every later pool call (the authenticator check, a reset) is addressed by
+    // username: a mismatch would check another pool user, or none.
+    dbMocks.getUserByCognitoSub.mockResolvedValue(row({ username: 'renamed_locally' }));
+    const { agent, state } = await started();
+    const res = await agent.get('/api/auth/cognito/callback').query({ code: 'c1', state });
+    expect(res.headers.location).toBe('/login?error=no_account');
     expect((await agent.get('/test/session')).body.userId).toBeNull();
   });
 });

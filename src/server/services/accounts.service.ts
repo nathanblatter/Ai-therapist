@@ -24,6 +24,9 @@ import {
   setSquawkUserId,
   setCognitoSub,
   replaceCognitoSub,
+  setCognitoTotpEnrolledAt,
+  getUserByUsernameForCognito,
+  deleteSessionsForUser,
   type CreateUserOptions,
   type UserRow,
 } from '../db/index.js';
@@ -31,6 +34,7 @@ import * as squawk from './squawk.service.js';
 import * as cognito from './cognito.service.js';
 import * as cognitoAdmin from './cognitoAdmin.service.js';
 import { clearEmailIfIneligible } from './researcherEmail.service.js';
+import { requiresSecondFactor } from '../../shared/roles.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('accounts');
@@ -41,7 +45,7 @@ export class AccountSyncError extends Error {
     public readonly cause?: unknown,
     /** Set when the provider refused the password itself (the person can fix
      *  that by choosing another); routes answer 400 instead of 502. */
-    public readonly code?: 'password_rejected',
+    public readonly code?: 'password_rejected' | 'not_staff',
   ) {
     super(message);
     this.name = 'AccountSyncError';
@@ -59,6 +63,19 @@ function provider(): 'cognito' | 'squawk' | null {
   if (cognito.enabled()) return 'cognito';
   if (squawk.enabled()) return 'squawk';
   return null;
+}
+
+/** End the app sessions an account holds. A session keeps the role it was
+ *  given at sign-in for up to a day, so an account that was deleted, changed
+ *  role or had its authenticator reset must not keep one. Never throws: the
+ *  account change it follows has already happened. */
+async function endSessions(userid: number | string, why: string): Promise<void> {
+  try {
+    const ended = await deleteSessionsForUser(userid);
+    if (ended > 0) log.info({ userid, ended }, `app sessions ended: ${why}`);
+  } catch (err) {
+    log.error({ err, userid }, `could not end app sessions after: ${why}`);
+  }
 }
 
 function isPoolError(err: unknown, code: cognitoAdmin.CognitoAdminErrorCode): boolean {
@@ -144,7 +161,10 @@ async function updateInPool(userid: number | string, updates: AccountUpdates): P
     throw new Error('Username cannot be changed');
   }
   const updated = await updateUser(userid, updates as Record<string, string>);
-  if (updates.role !== undefined) await clearEmailIfIneligible(userid, updates.role);
+  if (updates.role !== undefined) {
+    await clearEmailIfIneligible(userid, updates.role);
+    await endSessions(userid, 'role change');
+  }
   if (updates.password === undefined && updates.role === undefined) return updated;
   const username = current?.username ?? updated.username;
   try {
@@ -158,6 +178,7 @@ async function updateInPool(userid: number | string, updates: AccountUpdates): P
         // with the role the row holds after this update.
         return await moveIntoPool(updated, username, updates.password);
       }
+      await relinkIfPoolUserChanged(updated.userid, username);
     }
     if (updates.role !== undefined) await cognitoAdmin.setRole(username, updates.role);
   } catch (err) {
@@ -173,6 +194,24 @@ async function updateInPool(userid: number | string, updates: AccountUpdates): P
   return updated;
 }
 
+/** A pool user that was deleted and made again under the same username has a
+ *  new subject, and sign-in refuses a row linked to the old one. A password
+ *  reset is how a researcher repairs an account, so repair the link then.
+ *  Never throws: the password change it follows has succeeded. */
+async function relinkIfPoolUserChanged(userid: number | string, username: string): Promise<void> {
+  try {
+    const [sub, row] = await Promise.all([cognitoAdmin.getUserSub(username), getUserByUsernameForCognito(username)]);
+    if (sub && row && row.cognito_sub !== sub) {
+      await replaceCognitoSub(userid, sub);
+      // A re-made pool user has no authenticator; any recorded enrolment is stale.
+      await setCognitoTotpEnrolledAt(userid, null);
+      log.info({ userid }, 'local row relinked to a re-created pool user');
+    }
+  } catch (err) {
+    log.warn({ err, userid }, 'could not check the pool subject after a password change');
+  }
+}
+
 /** Create the pool user for a row that existed before the pool (or whose pool
  *  user is gone), from a password that was just set for it, and link the row.
  *  Errors propagate to updateInPool's handler; the local row is never removed
@@ -182,8 +221,10 @@ async function moveIntoPool(user: UserRow, username: string, password: string): 
   log.info({ userid: user.userid, role: user.role }, 'account created in the Cognito pool on a password change');
   if (!sub) return user;
   try {
-    // Any subject the row held is of a pool user that no longer exists.
+    // Any subject the row held is of a pool user that no longer exists, and
+    // so is any authenticator enrolment recorded for it.
     await replaceCognitoSub(user.userid, sub);
+    await setCognitoTotpEnrolledAt(user.userid, null);
   } catch (err) {
     log.warn({ err, userid: user.userid }, 'could not record the pool subject of a moved account');
     return user;
@@ -201,6 +242,9 @@ export async function resetAuthenticator(userid: number | string): Promise<UserR
   if (provider() !== 'cognito') {
     throw new AccountSyncError('Authenticator apps are not managed by the sign-in service in this deployment');
   }
+  if (!requiresSecondFactor(user.role)) {
+    throw new AccountSyncError('Only staff accounts sign in with an authenticator app', undefined, 'not_staff');
+  }
   try {
     await cognitoAdmin.setTotpEnabled(user.username, false);
   } catch (err) {
@@ -210,6 +254,15 @@ export async function resetAuthenticator(userid: number | string): Promise<UserR
     }
     throw new AccountSyncError('Sign-in service rejected the change', err);
   }
+  // The reset is done. What follows closes what the old authenticator opened;
+  // a failure here is logged, not surfaced as "reset failed".
+  await setCognitoTotpEnrolledAt(user.userid, null).catch((err: unknown) =>
+    log.error({ err, userid }, 'could not clear the authenticator enrolment time'),
+  );
+  await cognitoAdmin
+    .globalSignOut(user.username)
+    .catch((err: unknown) => log.warn({ err, userid }, 'could not revoke the pool tokens of a reset account'));
+  await endSessions(user.userid, 'authenticator reset');
   return user;
 }
 
@@ -227,7 +280,10 @@ export async function updateAccount(userid: number | string, updates: AccountUpd
   const updated = await updateUser(userid, updates as Record<string, string>);
   // Leaving the staff roles drops the account's email (participants are
   // anonymous; ai-therapist-283).
-  if (updates.role !== undefined) await clearEmailIfIneligible(userid, updates.role);
+  if (updates.role !== undefined) {
+    await clearEmailIfIneligible(userid, updates.role);
+    await endSessions(userid, 'role change');
+  }
   if (!linked) return updated;
   try {
     if (updates.password !== undefined) await squawk.setPassword(linked, updates.password);
@@ -244,6 +300,7 @@ export async function updateAccount(userid: number | string, updates: AccountUpd
  *  registered again. An account the pool never had is not an error. */
 async function removeFromPool(userid: number | string): Promise<UserRow> {
   const deleted = await deleteUser(userid);
+  await endSessions(userid, 'account deleted');
   try {
     await cognitoAdmin.deleteUser(deleted.username);
   } catch (err) {
@@ -264,6 +321,7 @@ export async function removeAccount(userid: number | string): Promise<UserRow> {
   if (via === 'cognito') return removeFromPool(userid);
   const current = via === 'squawk' ? await getUserById(userid) : null;
   const deleted = await deleteUser(userid);
+  await endSessions(userid, 'account deleted');
   if (current?.squawk_user_id) {
     try {
       await squawk.deleteUser(current.squawk_user_id);

@@ -83,6 +83,8 @@ aws cognito-idp create-user-pool-domain --region "$REGION" --user-pool-id "$POOL
 
 echo "==> app client"
 # A server-side client with a secret: only this app's backend exchanges codes.
+# No direct password flows on the client (ALLOW_REFRESH_TOKEN_AUTH only):
+# sign-in is the hosted page's authorization-code flow and nothing else.
 # aws.cognito.signin.user.admin lets the backend enrol an authenticator app for
 # the staff member who just signed in (the hosted page does not offer setup
 # while a second factor is optional in the pool).
@@ -92,6 +94,7 @@ CLIENT_JSON="$(aws cognito-idp create-user-pool-client --region "$REGION" --user
   --supported-identity-providers COGNITO \
   --allowed-o-auth-flows-user-pool-client \
   --allowed-o-auth-flows code \
+  --explicit-auth-flows ALLOW_REFRESH_TOKEN_AUTH \
   --allowed-o-auth-scopes openid aws.cognito.signin.user.admin \
   --callback-urls "$APP_URL/api/auth/cognito/callback" \
   --logout-urls "$APP_URL/login" \

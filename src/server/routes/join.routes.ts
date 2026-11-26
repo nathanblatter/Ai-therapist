@@ -29,7 +29,8 @@ import {
   deleteSandboxOrganization,
 } from '../db/index.js';
 import { seedSandboxCaseload } from '../services/sandboxSeed.js';
-import { isCareTeamRole } from '../../shared/roles.js';
+import { isCareTeamRole, requiresSecondFactor } from '../../shared/roles.js';
+import * as cognito from '../services/cognito.service.js';
 import { MIN_PASSWORD_LENGTH, passwordPolicyError } from '../utils/passwordPolicy.js';
 import {
   MIN_USERNAME_LENGTH,
@@ -38,6 +39,15 @@ import {
   usernamePolicyError,
 } from '../utils/usernamePolicy.js';
 import { registerAccount, removeAccount } from '../services/accounts.service.js';
+
+/** With Cognito signing people in, a staff account gets an app session only
+ *  from a verified sign-in that used an authenticator code
+ *  (cognitoAuth.routes.ts). A join route that stamped the session itself
+ *  would hand out a staff session on a password alone, so for those roles it
+ *  creates the account and sends the person to sign in. */
+function mustSignInAtProvider(role: string): boolean {
+  return cognito.enabled() && requiresSecondFactor(role);
+}
 
 import { createLogger } from '../utils/logger.js';
 
@@ -115,7 +125,9 @@ function registrationPage(opts: RegistrationPageOptions): string {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
-        location.href = ${JSON.stringify(opts.redirectTo)};
+        // Staff accounts on a Cognito deployment are created here but sign in
+        // (and set up their authenticator app) on the sign-in page.
+        location.href = data.signInRequired ? '/login' : ${JSON.stringify(opts.redirectTo)};
         return;
       }
       errorEl.textContent = data.error || 'Registration failed. Please try again.';
@@ -313,6 +325,14 @@ export default function joinRoutes(): Router {
         return res.status(500).json({ error: 'Registration failed' });
       }
 
+      if (mustSignInAtProvider(user.role)) {
+        return res.json({
+          success: true,
+          signInRequired: true,
+          user: { userid: user.userid, username: user.username, role: user.role },
+        });
+      }
+
       // Establish the session, mirroring login (incl. org/sandbox stamps).
       req.session.userId = user.userid;
       req.session.username = user.username;
@@ -485,6 +505,14 @@ export default function joinRoutes(): Router {
         }
         await release();
         return res.status(500).json({ error: 'Could not assemble the sandbox. Please try again.' });
+      }
+
+      if (mustSignInAtProvider(user.role)) {
+        return res.json({
+          success: true,
+          signInRequired: true,
+          user: { userid: user.userid, username: user.username, role: user.role },
+        });
       }
 
       // Establish the session, mirroring login (incl. org/sandbox stamps).

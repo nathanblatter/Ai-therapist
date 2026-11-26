@@ -321,16 +321,32 @@ export default function usersRoutes(): Router {
   // off in the sign-in service so their next sign-in enrols a new one
   // (ai-therapist-396). Cognito deployments only.
   router.post('/api/users/:userid/reset-authenticator', requireRole('researcher'), async (req, res) => {
+    // A reset opens an account to whoever knows its password until the owner
+    // enrols again, so this is not a request another site may make for a
+    // signed-in researcher: a cross-site form cannot send JSON.
+    if (!req.is('application/json')) {
+      return res.status(415).json({ error: 'Send this request as JSON' });
+    }
     try {
+      // Same reach as the user list: accounts in the researcher's own organisation.
+      const target = await getUserById(req.params.userid);
+      const callerOrg = await orgIdFor(req);
+      if (!target || callerOrg === null || target.organization_id !== callerOrg) {
+        return res.status(404).json({ error: 'User not found' });
+      }
       const user = await resetAuthenticator(req.params.userid);
-      log.info({ userid: user.userid, by: req.session.userId }, 'authenticator app reset by a researcher');
+      log.warn(
+        { userid: user.userid, username: user.username, by: req.session.userId, byUsername: req.session.username },
+        'authenticator app reset by a researcher',
+      );
       res.json({ success: true, user: { userid: user.userid, username: user.username, role: user.role } });
     } catch (error: unknown) {
       if (error instanceof Error && error.message === 'User not found') {
         return res.status(404).json({ error: 'User not found' });
       }
       if (error instanceof Error && error.name === 'AccountSyncError') {
-        return res.status(502).json({ error: error.message });
+        const notStaff = (error as { code?: string }).code === 'not_staff';
+        return res.status(notStaff ? 400 : 502).json({ error: error.message });
       }
       log.error({ err: error }, 'Error resetting an authenticator app');
       res.status(500).json({ error: 'Failed to reset the authenticator app' });

@@ -12,6 +12,9 @@ const db = vi.hoisted(() => ({
   setSquawkUserId: vi.fn(),
   setCognitoSub: vi.fn(),
   replaceCognitoSub: vi.fn(),
+  setCognitoTotpEnrolledAt: vi.fn(),
+  getUserByUsernameForCognito: vi.fn(),
+  deleteSessionsForUser: vi.fn(),
 }));
 vi.mock('../db/index.js', () => db);
 
@@ -57,6 +60,7 @@ const pool = vi.hoisted(() => {
     deleteUser: vi.fn(),
     getUserSub: vi.fn(),
     setTotpEnabled: vi.fn(),
+    globalSignOut: vi.fn(),
   };
 });
 vi.mock('./cognitoAdmin.service.js', () => pool);
@@ -99,6 +103,11 @@ beforeEach(() => {
   db.getUserById.mockResolvedValue({ ...ROW });
   db.setCognitoSub.mockResolvedValue(undefined);
   db.replaceCognitoSub.mockResolvedValue(undefined);
+  db.setCognitoTotpEnrolledAt.mockResolvedValue(undefined);
+  db.getUserByUsernameForCognito.mockResolvedValue(null);
+  db.deleteSessionsForUser.mockResolvedValue(0);
+  pool.getUserSub.mockResolvedValue(null);
+  pool.globalSignOut.mockResolvedValue(undefined);
   db.setSquawkUserId.mockResolvedValue(undefined);
   email.clearEmailIfIneligible.mockResolvedValue(undefined);
   pool.createUser.mockResolvedValue({ sub: 'sub-123' });
@@ -350,11 +359,27 @@ describe('Cognito configured', () => {
 });
 
 describe('resetAuthenticator', () => {
-  it('switches the code challenge off in the pool for the account', async () => {
-    cognito.enabled.mockReturnValue(true);
+  const STAFF = { userid: 7, username: 'dr_one', role: 'therapist' };
+  beforeEach(() => {
+    db.getUserById.mockResolvedValue({ ...STAFF });
     pool.setTotpEnabled.mockResolvedValue(undefined);
-    await expect(resetAuthenticator(7)).resolves.toMatchObject({ userid: 7, username: 'p_one' });
-    expect(pool.setTotpEnabled).toHaveBeenCalledWith('p_one', false);
+  });
+
+  it('switches the challenge off, forgets the enrolment, revokes pool tokens and ends app sessions', async () => {
+    cognito.enabled.mockReturnValue(true);
+    await expect(resetAuthenticator(7)).resolves.toMatchObject({ userid: 7, username: 'dr_one' });
+    expect(pool.setTotpEnabled).toHaveBeenCalledWith('dr_one', false);
+    expect(db.setCognitoTotpEnrolledAt).toHaveBeenCalledWith(7, null);
+    expect(pool.globalSignOut).toHaveBeenCalledWith('dr_one');
+    expect(db.deleteSessionsForUser).toHaveBeenCalledWith(7);
+  });
+
+  it('is refused for an account that is not staff, before the pool is touched', async () => {
+    cognito.enabled.mockReturnValue(true);
+    db.getUserById.mockResolvedValue({ ...ROW });
+    await expect(resetAuthenticator(7)).rejects.toMatchObject({ name: 'AccountSyncError', code: 'not_staff' });
+    expect(pool.setTotpEnabled).not.toHaveBeenCalled();
+    expect(db.deleteSessionsForUser).not.toHaveBeenCalled();
   });
 
   it('is refused when Cognito is not the provider', async () => {
@@ -372,6 +397,74 @@ describe('resetAuthenticator', () => {
     await expect(resetAuthenticator(7)).rejects.toThrow(NOT_IN_POOL_MESSAGE);
     pool.setTotpEnabled.mockRejectedValueOnce(new pool.CognitoAdminError('failed'));
     await expect(resetAuthenticator(7)).rejects.toMatchObject({ name: 'AccountSyncError' });
+    // Nothing after the failed pool call ran.
+    expect(db.deleteSessionsForUser).not.toHaveBeenCalled();
+  });
+
+  it('a failure after the reset (token revocation, session cleanup) does not undo or fail it', async () => {
+    cognito.enabled.mockReturnValue(true);
+    pool.globalSignOut.mockRejectedValue(new pool.CognitoAdminError('failed'));
+    db.deleteSessionsForUser.mockRejectedValue(new Error('db down'));
+    db.setCognitoTotpEnrolledAt.mockRejectedValue(new Error('db down'));
+    await expect(resetAuthenticator(7)).resolves.toMatchObject({ userid: 7 });
+  });
+});
+
+describe('app sessions end with the account change that outdates them (review C5)', () => {
+  it.each([
+    ['no provider', () => {}],
+    ['Cognito', () => cognito.enabled.mockReturnValue(true)],
+  ])("a role change ends the account's sessions (%s)", async (_label, setUp) => {
+    setUp();
+    await updateAccount(7, { role: 'therapist' });
+    expect(db.deleteSessionsForUser).toHaveBeenCalledWith(7);
+  });
+
+  it.each([
+    ['no provider', () => {}],
+    ['Cognito', () => cognito.enabled.mockReturnValue(true)],
+  ])("a deletion ends the account's sessions (%s)", async (_label, setUp) => {
+    setUp();
+    await removeAccount(7);
+    expect(db.deleteSessionsForUser).toHaveBeenCalledWith(7);
+  });
+
+  it('a password change alone does not', async () => {
+    cognito.enabled.mockReturnValue(true);
+    await updateAccount(7, { password: 'another passphrase' });
+    expect(db.deleteSessionsForUser).not.toHaveBeenCalled();
+  });
+
+  it('a failed session cleanup does not fail the change', async () => {
+    db.deleteSessionsForUser.mockRejectedValue(new Error('db down'));
+    await expect(updateAccount(7, { role: 'therapist' })).resolves.toMatchObject({ userid: 7 });
+    await expect(removeAccount(7)).resolves.toMatchObject({ userid: 7 });
+  });
+});
+
+describe('a pool user re-created under the same username (review C7)', () => {
+  beforeEach(() => cognito.enabled.mockReturnValue(true));
+
+  it('a password reset relinks the row to the new subject and forgets the old enrolment', async () => {
+    pool.getUserSub.mockResolvedValue('sub-new');
+    db.getUserByUsernameForCognito.mockResolvedValue({ ...ROW, cognito_sub: 'sub-old' });
+    await updateAccount(7, { password: 'another passphrase' });
+    expect(db.replaceCognitoSub).toHaveBeenCalledWith(7, 'sub-new');
+    expect(db.setCognitoTotpEnrolledAt).toHaveBeenCalledWith(7, null);
+  });
+
+  it('leaves a row alone when the subject matches, or the pool reports none', async () => {
+    pool.getUserSub.mockResolvedValue('sub-same');
+    db.getUserByUsernameForCognito.mockResolvedValue({ ...ROW, cognito_sub: 'sub-same' });
+    await updateAccount(7, { password: 'another passphrase' });
+    pool.getUserSub.mockResolvedValue(null);
+    await updateAccount(7, { password: 'another passphrase' });
+    expect(db.replaceCognitoSub).not.toHaveBeenCalled();
+  });
+
+  it('a failed check does not fail the password change', async () => {
+    pool.getUserSub.mockRejectedValue(new pool.CognitoAdminError('failed'));
+    await expect(updateAccount(7, { password: 'another passphrase' })).resolves.toMatchObject({ userid: 7 });
   });
 });
 

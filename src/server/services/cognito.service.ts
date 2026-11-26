@@ -144,6 +144,8 @@ export interface CognitoClaims {
   aud: string;
   token_use: string;
   nonce?: string;
+  /** When the person authenticated at the hosted page (seconds). */
+  auth_time?: number;
   'cognito:username'?: string;
   'cognito:groups'?: string[];
   iat: number;
