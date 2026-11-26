@@ -17,6 +17,7 @@ export * from './studyStatus.queries.js';
 export * from './health.queries.js';
 export * from './contentRetention.queries.js';
 export * from './userSessions.queries.js';
+export * from './accountAudit.queries.js';
 export * from './crisis.queries.js';
 export * from './redaction.queries.js';
 export * from './accessLog.queries.js';

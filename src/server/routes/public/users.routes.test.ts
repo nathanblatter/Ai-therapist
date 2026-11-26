@@ -21,6 +21,8 @@ const dbMocks = vi.hoisted(() => ({
   setUserEmail: vi.fn(),
   findUserByEmail: vi.fn(),
   listEmailsWithPrefix: vi.fn(),
+  insertAccountAudit: vi.fn(),
+  listAccountAudit: vi.fn(),
 }));
 vi.mock('../../db/index.js', () => dbMocks);
 vi.mock('../../utils/sessionHelpers.js', () => ({
@@ -289,5 +291,129 @@ describe('a researcher reaches accounts in their own organisation only (ai-thera
       .put('/api/users/4242')
       .send({ password: 'a long enough passphrase' });
     expect(put.status).toBe(200);
+  });
+});
+
+describe('account changes are written to the audit trail (ai-therapist-411)', () => {
+  // appAs('researcher') is user 4242 "someone" in organisation 1.
+  const audited = () => dbMocks.insertAccountAudit.mock.calls.map((c) => c[0]);
+  const TARGET = { userid: 5, username: 'u5', role: 'participant', organization_id: 1 };
+
+  beforeEach(() => {
+    dbMocks.getUserById.mockResolvedValue(TARGET);
+    dbMocks.updateUser.mockResolvedValue({ ...TARGET });
+  });
+
+  it('a save that changes nothing but the password records the password change only', async () => {
+    // The form sends the same username and role with every save.
+    const res = await request(appAs('researcher'))
+      .put('/api/users/5')
+      .send({ username: 'u5', role: 'participant', password: 'a long enough passphrase' });
+    expect(res.status).toBe(200);
+    expect(audited()).toEqual([
+      expect.objectContaining({
+        action: 'password_changed',
+        targetUserId: 5,
+        targetUsername: 'u5',
+        organizationId: 1,
+        actorUserId: 4242,
+        actorUsername: 'someone',
+      }),
+    ]);
+    // Never the password itself.
+    expect(JSON.stringify(audited())).not.toContain('a long enough passphrase');
+  });
+
+  it('a role change records the role before and after', async () => {
+    dbMocks.updateUser.mockResolvedValue({ ...TARGET, role: 'therapist' });
+    await request(appAs('researcher')).put('/api/users/5').send({ username: 'u5', role: 'therapist' });
+    expect(audited()).toEqual([
+      expect.objectContaining({ action: 'role_changed', detail: { from: 'participant', to: 'therapist' } }),
+    ]);
+  });
+
+  it("a rename records both names, and a self password change is marked as the person's own", async () => {
+    dbMocks.updateUser.mockResolvedValue({ ...TARGET, username: 'u5b' });
+    await request(appAs('researcher')).put('/api/users/5').send({ username: 'u5b' });
+    expect(audited()[0]).toMatchObject({ action: 'username_changed', detail: { from: 'u5', to: 'u5b' } });
+
+    dbMocks.insertAccountAudit.mockClear();
+    dbMocks.getUserById.mockResolvedValue({
+      userid: 4242,
+      username: 'someone',
+      role: 'participant',
+      organization_id: 1,
+    });
+    dbMocks.updateUser.mockResolvedValue({ userid: 4242, username: 'someone', role: 'participant' });
+    await request(appAs('participant')).put('/api/users/4242').send({ password: 'a long enough passphrase' });
+    expect(audited()).toEqual([
+      expect.objectContaining({
+        action: 'password_changed',
+        actorUserId: 4242,
+        targetUserId: 4242,
+        detail: { self: true },
+      }),
+    ]);
+  });
+
+  it('an email change records that an address was set or cleared, not the address', async () => {
+    dbMocks.getUserById.mockResolvedValue({ userid: 5, username: 'ra', role: 'researcher', organization_id: 1 });
+    dbMocks.findUserByEmail.mockResolvedValue(null);
+    dbMocks.setUserEmail.mockResolvedValue({
+      userid: 5,
+      username: 'ra',
+      role: 'researcher',
+      email: 'ra@byuisresearch.com',
+    });
+    await request(appAs('researcher')).put('/api/users/5').send({ email: 'ra@byuisresearch.com' });
+    const rows = audited().filter((r) => r.action === 'email_changed');
+    expect(rows).toEqual([expect.objectContaining({ detail: { set: true } })]);
+    expect(JSON.stringify(audited())).not.toContain('byuisresearch.com');
+  });
+
+  it('a creation and a deletion are recorded with the role', async () => {
+    dbMocks.createUser.mockResolvedValue({ userid: 9, username: 'new_p', role: 'participant', organization_id: 1 });
+    await request(appAs('researcher'))
+      .post('/api/users')
+      .send({ username: 'new_p', password: 'a long enough passphrase', role: 'participant' });
+    expect(audited()[0]).toMatchObject({
+      action: 'account_created',
+      targetUserId: 9,
+      detail: { role: 'participant', via: 'user_management' },
+    });
+
+    dbMocks.insertAccountAudit.mockClear();
+    dbMocks.deleteUser.mockResolvedValue({ userid: 5, username: 'u5' });
+    await request(appAs('researcher')).delete('/api/users/5');
+    expect(audited()).toEqual([
+      expect.objectContaining({
+        action: 'account_deleted',
+        targetUserId: 5,
+        targetUsername: 'u5',
+        detail: { role: 'participant' },
+      }),
+    ]);
+  });
+
+  it('nothing is recorded for a refused change', async () => {
+    dbMocks.getUserById.mockResolvedValue({ ...TARGET, organization_id: 2 });
+    await request(appAs('researcher')).put('/api/users/5').send({ role: 'therapist' });
+    await request(appAs('researcher')).delete('/api/users/5');
+    await request(appAs('therapist')).put('/api/users/5').send({ password: 'a long enough passphrase' });
+    expect(dbMocks.insertAccountAudit).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/users/audit', () => {
+  it('is researcher-only and returns the caller\'s own organisation, not an account called "audit"', async () => {
+    dbMocks.listAccountAudit.mockResolvedValue([{ audit_id: 1, action: 'role_changed' }]);
+    for (const role of ['therapist', 'caseworker', 'participant']) {
+      expect((await request(appAs(role)).get('/api/users/audit')).status).toBe(403);
+    }
+    const res = await request(appAs('researcher')).get('/api/users/audit?limit=25');
+    expect(res.status).toBe(200);
+    expect(res.body.audit).toEqual([{ audit_id: 1, action: 'role_changed' }]);
+    expect(dbMocks.listAccountAudit).toHaveBeenCalledWith(1, 25);
+    expect(dbMocks.getUserById).not.toHaveBeenCalled();
   });
 });

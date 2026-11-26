@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { requireRole } from '../../middleware/auth.js';
-import { verifyCredentials } from '../../db/index.js';
+import { insertAccountAudit, verifyCredentials } from '../../db/index.js';
 import { passwordPolicyError } from '../../utils/passwordPolicy.js';
 import { registerAccount } from '../../services/accounts.service.js';
 import { enabled as squawkEnabled } from '../../services/squawk.service.js';
@@ -147,6 +147,15 @@ export default function authRoutes(): Router {
 
     try {
       const user = await registerAccount(username, password, role);
+      await insertAccountAudit({
+        action: 'account_created',
+        targetUserId: user.userid,
+        targetUsername: user.username,
+        organizationId: user.organization_id ?? req.session.orgId ?? null,
+        actorUserId: req.session.userId ?? null,
+        actorUsername: req.session.username ?? null,
+        detail: { role: user.role, via: 'register' },
+      });
       res.json({
         success: true,
         user: { userid: user.userid, username: user.username, role: user.role },

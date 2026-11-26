@@ -11,6 +11,7 @@ import request from 'supertest';
 const dbMocks = vi.hoisted(() => ({
   verifyCredentials: vi.fn(),
   createUser: vi.fn(),
+  insertAccountAudit: vi.fn(),
 }));
 vi.mock('../../db/index.js', () => dbMocks);
 
@@ -159,6 +160,12 @@ describe('POST /api/auth/register validation', () => {
       .send({ username: 'newuser', password: 'twelvechars!', role: 'participant' });
     expect(res.status).toBe(200);
     expect(dbMocks.createUser).toHaveBeenCalledWith('newuser', 'twelvechars!', 'participant');
+    // The creation is in the audit trail, with the researcher as the actor
+    // and no password anywhere in the row.
+    expect(dbMocks.insertAccountAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'account_created', targetUserId: 5, targetUsername: 'newuser' }),
+    );
+    expect(JSON.stringify(dbMocks.insertAccountAudit.mock.calls)).not.toContain('twelvechars!');
   });
 
   it('maps the research-org caseworker rejection to a 400 with the db error message', async () => {
