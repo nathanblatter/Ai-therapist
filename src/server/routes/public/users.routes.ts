@@ -1,6 +1,6 @@
 // User management + per-user preferences (under /api/users).
 // Researcher-gated where noted; preferences/self routes only need auth.
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { orgIdFor } from '../../middleware/org.js';
 import { passwordPolicyError } from '../../utils/passwordPolicy.js';
@@ -18,6 +18,7 @@ import {
   getUserPreferences,
   updateUserPreferences,
   setUserPreferredTheme,
+  type UserRow,
   type VoicesConfig,
   type LanguagesConfig,
 } from '../../db/index.js';
@@ -48,6 +49,30 @@ const VALID_THEMES = ['default', 'sage', 'ocean', 'dusk', 'dark'];
 // 'demo' is deliberately absent — demo accounts are only minted by the magic
 // link, and an arbitrary role string would corrupt every role-keyed gate.
 const VALID_ROLES = ['therapist', 'researcher', 'participant', 'caseworker'];
+
+/**
+ * The account a request may act on by id, or null (answer 404). A researcher
+ * reaches the accounts of their own organisation and no others: the same
+ * reach as the user list (GET /api/users). Before 2026-11-26 the by-id routes
+ * checked the role only, so a researcher in one organisation could read,
+ * re-password, re-role or delete an account in another by guessing its id.
+ * Acting on your own account is always in reach. "Not found" and "not yours"
+ * get the same answer, so ids in other organisations cannot be probed.
+ */
+async function accountInReach(req: Request, userid: string): Promise<UserRow | null> {
+  const target = await getUserById(userid);
+  if (!target) return null;
+  if (target.userid === req.session.userId) return target;
+  const callerOrg = await orgIdFor(req);
+  if (callerOrg === null || target.organization_id !== callerOrg) {
+    log.warn(
+      { by: req.session.userId, target: target.userid, method: req.method },
+      'account access across organisations refused',
+    );
+    return null;
+  }
+  return target;
+}
 
 export default function usersRoutes(): Router {
   const router = Router();
@@ -188,7 +213,7 @@ export default function usersRoutes(): Router {
     }
 
     try {
-      const user = await getUserById(userid);
+      const user = await accountInReach(req, userid);
       if (!user) {
         return res.status(404).json({ error: 'User not found' });
       }
@@ -234,6 +259,9 @@ export default function usersRoutes(): Router {
     }
 
     try {
+      if (!isSelf && !(await accountInReach(req, userid))) {
+        return res.status(404).json({ error: 'User not found' });
+      }
       const updates: UserUpdates = {};
       if (username !== undefined) updates.username = username;
       if (password !== undefined) updates.password = password;
@@ -301,6 +329,9 @@ export default function usersRoutes(): Router {
   // (ai-therapist-283 phase 1). Idempotent; participants are refused.
   router.post('/api/users/:userid/provision-email', requireRole('researcher'), async (req, res) => {
     try {
+      if (!(await accountInReach(req, req.params.userid))) {
+        return res.status(404).json({ error: 'User not found' });
+      }
       const { user, address } = await provisionStudyAddress(req.params.userid);
       log.info({ userid: user.userid, by: req.session.userId, address }, 'study email address provisioned');
       res.json({
@@ -329,9 +360,7 @@ export default function usersRoutes(): Router {
     }
     try {
       // Same reach as the user list: accounts in the researcher's own organisation.
-      const target = await getUserById(req.params.userid);
-      const callerOrg = await orgIdFor(req);
-      if (!target || callerOrg === null || target.organization_id !== callerOrg) {
+      if (!(await accountInReach(req, req.params.userid))) {
         return res.status(404).json({ error: 'User not found' });
       }
       const user = await resetAuthenticator(req.params.userid);
@@ -356,6 +385,9 @@ export default function usersRoutes(): Router {
   router.delete('/api/users/:userid', requireRole('researcher'), async (req, res) => {
     const { userid } = req.params;
     try {
+      if (!(await accountInReach(req, userid))) {
+        return res.status(404).json({ error: 'User not found' });
+      }
       const deletedUser = await removeAccount(userid);
       res.json({ success: true, message: `User ${deletedUser.username} deleted successfully` });
     } catch (error: unknown) {

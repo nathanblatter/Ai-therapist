@@ -13,7 +13,7 @@
 //     calls). Compensating cleanup on any failure.
 // The raw token is never reflected into HTML (the page reads it from
 // location.pathname) and only its sha256 hash is ever compared in the DB.
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import rateLimit from 'express-rate-limit';
 import {
   findInviteByToken,
@@ -47,6 +47,36 @@ import { registerAccount, removeAccount } from '../services/accounts.service.js'
  *  creates the account and sends the person to sign in. */
 function mustSignInAtProvider(role: string): boolean {
   return cognito.enabled() && requiresSecondFactor(role);
+}
+
+/** Sign the new account in on a FRESH session id, as the login and the study
+ *  join do. Stamping the id the browser arrived with would let whoever planted
+ *  that id (session fixation) ride the new account's session, and would carry
+ *  over fields a previous account left on this browser. Resolves false when
+ *  the session could not be established; the account exists either way. */
+function signIn(
+  req: Request,
+  user: { userid: number; username: string; role: string; organization_id?: number | null },
+  isSandbox: boolean,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    req.session.regenerate((regenErr) => {
+      if (regenErr) {
+        log.error({ err: regenErr }, 'Session regenerate error');
+        return resolve(false);
+      }
+      req.session.userId = user.userid;
+      req.session.username = user.username;
+      req.session.userRole = user.role as typeof req.session.userRole;
+      req.session.mfaVerified = true;
+      if (typeof user.organization_id === 'number') req.session.orgId = user.organization_id;
+      req.session.isSandbox = isSandbox;
+      req.session.save((err) => {
+        if (err) log.error({ err }, 'Session save error');
+        resolve(!err);
+      });
+    });
+  });
 }
 
 import { createLogger } from '../utils/logger.js';
@@ -334,16 +364,9 @@ export default function joinRoutes(): Router {
       }
 
       // Establish the session, mirroring login (incl. org/sandbox stamps).
-      req.session.userId = user.userid;
-      req.session.username = user.username;
-      req.session.userRole = user.role;
-      req.session.mfaVerified = true;
-      if (typeof user.organization_id === 'number') req.session.orgId = user.organization_id;
-      req.session.isSandbox = user.is_sandbox === true;
-
-      req.session.save((err) => {
-        if (err) log.error({ err }, 'Session save error');
-      });
+      if (!(await signIn(req, user, user.is_sandbox === true))) {
+        return res.status(500).json({ error: 'Account created. Please log in from the home page.' });
+      }
 
       res.json({
         success: true,
@@ -516,16 +539,9 @@ export default function joinRoutes(): Router {
       }
 
       // Establish the session, mirroring login (incl. org/sandbox stamps).
-      req.session.userId = user.userid;
-      req.session.username = user.username;
-      req.session.userRole = user.role;
-      req.session.mfaVerified = true;
-      if (typeof user.organization_id === 'number') req.session.orgId = user.organization_id;
-      req.session.isSandbox = true;
-
-      req.session.save((err) => {
-        if (err) log.error({ err }, 'Session save error');
-      });
+      if (!(await signIn(req, user, true))) {
+        return res.status(500).json({ error: 'Account created. Please log in from the home page.' });
+      }
 
       res.json({
         success: true,

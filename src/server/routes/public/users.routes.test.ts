@@ -33,7 +33,7 @@ function appAs(role: string, userId = 4242) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    req.session = { userId, userRole: role, username: 'someone' } as unknown as typeof req.session;
+    req.session = { userId, userRole: role, username: 'someone', orgId: 1 } as unknown as typeof req.session;
     next();
   });
   app.use(usersRoutes());
@@ -46,6 +46,8 @@ beforeEach(() => {
   dbMocks.deleteUser.mockResolvedValue({ username: 'gone' });
   dbMocks.createUser.mockResolvedValue({ userid: 1, username: 'x', role: 'participant' });
   dbMocks.setUserPreferredTheme.mockResolvedValue(undefined);
+  // The account a by-id route acts on, in the caller's organisation (1).
+  dbMocks.getUserById.mockResolvedValue({ userid: 5, username: 'u5', role: 'participant', organization_id: 1 });
 });
 
 describe('demo write guard on /api/users (defense-in-depth)', () => {
@@ -122,7 +124,7 @@ describe('staff email (ai-therapist-283 phase 1)', () => {
   });
 
   it('a researcher can set a staff address through PUT', async () => {
-    dbMocks.getUserById.mockResolvedValue({ userid: 5, username: 'ra', role: 'researcher' });
+    dbMocks.getUserById.mockResolvedValue({ userid: 5, username: 'ra', role: 'researcher', organization_id: 1 });
     const res = await request(appAs('researcher')).put('/api/users/5').send({ email: 'RA@byuisresearch.com' });
     expect(res.status).toBe(200);
     expect(dbMocks.setUserEmail).toHaveBeenCalledWith(5, 'ra@byuisresearch.com');
@@ -136,7 +138,7 @@ describe('staff email (ai-therapist-283 phase 1)', () => {
   });
 
   it('participants never get an address', async () => {
-    dbMocks.getUserById.mockResolvedValue({ userid: 8, username: 'p8', role: 'participant' });
+    dbMocks.getUserById.mockResolvedValue({ userid: 8, username: 'p8', role: 'participant', organization_id: 1 });
     const res = await request(appAs('researcher')).put('/api/users/8').send({ email: 'p8@byuisresearch.com' });
     expect(res.status).toBe(403);
     const prov = await request(appAs('researcher')).post('/api/users/8/provision-email');
@@ -145,7 +147,7 @@ describe('staff email (ai-therapist-283 phase 1)', () => {
   });
 
   it('a rejected email leaves the rest of the edit unapplied', async () => {
-    dbMocks.getUserById.mockResolvedValue({ userid: 5, username: 'ra', role: 'researcher' });
+    dbMocks.getUserById.mockResolvedValue({ userid: 5, username: 'ra', role: 'researcher', organization_id: 1 });
     dbMocks.findUserByEmail.mockResolvedValue({ userid: 9, username: 'other', role: 'therapist' });
     const res = await request(appAs('researcher'))
       .put('/api/users/5')
@@ -161,6 +163,7 @@ describe('staff email (ai-therapist-283 phase 1)', () => {
       username: 'cw',
       role: 'caseworker',
       email: 'cw@byuisresearch.com',
+      organization_id: 1,
     });
     const res = await request(appAs('researcher')).put('/api/users/5').send({ username: 'cw', role: 'participant' });
     expect(res.status).toBe(200);
@@ -168,7 +171,7 @@ describe('staff email (ai-therapist-283 phase 1)', () => {
   });
 
   it('provision-email assigns <slug>@byuisresearch.com', async () => {
-    dbMocks.getUserById.mockResolvedValue({ userid: 5, username: 'Jane Doe', role: 'therapist' });
+    dbMocks.getUserById.mockResolvedValue({ userid: 5, username: 'Jane Doe', role: 'therapist', organization_id: 1 });
     const res = await request(appAs('researcher')).post('/api/users/5/provision-email');
     expect(res.status).toBe(200);
     expect(res.body.email).toBe('jane-doe@byuisresearch.com');
@@ -221,5 +224,70 @@ describe('POST /api/users/:userid/reset-authenticator (ai-therapist-396)', () =>
     const res = await post(researcherIn(3));
     expect(res.status).toBe(502);
     expect(res.body.error).toMatch(/not managed by the sign-in service/);
+  });
+});
+
+describe('a researcher reaches accounts in their own organisation only (ai-therapist-411)', () => {
+  // appAs() puts the caller in organisation 1.
+  const OTHER = { userid: 77, username: 'other_org_staff', role: 'therapist', organization_id: 2 };
+
+  beforeEach(() => {
+    dbMocks.getUserById.mockResolvedValue(OTHER);
+  });
+
+  it('cannot read an account in another organisation', async () => {
+    const res = await request(appAs('researcher')).get('/api/users/77');
+    expect(res.status).toBe(404);
+    expect(res.body.user).toBeUndefined();
+  });
+
+  it('cannot re-password, re-role or rename one', async () => {
+    for (const body of [{ password: 'a long enough passphrase' }, { role: 'participant' }, { username: 'mine_now' }]) {
+      const res = await request(appAs('researcher')).put('/api/users/77').send(body);
+      expect(res.status).toBe(404);
+    }
+    expect(dbMocks.updateUser).not.toHaveBeenCalled();
+  });
+
+  it('cannot delete one', async () => {
+    const res = await request(appAs('researcher')).delete('/api/users/77');
+    expect(res.status).toBe(404);
+    expect(dbMocks.deleteUser).not.toHaveBeenCalled();
+  });
+
+  it('cannot give one a study address', async () => {
+    const res = await request(appAs('researcher')).post('/api/users/77/provision-email').send({});
+    expect(res.status).toBe(404);
+    expect(dbMocks.setUserEmail).not.toHaveBeenCalled();
+  });
+
+  it('answers the same for an id that does not exist', async () => {
+    dbMocks.getUserById.mockResolvedValue(null);
+    expect((await request(appAs('researcher')).get('/api/users/999')).status).toBe(404);
+    expect((await request(appAs('researcher')).delete('/api/users/999')).status).toBe(404);
+    expect(dbMocks.deleteUser).not.toHaveBeenCalled();
+  });
+
+  it('still reaches an account in its own organisation', async () => {
+    dbMocks.getUserById.mockResolvedValue({ ...OTHER, organization_id: 1 });
+    expect((await request(appAs('researcher')).get('/api/users/77')).status).toBe(200);
+    const del = await request(appAs('researcher')).delete('/api/users/77');
+    expect(del.status).toBe(200);
+    expect(dbMocks.deleteUser).toHaveBeenCalled();
+  });
+
+  it('anyone can still read and edit their own account, whatever organisation the row says', async () => {
+    dbMocks.getUserById.mockResolvedValue({
+      userid: 4242,
+      username: 'someone',
+      role: 'participant',
+      organization_id: 9,
+    });
+    dbMocks.updateUser.mockResolvedValue({ userid: 4242, username: 'someone', role: 'participant' });
+    expect((await request(appAs('participant')).get('/api/users/4242')).status).toBe(200);
+    const put = await request(appAs('participant'))
+      .put('/api/users/4242')
+      .send({ password: 'a long enough passphrase' });
+    expect(put.status).toBe(200);
   });
 });

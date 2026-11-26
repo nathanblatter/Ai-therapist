@@ -46,10 +46,22 @@ vi.mock('../services/sandboxSeed.js', () => ({
 
 import joinRoutes from './join.routes.js';
 
-type FakeSession = Record<string, unknown> & { save: (cb?: (err?: unknown) => void) => void };
+type FakeSession = Record<string, unknown> & {
+  save: (cb?: (err?: unknown) => void) => void;
+  regenerate: (cb: (err?: unknown) => void) => void;
+};
 
 function makeApp() {
-  const session: FakeSession = { save: (cb) => cb?.() };
+  // regenerate() notes what the session held when it was called: a real one
+  // swaps in an empty session, so the account fields must be stamped after.
+  const session: FakeSession = {
+    save: (cb) => cb?.(),
+    regenerate: (cb) => {
+      session.regeneratedWithUserId = session.userId ?? null;
+      session.regenerations = ((session.regenerations as number | undefined) ?? 0) + 1;
+      cb();
+    },
+  };
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
@@ -385,6 +397,19 @@ describe('POST /join-sandbox/:token', () => {
     expect(session.userRole).toBe('caseworker');
     expect(session.orgId).toBe(9);
     expect(session.isSandbox).toBe(true);
+    // On a fresh session id, stamped only after the old one was dropped.
+    expect(session.regenerations).toBe(1);
+    expect(session.regeneratedWithUserId).toBeNull();
+  });
+
+  it('answers 500 and stamps nothing when the session cannot be regenerated (the account exists)', async () => {
+    const { app, session } = makeApp();
+    session.regenerate = (cb) => cb(new Error('store down'));
+    const res = await request(app).post('/join-sandbox/raw-tok').send(GOOD_BODY);
+    expect(res.status).toBe(500);
+    expect(res.body.error).toMatch(/log in/i);
+    expect(session.userId).toBeUndefined();
+    expect(mocks.createUser).toHaveBeenCalled();
   });
 
   it('410s on a dead invite without creating anything', async () => {
