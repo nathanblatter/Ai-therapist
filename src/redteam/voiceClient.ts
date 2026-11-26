@@ -935,6 +935,17 @@ export async function runVoiceScenario(
     );
   }
 
+  // Opening-only start (the silent-start measurement, ai-therapist-315): no
+  // beats, the session ends once the opening has been spoken or given up on.
+  if (scenario.voiceEval?.mode === 'opening') {
+    if (backend !== 'live')
+      throw new Error(
+        `${scenario.id} measures the GPT-Live opening; system_config.ai_model is '${aiModel}' (${backend})`,
+      );
+    const { runOpeningOnlyScenario } = await import('./voice/openingOnly.js');
+    return runOpeningOnlyScenario(scenario, client, openai, cost, pool);
+  }
+
   const agent: Agent = client.newAgent();
   await client.loginParticipant(agent);
   await client.acceptConsent(agent);

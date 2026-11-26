@@ -21,7 +21,9 @@ export interface RunCaller {
 }
 
 export interface VoiceEvalSpec {
-  mode: 'crawl' | 'walk' | 'run';
+  /** `opening`: one ordinary start, the opening only, then the session ends
+   *  (voice/openingOnly.ts, the silent-start measurement of ai-therapist-315). */
+  mode: 'crawl' | 'walk' | 'run' | 'opening';
   /** CRAWL/WALK: prior turns seeded as text in `session.input`; only the
    *  scenario's single beat is spoken. No opening line is played. */
   history?: HistoryTurn[];

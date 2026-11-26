@@ -22,7 +22,10 @@ export type RedteamSuite =
   // conditions, and a simulated participant in one full-duplex session.
   | 'voice-crawl'
   | 'voice-walk'
-  | 'voice-run';
+  | 'voice-run'
+  // Opening-only GPT-Live starts (voice/openingOnly.ts): `--variations N`
+  // measures N ordinary starts for the silent-start rate. On demand only.
+  | 'voice-opening';
 
 const SUITES: RedteamSuite[] = [
   'smoke',
@@ -34,6 +37,7 @@ const SUITES: RedteamSuite[] = [
   'voice-crawl',
   'voice-walk',
   'voice-run',
+  'voice-opening',
 ];
 
 export function isRedteamSuite(v: string | undefined): v is RedteamSuite {

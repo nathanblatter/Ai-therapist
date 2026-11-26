@@ -19,6 +19,7 @@ const SUITES: RedteamSuite[] = [
   'voice-crawl',
   'voice-walk',
   'voice-run',
+  'voice-opening',
 ];
 const all = new Map<string, Scenario>();
 for (const suite of SUITES) for (const e of selectSuite(suite)) all.set(e.scenario.id, e.scenario);

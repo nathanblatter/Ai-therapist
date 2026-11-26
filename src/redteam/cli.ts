@@ -4,7 +4,7 @@
 //
 //   npx tsx src/redteam/cli.ts --suite smoke
 //
-// Flags: --suite smoke|full|quality|voice|voice-safety|extended|voice-crawl|voice-walk|voice-run
+// Flags: --suite smoke|full|quality|voice|voice-safety|extended|voice-crawl|voice-walk|voice-run|voice-opening
 //        --scenario <id>  --out <dir>
 //        --judge-model <m>  --seed <n>  --variations <k>  --allow-fail  --dry-run
 //        --baseline <path|latest>  --gate-diff  --gate-quality
