@@ -157,8 +157,8 @@ level with both usernames and written to the account audit trail
 (`account_audit_log`, migration 132), as are account creations, deletions,
 role, username, password and email changes made through User Management, in
 every sign-in mode. The trail never holds a password, a token or an address.
-Researchers read their organisation's rows at `GET /api/users/audit`; there
-is no screen for it yet.
+Researchers read their organisation's rows under "Recent account changes" in
+User Management (`GET /api/users/audit`).
 
 An account's app sessions also end when it is deleted or its role changes, in
 every sign-in mode: a session otherwise keeps the role it was given for up to

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { Users, Plus, Edit2, Trash2, X, Save, Key, Search, Shield, Filter, Info, Eye, Cpu } from 'react-feather';
+import { Users, Plus, Edit2, Trash2, X, Save, Key, Search, Shield, Filter, Info, Eye, Cpu, Clock } from 'react-feather';
 import { deleteJson, getJson, postJson } from '../../shared/http';
+import { auditActionLabel, auditActorText, auditDetailText, type AccountAuditRow } from '../utils/accountAudit';
 
 const VOICE_OPTIONS = [
   { value: 'alloy', label: 'Alloy' },
@@ -115,6 +116,28 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
   // screen can reset one, and the app's own MFA flag means nothing.
   const [cognitoMode, setCognitoMode] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // The account audit trail (who changed which account), loaded when opened.
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [auditRows, setAuditRows] = useState<AccountAuditRow[] | null>(null);
+  const [auditError, setAuditError] = useState<string | null>(null);
+
+  const loadAudit = async () => {
+    setAuditError(null);
+    try {
+      const data = await getJson<{ audit: AccountAuditRow[] }>('/api/users/audit?limit=100', {
+        fallback: 'Failed to load account changes',
+      });
+      setAuditRows(data.audit ?? []);
+    } catch (err: unknown) {
+      setAuditError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const toggleAudit = () => {
+    const next = !auditOpen;
+    setAuditOpen(next);
+    if (next) void loadAudit();
+  };
 
   useEffect(() => {
     fetchUsers();
@@ -140,6 +163,8 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
       setLoading(true);
       const data = await getJson<{ users: User[] }>('/api/users', { fallback: 'Failed to fetch users' });
       setUsers(data.users);
+      // Every list refresh follows an account change: keep the open trail current.
+      if (auditOpen) void loadAudit();
       setError(null);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -1026,6 +1051,72 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
           <div className="text-center py-8 text-gray-500">
             <Users size={48} className="mx-auto mb-2 text-gray-400" />
             <p>{users.length === 0 ? 'No users found' : 'No users match the current filters'}</p>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-6 mb-16 bg-white rounded-lg shadow">
+        <button
+          type="button"
+          onClick={toggleAudit}
+          aria-expanded={auditOpen}
+          className="w-full flex items-center justify-between px-6 py-4 text-left min-h-[44px]"
+        >
+          <span className="flex items-center gap-2 font-semibold text-gray-900">
+            <Clock size={18} className="text-royal" aria-hidden="true" />
+            Recent account changes
+          </span>
+          <span className="text-sm text-royal">{auditOpen ? 'Hide' : 'Show'}</span>
+        </button>
+        {auditOpen && (
+          <div className="px-6 pb-6">
+            <p className="text-sm text-gray-600 mb-3">
+              Who created, deleted or changed an account in your organisation, newest first. Passwords and email
+              addresses are never recorded here.
+            </p>
+            {auditError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-3">{auditError}</div>
+            )}
+            {auditRows === null && !auditError && <p className="text-sm text-gray-500">Loading...</p>}
+            {auditRows !== null && auditRows.length === 0 && (
+              <p className="text-sm text-gray-500">No account changes have been recorded yet.</p>
+            )}
+            {auditRows !== null && auditRows.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      {['When', 'Change', 'Account', 'By', 'Details'].map((h) => (
+                        <th
+                          key={h}
+                          scope="col"
+                          className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                        >
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {auditRows.map((row) => (
+                      <tr key={row.audit_id}>
+                        <td className="px-4 py-2 whitespace-nowrap text-gray-700">
+                          {new Date(row.created_at).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap font-medium text-gray-900">
+                          {auditActionLabel(row.action)}
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap text-gray-700">
+                          {row.target_username ?? (row.target_user_id !== null ? `user ${row.target_user_id}` : '')}
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap text-gray-700">{auditActorText(row)}</td>
+                        <td className="px-4 py-2 text-gray-700">{auditDetailText(row)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </div>
