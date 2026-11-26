@@ -1023,7 +1023,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
 
       {voiceNotice && (
         <div
-          className={`border-l-4 p-4 rounded flex items-center justify-between ${
+          className={`border-l-4 p-4 rounded flex items-center justify-between gap-3 ${
             voiceNotice.persistent
               ? 'bg-red-100 border-red-500 text-red-900'
               : 'bg-amber-100 border-amber-500 text-amber-900'
@@ -1031,17 +1031,17 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
           role={voiceNotice.persistent ? 'alert' : 'status'}
           aria-live={voiceNotice.persistent ? 'assertive' : 'polite'}
         >
-          <div className="flex items-center gap-3">
-            <MicOff size={24} aria-hidden="true" />
-            <div>
+          <div className="flex items-center gap-3 min-w-0">
+            <MicOff size={24} aria-hidden="true" className="flex-shrink-0" />
+            <div className="min-w-0">
               <p className="font-bold">{voiceNotice.message}</p>
               <p className="text-sm">Session: {voiceNotice.sessionId.substring(0, 12)}...</p>
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-shrink-0">
             <button
               onClick={() => onViewSession(voiceNotice.sessionId, false)}
-              className="px-3 py-1 bg-white bg-opacity-50 rounded hover:bg-opacity-75 transition text-sm font-medium min-h-[44px]"
+              className="px-3 py-1 bg-white bg-opacity-50 rounded hover:bg-opacity-75 transition text-sm font-medium min-h-[44px] whitespace-nowrap"
               aria-label={`View session ${voiceNotice.sessionId.substring(0, 12)}`}
             >
               View Session

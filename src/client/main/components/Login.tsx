@@ -282,11 +282,22 @@ export default function Login() {
           <div className="text-center">
             <h1 className="text-3xl sm:text-4xl font-bold text-navy mb-2">AI Therapist Assistant</h1>
             <p className="text-lg text-gray-600">
-              {mfaRequired ? 'Two-Factor Authentication' : 'Sign in to start your session'}
+              {mfaRequired
+                ? 'Two-Factor Authentication'
+                : cognitoMode && enrolling
+                  ? 'Set up two-step sign-in'
+                  : 'Sign in to start your session'}
             </p>
           </div>
 
-          {cognitoMode && enrolling ? (
+          {squawk === null ? (
+            // Which sign-in runs here is not known yet. Show no form until it
+            // is: under Cognito a password must never be typed into this page,
+            // and the form would otherwise flash before the browser leaves.
+            <p className="text-sm text-gray-500 text-center" role="status">
+              Loading sign-in...
+            </p>
+          ) : cognitoMode && enrolling ? (
             <TotpEnrol />
           ) : cognitoMode ? (
             // The password is typed on the study's hosted sign-in page, not here.
