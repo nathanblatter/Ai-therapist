@@ -2,7 +2,9 @@
 
 Status (2026-11-26): the server sign-in flow, the login page's Cognito mode,
 the mirroring of account changes to the pool and the authenticator-code rule
-for staff are built and unit-tested.
+for staff are built and unit-tested, run end to end in a browser against a
+local stand-in pool, and reviewed once by an independent reader (findings
+fixed the same night).
 It is **not enabled anywhere yet**: no user pool exists (ai-therapist-394).
 Nothing here has run against a real pool; the account mirroring in particular
 has only ever talked to a mocked AWS client (see "Unconfirmed until the first
@@ -114,6 +116,23 @@ rest:
    establishes the session. The code just entered is the second factor for
    this sign-in.
 4. From then on the hosted page asks that account for a code every time.
+5. "Switched on now" is not the same as "this sign-in was asked for a code":
+   someone who signed in at the hosted page with the password alone, before
+   the owner enrolled, could come back afterwards. So step 3 also records when
+   the account enrolled (`users.cognito_totp_enrolled_at`, migration 131), and
+   the callback requires the ID token's `auth_time` to be later. An older
+   sign-in gets no session: the browser is sent through the hosted sign-out,
+   and the next attempt authenticates afresh, with a code. A token with no
+   `auth_time` is treated as older.
+6. A held sign-in ends the moment the account has an authenticator: both
+   enrolment calls ask the pool first, so a hold opened by someone else
+   cannot register a second authenticator or sign in once the owner has
+   enrolled.
+
+Other ways into a session follow the same rule. With Cognito on, the invite
+links (`/join/:token`, `/join-sandbox/:token`) create a staff account but do
+not sign it in: the page goes to `/login` and the person signs in and enrols
+like anyone else. Participant invites still sign the new participant in.
 
 The access token is the only Cognito token the app ever keeps, only for a held
 staff sign-in, only in the server-side session, and it is dropped when the
@@ -122,11 +141,20 @@ the `aws.cognito.signin.user.admin` scope: `AssociateSoftwareToken` and
 `VerifySoftwareToken` are authorised by that token, not by IAM.
 
 Lost phone: a researcher presses "Reset authenticator app" on the account in
-User Management (`POST /api/users/:id/reset-authenticator`, researcher only,
-through `accounts.service.ts`). That switches the challenge off in the pool
-(`AdminSetUserMFAPreference`); the person's next sign-in is then held for
-setup again, and the new setup replaces the old secret. There are no backup
-codes: the reset is the recovery path, as for passwords.
+User Management (`POST /api/users/:id/reset-authenticator`, through
+`accounts.service.ts`). That switches the challenge off in the pool
+(`AdminSetUserMFAPreference`), clears the recorded enrolment time, revokes the
+account's pool tokens (`AdminUserGlobalSignOut`) and ends its app sessions;
+the person's next sign-in is then held for setup again, and the new setup
+replaces the old secret. There are no backup codes: the reset is the recovery
+path, as for passwords. The route is researcher only, limited to staff
+accounts in the researcher's own organisation, and accepts JSON requests only
+(another site cannot make it for a signed-in researcher). It is logged at warn
+level with both usernames; there is no audit-table row yet.
+
+An account's app sessions also end when it is deleted or its role changes, in
+every sign-in mode: a session otherwise keeps the role it was given for up to
+24 hours.
 
 The security settings screen (Admin, MFA) says, under Cognito, that the
 sign-in service holds the password and authenticator, and offers nothing to
@@ -145,7 +173,15 @@ Known limits:
   enrolled (new account, or just reset) can enrol their own authenticator.
   This is inherent to enrol-at-first-sign-in; keep the window short by having
   new staff sign in when the account is made, and reset only on request.
-- A researcher can reset their own authenticator while signed in.
+- A researcher can set another staff account's password and reset its
+  authenticator, which together take the account over. That is the
+  researcher role's existing power over accounts; what is new is that it now
+  leaves a warn-level log line and ends the target's sessions.
+- The SDK version in use has no `AdminDeleteSoftwareToken`, so a reset does
+  not erase the old secret at the pool; it stops being asked for, and the
+  next enrolment replaces it.
+- `/api/auth/cognito/start` is not rate-limited and writes a session row per
+  request.
 - The ID token may carry `amr`/`acr` claims naming the methods used (AWS says
   the feature is rolling out and may not be on a given pool). The app does not
   read them yet; if the stage pool sends them, checking `amr` for a staff
@@ -165,8 +201,15 @@ Known limits:
    and does not ask one that was reset.
 5. After a reset, a new `AssociateSoftwareToken` replaces the old secret (the
    old authenticator entry stops working).
-6. `AdminGetUser` and `AdminSetUserMFAPreference` are covered by
-   `iam-app-policy.json` as written.
+6. `AdminGetUser`, `AdminSetUserMFAPreference` and `AdminUserGlobalSignOut`
+   are covered by `iam-app-policy.json` as written.
+7. The ID token carries `auth_time` (AWS's token reference says so). If it
+   does not, every staff sign-in after enrolment is sent back to the hosted
+   page: the rule fails closed, so check this first.
+8. Signing in again after the hosted sign-out really does ask for the
+   password and a code (the hosted page's own session is gone).
+9. `AdminUserGlobalSignOut` ends the hosted page's session for a reset
+   account.
 
 ## Account changes
 
@@ -286,9 +329,11 @@ outside the study account or when a pool of that name exists, and never changes
 an existing pool. Change the script, not the console, so stage and prod stay
 the same.
 
-As of 2026-11-25 the script has **not been run**: it passes a shell syntax
-check only. The study's `nathan` IAM user has no Cognito permissions, so the
-first run on stage is also the first test of every option in it.
+As of 2026-11-26 the script has **not been run**. It passes a shell syntax
+check, and every command and flag in it and in `create-first-researcher.sh`
+exists in the installed AWS CLI (2.38.1, checked against its own help). The
+study's `nathan` IAM user has no Cognito permissions, so the first run on
+stage is still the first test of what the service accepts.
 
 Two sets of AWS permissions are involved, both granted by Nathan:
 
@@ -344,7 +389,13 @@ IAM, account or prod decision that only he makes. Nothing here has been done.
    `SQUAWK_*` lines, redeploy, confirm Squawk sign-in works, then switch back.
 10. (Nathan) Remove the setup rights from step 1.
 
-Migration 129 (`users.cognito_sub`) is already on stage.
+Migrations 129 (`users.cognito_sub`) and 131
+(`users.cognito_totp_enrolled_at`) are already on stage.
+
+At the moment of the switch (step 5), end every existing app session, so
+nobody carries a pre-Cognito session, or a staff session that never passed the
+authenticator rule, across the cutover:
+`TRUNCATE user_sessions;` on the stage database. Everyone signs in again.
 
 ### Prod (ai-therapist-399), after stage has run on Cognito
 
@@ -354,7 +405,7 @@ legacy login today. Each promotion to prod needs Nathan's go-ahead.
 1. (Nathan) Tell the two participants a new password is coming, and how they
    will get it. They have no email on file.
 2. Take a manual RDS snapshot (`ai-therapist-pre-cognito-YYYYMMDD`), wait for
-   `available`, and apply migration 129 to `ai_therapist_prod`.
+   `available`, and apply migrations 129 and 131 to `ai_therapist_prod`.
 3. (Nathan) Setup rights as on stage, then
    `scripts/cognito/create-pool.sh prod https://ai.byuisresearch.com <domain-prefix>`.
 4. (Nathan) An identity for the app with `iam-app-policy.json` naming the prod
@@ -364,7 +415,9 @@ legacy login today. Each promotion to prod needs Nathan's go-ahead.
 6. Promote the Cognito code to prod (`git push origin main:prod`) with the
    `COGNITO_*` variables still unset: nothing changes yet.
 7. Add the `COGNITO_*` values to `/opt/ai-therapist/.env` and redeploy through
-   the pipeline. From this moment the legacy login answers 410.
+   the pipeline. From this moment the legacy login answers 410. In the same
+   step run `TRUNCATE user_sessions;` on prod (Nathan's go-ahead: it signs
+   everyone out), so no pre-Cognito session outlives the switch.
 8. Sign in as the researcher, set up the authenticator app, then set a new
    password for each participant in User Management (this creates their pool
    accounts) and pass the passwords on by the channel agreed in step 1.

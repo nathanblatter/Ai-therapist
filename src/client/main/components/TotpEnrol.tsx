@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Shield, LogIn } from 'react-feather';
 import { HttpError, getJson, postJson } from '../../shared/http';
 import { COGNITO_START } from '../lib/signInMode';
@@ -18,28 +18,30 @@ export default function TotpEnrol() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // One enrolment per page load. A second /begin (React StrictMode runs
+  // effects twice in development) would replace the secret behind the QR code
+  // already on screen.
+  const begun = useRef(false);
+
   useEffect(() => {
-    let cancelled = false;
+    if (begun.current) return;
+    begun.current = true;
+    // No cancel-on-cleanup flag: StrictMode's first cleanup would discard the
+    // only request this page makes. Setting state after an unmount is a no-op.
     (async () => {
       try {
         const status = await getJson<{ pending: boolean; username?: string }>('/api/auth/cognito/totp/status');
-        if (cancelled) return;
         if (!status.pending) return setStep('expired');
         setUsername(status.username ?? '');
-        const begun = await postJson<{ secret: string; qrCode: string }>('/api/auth/cognito/totp/begin');
-        if (cancelled) return;
-        setSecret(begun.secret);
-        setQrCode(begun.qrCode);
+        const begun2 = await postJson<{ secret: string; qrCode: string }>('/api/auth/cognito/totp/begin');
+        setSecret(begun2.secret);
+        setQrCode(begun2.qrCode);
         setStep('scan');
       } catch (err) {
-        if (cancelled) return;
         setError(err instanceof Error ? err.message : 'Setup could not start.');
         setStep('expired');
       }
     })();
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   const verify = async (e: React.FormEvent<HTMLFormElement>) => {

@@ -23,16 +23,19 @@
 import { Router, type Request, type Response } from 'express';
 import { createHash, randomBytes } from 'node:crypto';
 import {
+  getCognitoTotpEnrolledAt,
   getUserByCognitoSub,
   getUserById,
   getUserByUsernameForCognito,
   setCognitoSub,
+  setCognitoTotpEnrolledAt,
   syncRoleFromCognito,
   type UserRow,
 } from '../../db/index.js';
 import * as cognito from '../../services/cognito.service.js';
 import * as cognitoAdmin from '../../services/cognitoAdmin.service.js';
 import { generateQRCode } from '../../services/mfa.service.js';
+import { clearEmailIfIneligible } from '../../services/researcherEmail.service.js';
 import { requiresSecondFactor } from '../../../shared/roles.js';
 import { createLogger } from '../../utils/logger.js';
 
@@ -94,8 +97,19 @@ export async function resolveLocalUser(claims: cognito.CognitoClaims): Promise<R
     }
   }
   if (!user) return { error: 'no_account' };
+  // The pool username is this account's address for every later pool call
+  // (the authenticator check, enrolment, a reset). A row found by its subject
+  // whose username no longer matches would be checked against another pool
+  // user, or none: refuse it.
+  if (username && username !== user.username) {
+    log.warn({ userid: user.userid }, 'pool username differs from the linked local username');
+    return { error: 'no_account' };
+  }
   if (role !== user.role) {
     await syncRoleFromCognito(user.userid, role);
+    // The same rule a role change in User Management applies: a role that may
+    // not hold a study address loses it.
+    await clearEmailIfIneligible(user.userid, role);
     user = { ...user, role };
   }
   return { user };
@@ -138,6 +152,9 @@ function establishEnrolment(req: Request, user: UserRow, accessToken: string): P
         startedAt: Date.now(),
         attempts: 0,
       };
+      // The row holds an access token: let the store drop it when the hold
+      // ends, not a day later.
+      req.session.cookie.maxAge = ENROL_TTL_MS;
       req.session.save((err) => (err ? reject(err) : resolve()));
     });
   });
@@ -152,6 +169,24 @@ function pendingEnrolment(req: Request): NonNullable<Request['session']['cognito
   }
   return e;
 }
+
+/** Did the person authenticate at the hosted page after `enrolledAt`? A token
+ *  with no usable auth_time is treated as "no": the rule fails closed. */
+export function authenticatedAfter(authTime: unknown, enrolledAt: Date): boolean {
+  return typeof authTime === 'number' && Number.isFinite(authTime) && authTime * 1000 > enrolledAt.getTime();
+}
+
+/** A hold is for an account with no authenticator. If the account has one by
+ *  now (the real owner enrolled from another browser), the hold is over: it
+ *  must not be able to re-enrol or sign in. Throws if the pool cannot be asked. */
+async function holdStillValid(req: Request, pending: { username: string; userId: number }): Promise<boolean> {
+  if (!(await cognitoAdmin.getTotpEnabled(pending.username))) return true;
+  log.warn({ userid: pending.userId }, 'held sign-in dropped: the account enrolled an authenticator elsewhere');
+  delete req.session.cognitoEnrol;
+  return false;
+}
+
+const ENROL_EXPIRED = { error: 'Sign in again to set up your authenticator app.', code: 'enrol_expired' };
 
 /** The label an authenticator app shows for the account. */
 function otpauthUrl(username: string, secret: string): string {
@@ -256,6 +291,25 @@ export default function cognitoAuthRoutes(): Router {
         log.info({ userid: user.userid, role: user.role }, 'staff sign-in held for authenticator enrolment');
         return res.redirect(302, ENROL_PAGE);
       }
+      // "Switched on now" is not "this sign-in was asked for a code": a
+      // sign-in completed at the hosted page before the account enrolled
+      // would pass. The token says when the person authenticated; if that is
+      // not after the enrolment this app recorded, end the hosted page's
+      // session so the next attempt authenticates afresh, with a code.
+      let enrolledAt: Date | null;
+      try {
+        enrolledAt = await getCognitoTotpEnrolledAt(user.userid);
+      } catch (err) {
+        log.error({ err, userid: user.userid }, 'could not read the authenticator enrolment time');
+        return loginError(res, 'server_error');
+      }
+      if (enrolledAt && !authenticatedAfter(claims.auth_time, enrolledAt)) {
+        log.warn(
+          { userid: user.userid, authTime: claims.auth_time ?? null },
+          'staff sign-in predates the authenticator enrolment; sending it back to authenticate again',
+        );
+        return res.redirect(302, cognito.logoutUrl());
+      }
     }
     try {
       await establishSession(req, user);
@@ -279,6 +333,7 @@ export default function cognitoAuthRoutes(): Router {
     if (!pending)
       return res.status(401).json({ error: 'Sign in again to set up your authenticator app.', code: 'enrol_expired' });
     try {
+      if (!(await holdStillValid(req, pending))) return res.status(401).json(ENROL_EXPIRED);
       const { secret } = await cognitoAdmin.beginTotpEnrolment(pending.accessToken);
       const qrCode = await generateQRCode(otpauthUrl(pending.username, secret));
       res.json({ secret, qrCode });
@@ -296,12 +351,15 @@ export default function cognitoAuthRoutes(): Router {
     if (!/^\d{6}$/.test(code)) return res.status(400).json({ error: 'Enter the 6-digit code.' });
     pending.attempts += 1;
     try {
+      if (!(await holdStillValid(req, pending))) return res.status(401).json(ENROL_EXPIRED);
       if (!(await cognitoAdmin.verifyTotpEnrolment(pending.accessToken, code))) {
         return res
           .status(401)
           .json({ error: 'That code did not match. Check the app and try again.', code: 'code_mismatch' });
       }
       await cognitoAdmin.setTotpEnabled(pending.username, true);
+      // From here a sign-in must have authenticated after this moment.
+      await setCognitoTotpEnrolledAt(pending.userId, new Date());
     } catch (err) {
       log.error({ err, userid: pending.userId }, 'authenticator enrolment failed');
       return res.status(502).json({ error: 'The sign-in service could not finish the setup. Sign in again.' });

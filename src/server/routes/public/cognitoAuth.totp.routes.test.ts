@@ -13,6 +13,8 @@ vi.stubEnv('COGNITO_DOMAIN', 'https://study-test.auth.us-west-1.amazoncognito.co
 vi.stubEnv('APP_URL', 'https://app.test');
 
 const dbMocks = vi.hoisted(() => ({
+  getCognitoTotpEnrolledAt: vi.fn(),
+  setCognitoTotpEnrolledAt: vi.fn(),
   getUserByCognitoSub: vi.fn(),
   getUserById: vi.fn(),
   getUserByUsernameForCognito: vi.fn(),
@@ -37,8 +39,9 @@ vi.mock('../../services/cognitoAdmin.service.js', () => adminMocks);
 
 const qrMock = vi.hoisted(() => ({ generateQRCode: vi.fn() }));
 vi.mock('../../services/mfa.service.js', () => qrMock);
+vi.mock('../../services/researcherEmail.service.js', () => ({ clearEmailIfIneligible: vi.fn() }));
 
-const { default: cognitoAuthRoutes } = await import('./cognitoAuth.routes.js');
+const { default: cognitoAuthRoutes, authenticatedAfter } = await import('./cognitoAuth.routes.js');
 
 function makeApp() {
   const app = express();
@@ -56,6 +59,7 @@ function makeApp() {
       mfaVerified: req.session.mfaVerified ?? null,
       ownedSessions: req.session.ownedSessions ?? null,
       enrol: req.session.cognitoEnrol ?? null,
+      maxAge: req.session.cookie.originalMaxAge ?? null,
     });
   });
   app.post('/test/age-enrol', (req, res) => {
@@ -76,7 +80,7 @@ const staffRow = (over: Record<string, unknown> = {}) => ({
   cognito_sub: SUB,
   ...over,
 });
-const claimsFor = (role: string) => ({
+const claimsFor = (role: string, over: Record<string, unknown> = {}) => ({
   iss: 'x',
   sub: SUB,
   aud: 'client123',
@@ -85,6 +89,7 @@ const claimsFor = (role: string) => ({
   'cognito:groups': [role],
   iat: 0,
   exp: 0,
+  ...over,
 });
 
 /** Sign in through start + callback; returns the agent and the callback answer. */
@@ -102,6 +107,8 @@ beforeEach(() => {
   dbMocks.getUserByCognitoSub.mockResolvedValue(staffRow());
   dbMocks.getUserById.mockResolvedValue(staffRow());
   adminMocks.getTotpEnabled.mockResolvedValue(false);
+  dbMocks.getCognitoTotpEnrolledAt.mockResolvedValue(null);
+  dbMocks.setCognitoTotpEnrolledAt.mockResolvedValue(undefined);
   adminMocks.beginTotpEnrolment.mockResolvedValue({ secret: 'JBSWY3DPEHPK3PXP' });
   adminMocks.verifyTotpEnrolment.mockResolvedValue(true);
   adminMocks.setTotpEnabled.mockResolvedValue(undefined);
@@ -234,6 +241,7 @@ describe('enrolment routes', () => {
     expect(order).toEqual(['verify', 'enable']);
     expect(adminMocks.verifyTotpEnrolment).toHaveBeenCalledWith('ACCESS-1', '123456');
     expect(adminMocks.setTotpEnabled).toHaveBeenCalledWith('dr_one', true);
+    expect(dbMocks.setCognitoTotpEnrolledAt).toHaveBeenCalledWith(9, expect.any(Date));
     const s = (await agent.get('/test/session')).body;
     expect(s).toMatchObject({ userId: 9, userRole: 'therapist', mfaVerified: true });
     // The enrolment state, and with it the access token, is gone.
@@ -304,5 +312,107 @@ describe('enrolment routes', () => {
     const s = (await agent.get('/test/session')).body;
     expect(s.userId).toBeNull();
     expect(s.enrol).toBeNull();
+  });
+});
+
+describe('a hold ends when the account enrols elsewhere (review C2)', () => {
+  // Someone who knows a new staff member's password signs in first and is
+  // held. The real owner then enrols from their own browser. The first hold
+  // must not be able to register a second authenticator or sign in.
+  it('begin: refuses, asks the pool for nothing more, and drops the hold', async () => {
+    const { agent } = await signIn();
+    adminMocks.getTotpEnabled.mockResolvedValue(true);
+    const res = await agent.post('/api/auth/cognito/totp/begin');
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBe('enrol_expired');
+    expect(adminMocks.beginTotpEnrolment).not.toHaveBeenCalled();
+    expect((await agent.get('/api/auth/cognito/totp/status')).body).toEqual({ pending: false });
+  });
+
+  it('verify: refuses a right code, enables nothing, signs nobody in', async () => {
+    const { agent } = await signIn();
+    adminMocks.getTotpEnabled.mockResolvedValue(true);
+    const res = await agent.post('/api/auth/cognito/totp/verify').send({ code: '123456' });
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBe('enrol_expired');
+    expect(adminMocks.verifyTotpEnrolment).not.toHaveBeenCalled();
+    expect(adminMocks.setTotpEnabled).not.toHaveBeenCalled();
+    const s = (await agent.get('/test/session')).body;
+    expect(s.userId).toBeNull();
+    expect(s.enrol).toBeNull();
+  });
+
+  it('verify: if the pool cannot be asked, nobody is signed in', async () => {
+    const { agent } = await signIn();
+    adminMocks.getTotpEnabled.mockRejectedValue(new Error('pool down'));
+    const res = await agent.post('/api/auth/cognito/totp/verify').send({ code: '123456' });
+    expect(res.status).toBe(502);
+    expect(adminMocks.verifyTotpEnrolment).not.toHaveBeenCalled();
+    expect((await agent.get('/test/session')).body.userId).toBeNull();
+  });
+});
+
+describe('a sign-in must have authenticated after the enrolment (review P1)', () => {
+  const ENROLLED = new Date('2026-12-01T12:00:00Z');
+  const at = (iso: string) => Math.floor(Date.parse(iso) / 1000);
+  beforeEach(() => {
+    adminMocks.getTotpEnabled.mockResolvedValue(true);
+    dbMocks.getCognitoTotpEnrolledAt.mockResolvedValue(ENROLLED);
+  });
+
+  it('signs in a token whose auth_time is after the enrolment', async () => {
+    cognitoMocks.verifyIdToken.mockResolvedValue(claimsFor('therapist', { auth_time: at('2026-12-01T12:00:05Z') }));
+    const { agent, res } = await signIn();
+    expect(res.headers.location).toBe('/admin');
+    expect((await agent.get('/test/session')).body.userId).toBe(9);
+  });
+
+  it.each([
+    ['from before the enrolment', { auth_time: at('2026-12-01T11:59:00Z') }],
+    ['from the same second', { auth_time: at('2026-12-01T12:00:00Z') }],
+    ['with no auth_time', {}],
+    ['with a non-numeric auth_time', { auth_time: 'yesterday' }],
+  ])('sends a sign-in %s back through the hosted sign-out, with no session', async (_label, over) => {
+    cognitoMocks.verifyIdToken.mockResolvedValue(claimsFor('therapist', over));
+    const { agent, res } = await signIn();
+    expect(res.status).toBe(302);
+    const url = new URL(res.headers.location);
+    expect(url.origin + url.pathname).toBe('https://study-test.auth.us-west-1.amazoncognito.com/logout');
+    const s = (await agent.get('/test/session')).body;
+    expect(s.userId).toBeNull();
+    expect(s.enrol).toBeNull();
+  });
+
+  it('does not apply to an account with no recorded enrolment, or to non-staff', async () => {
+    dbMocks.getCognitoTotpEnrolledAt.mockResolvedValue(null);
+    expect((await signIn()).res.headers.location).toBe('/admin');
+    dbMocks.getCognitoTotpEnrolledAt.mockResolvedValue(ENROLLED);
+    cognitoMocks.verifyIdToken.mockResolvedValue(claimsFor('participant'));
+    dbMocks.getUserByCognitoSub.mockResolvedValue(staffRow({ role: 'participant' }));
+    expect((await signIn()).res.headers.location).toBe('/');
+  });
+
+  it('refuses when the enrolment time cannot be read', async () => {
+    dbMocks.getCognitoTotpEnrolledAt.mockRejectedValue(new Error('db down'));
+    const { agent, res } = await signIn();
+    expect(res.headers.location).toBe('/login?error=server_error');
+    expect((await agent.get('/test/session')).body.userId).toBeNull();
+  });
+
+  it('authenticatedAfter compares seconds with the stored time and fails closed', () => {
+    expect(authenticatedAfter(at('2026-12-01T12:00:01Z'), ENROLLED)).toBe(true);
+    expect(authenticatedAfter(at('2026-12-01T12:00:00Z'), ENROLLED)).toBe(false);
+    for (const bad of [undefined, null, '', '1795000000', NaN, Infinity]) {
+      expect(authenticatedAfter(bad, ENROLLED)).toBe(false);
+    }
+  });
+});
+
+describe('the hold is short-lived in the session store too (review C9)', () => {
+  it('gives the held session a 15-minute cookie, and a signed-in one the normal lifetime', async () => {
+    const { agent } = await signIn();
+    expect((await agent.get('/test/session')).body.maxAge).toBe(15 * 60 * 1000);
+    await agent.post('/api/auth/cognito/totp/verify').send({ code: '123456' });
+    expect((await agent.get('/test/session')).body.maxAge).not.toBe(15 * 60 * 1000);
   });
 });

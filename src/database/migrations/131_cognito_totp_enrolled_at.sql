@@ -1,0 +1,14 @@
+-- ai-therapist-396: when a staff account's authenticator app was enrolled
+-- through this app (Cognito sign-in only).
+--
+-- The pool tells the app whether an authenticator is switched on for an
+-- account, not whether the sign-in that produced a given ID token was asked
+-- for a code. A sign-in completed at the hosted page BEFORE the account
+-- enrolled would otherwise pass the staff rule once the account enrols.
+-- The callback compares the token's auth_time with this timestamp and sends
+-- an older sign-in back to the hosted page.
+--
+-- NULL = never enrolled through this app (or reset by a researcher). Only
+-- the Cognito code paths read or write it, so a deployment on the legacy
+-- login is unaffected whether or not this migration has been applied.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS cognito_totp_enrolled_at TIMESTAMPTZ;

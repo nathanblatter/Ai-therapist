@@ -470,6 +470,21 @@ export async function replaceCognitoSub(userid: number | string, cognitoSub: str
   ]);
 }
 
+/** When the account's authenticator app was enrolled through this app
+ *  (migration 131), or null. Cognito sign-in only. */
+export async function getCognitoTotpEnrolledAt(userid: number | string): Promise<Date | null> {
+  const result = await pool.query<{ cognito_totp_enrolled_at: Date | null }>(
+    'SELECT cognito_totp_enrolled_at FROM users WHERE userid = $1',
+    [userid],
+  );
+  return result.rows[0]?.cognito_totp_enrolled_at ?? null;
+}
+
+/** Record (a Date) or clear (null) the authenticator enrolment time. */
+export async function setCognitoTotpEnrolledAt(userid: number | string, at: Date | null): Promise<void> {
+  await pool.query('UPDATE users SET cognito_totp_enrolled_at = $1 WHERE userid = $2', [at, userid]);
+}
+
 /** Copy the role the pool holds for the account into users.role (the pool's
  *  role group is the source of roles once sign-in runs through Cognito; RBAC
  *  middleware keeps reading the column). No-op when unchanged. */
