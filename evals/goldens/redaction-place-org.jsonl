@@ -1,0 +1,50 @@
+{"id":"po-school-01","class":"high-school","text":"I teach sophomore English at Lone Peak High School and the grading never ends.","identifier":"Lone Peak High School","match":["Lone Peak"]}
+{"id":"po-school-02","class":"high-school","text":"Back when I was at Timpanogos High I never talked to anyone at lunch.","identifier":"Timpanogos High","match":["Timpanogos"]}
+{"id":"po-school-03","class":"high-school","text":"My little brother is a junior at Maple Mountain High School and I worry he is copying my bad habits.","identifier":"Maple Mountain High School","match":["Maple Mountain"]}
+{"id":"po-school-04","class":"high-school","text":"I graduated from Skyridge and I still feel like the kid nobody noticed there.","identifier":"Skyridge","match":["Skyridge"]}
+{"id":"po-school-05","class":"high-school","text":"I was student body president at Westlake High, so people expect me to have it all together.","identifier":"Westlake High","match":["Westlake"]}
+{"id":"po-campus-01","class":"university-campus","text":"I transferred to Utah Valley University this semester and I have not really made friends yet.","identifier":"Utah Valley University","match":["Utah Valley"]}
+{"id":"po-campus-02","class":"university-campus","text":"Everyone at BYU seems so sure of their plans and I am just not.","identifier":"BYU","match":["BYU"]}
+{"id":"po-campus-03","class":"university-campus","text":"I live in Helaman Halls and my floor is loud until two in the morning.","identifier":"Helaman Halls","match":["Helaman"]}
+{"id":"po-campus-04","class":"university-campus","text":"I study on the third floor of the Tanner Building most nights because my apartment is too distracting.","identifier":"the Tanner Building","match":["Tanner"]}
+{"id":"po-campus-05","class":"university-campus","text":"I did my first two years at Snow College before I moved up here, and I miss how small it was.","identifier":"Snow College","match":["Snow College"]}
+{"id":"po-work-01","class":"employer-business","text":"I work the front desk at Canyon Crest Dental and my manager keeps changing my hours.","identifier":"Canyon Crest Dental","match":["Canyon Crest"]}
+{"id":"po-work-02","class":"employer-business","text":"I am the only barista at Bluebird Bakery on weekday mornings, so I can never call in sick.","identifier":"Bluebird Bakery","match":["Bluebird"]}
+{"id":"po-work-03","class":"employer-business","text":"I sell door to door for Wasatch Peak Solar and the rejection is wearing me down.","identifier":"Wasatch Peak Solar","match":["Wasatch Peak"]}
+{"id":"po-work-04","class":"employer-business","text":"My dad owns Ironwood Auto Body and he assumes I will take it over someday.","identifier":"Ironwood Auto Body","match":["Ironwood"]}
+{"id":"po-work-05","class":"employer-business","text":"I just started as a teller at Summit Ridge Credit Union and I am scared of making a mistake with the drawer.","identifier":"Summit Ridge Credit Union","match":["Summit Ridge"]}
+{"id":"po-church-01","class":"church-congregation","text":"I am the Relief Society president in the Edgemont 14th Ward and I feel like I am failing at it.","identifier":"the Edgemont 14th Ward","match":["Edgemont"]}
+{"id":"po-church-02","class":"church-congregation","text":"I stopped going to the YSA 87th Ward a month ago and nobody has reached out.","identifier":"the YSA 87th Ward","match":["87th"]}
+{"id":"po-church-03","class":"church-congregation","text":"I play piano at Grace Fellowship Church on Sundays, and it is the one place I feel calm.","identifier":"Grace Fellowship Church","match":["Grace Fellowship"]}
+{"id":"po-church-04","class":"church-congregation","text":"My family has gone to Saint Brigid parish for three generations, so leaving feels impossible.","identifier":"Saint Brigid parish","match":["Brigid"]}
+{"id":"po-church-05","class":"church-congregation","text":"The youth pastor at Cornerstone Baptist asked me to lead a small group and I said yes without thinking.","identifier":"Cornerstone Baptist","match":["Cornerstone"]}
+{"id":"po-clinic-01","class":"hospital-clinic","text":"I am a night shift nurse at Mountain Point Medical Center and I barely sleep anymore.","identifier":"Mountain Point Medical Center","match":["Mountain Point"]}
+{"id":"po-clinic-02","class":"hospital-clinic","text":"I get my prescription refilled at Cedar Hollow Clinic and I always feel rushed there.","identifier":"Cedar Hollow Clinic","match":["Cedar Hollow"]}
+{"id":"po-clinic-03","class":"hospital-clinic","text":"I used to see a counselor at Aspen Ridge Counseling but I stopped going after the summer.","identifier":"Aspen Ridge Counseling","match":["Aspen Ridge"]}
+{"id":"po-clinic-04","class":"hospital-clinic","text":"My mom has worked in billing at Riverbend Family Medicine for years, so everyone there knows my business.","identifier":"Riverbend Family Medicine","match":["Riverbend"]}
+{"id":"po-clinic-05","class":"hospital-clinic","text":"My daughter spent a week at Primary Children's Hospital and I still tense up when I drive past it.","identifier":"Primary Children's Hospital","match":["Primary Children"]}
+{"id":"po-housing-01","class":"apartment-complex","text":"I live at Alpine Court Apartments and the walls are so thin I hear every argument next door.","identifier":"Alpine Court Apartments","match":["Alpine Court"]}
+{"id":"po-housing-02","class":"apartment-complex","text":"My lease at Monarch Flats is up soon and I cannot decide whether to stay.","identifier":"Monarch Flats","match":["Monarch"]}
+{"id":"po-housing-03","class":"apartment-complex","text":"I am the resident manager at the Sycamore Lofts, so I never really feel off the clock.","identifier":"the Sycamore Lofts","match":["Sycamore"]}
+{"id":"po-housing-04","class":"apartment-complex","text":"We moved into the Windsor Park condos after the wedding and it still does not feel like home.","identifier":"the Windsor Park condos","match":["Windsor Park"]}
+{"id":"po-housing-05","class":"apartment-complex","text":"All of my roommates at Carriage Hollow already know each other and I feel like the extra one.","identifier":"Carriage Hollow","match":["Carriage Hollow"]}
+{"id":"po-town-01","class":"town-neighbourhood","text":"I grew up in Santaquin, where everybody knows everybody, and that made things harder.","identifier":"Santaquin","match":["Santaquin"]}
+{"id":"po-town-02","class":"town-neighbourhood","text":"My parents still live in Mapleton and I drive down every weekend out of guilt.","identifier":"Mapleton","match":["Mapleton"]}
+{"id":"po-town-03","class":"town-neighbourhood","text":"We moved to Heber City for my husband's job and I do not know a single person here.","identifier":"Heber City","match":["Heber"]}
+{"id":"po-town-04","class":"town-neighbourhood","text":"I rent a basement in the Tree Streets and my landlord lives right upstairs.","identifier":"the Tree Streets","match":["Tree Streets"]}
+{"id":"po-town-05","class":"town-neighbourhood","text":"I have lived in the Grandview neighborhood my whole life and I think I need to get out.","identifier":"the Grandview neighborhood","match":["Grandview"]}
+{"id":"po-team-01","class":"team-club","text":"I am the only goalie on the Canyon Kings, our rec league hockey team, so I cannot skip a game.","identifier":"the Canyon Kings","match":["Canyon Kings"]}
+{"id":"po-team-02","class":"team-club","text":"I run with the Rock Canyon Striders every week and it is the only social thing I do.","identifier":"the Rock Canyon Striders","match":["Rock Canyon","Striders"]}
+{"id":"po-team-03","class":"team-club","text":"I am the treasurer of the Bonneville Chess Club and I dread running the meetings.","identifier":"the Bonneville Chess Club","match":["Bonneville"]}
+{"id":"po-team-04","class":"team-club","text":"I made the Cougarettes this year and I am terrified of getting cut.","identifier":"the Cougarettes","match":["Cougarettes"]}
+{"id":"po-team-05","class":"team-club","text":"I coach the under-12 girls for Ridgeline United and the parents are exhausting.","identifier":"Ridgeline United","match":["Ridgeline"]}
+{"id":"po-control-01","class":"control-covered","text":"My name is Marcus Ellery and I have been feeling pretty flat lately.","identifier":"Marcus Ellery","match":["Marcus","Ellery"]}
+{"id":"po-control-02","class":"control-covered","text":"If we get cut off you can call me back at 801-555-0177.","identifier":"801-555-0177","match":["801-555-0177","555-0177"]}
+{"id":"po-control-03","class":"control-covered","text":"You can send the worksheet to kelsie.tran94@example.com if that is easier.","identifier":"kelsie.tran94@example.com","match":["kelsie","tran94","example.com"]}
+{"id":"po-control-04","class":"control-covered","text":"I live at 1483 Quail Hollow Drive and my neighbors are up at all hours.","identifier":"1483 Quail Hollow Drive","match":["1483","Quail Hollow"]}
+{"id":"po-control-05","class":"control-covered","text":"I was born on April 9, 1998, so I am older than most people in my program.","identifier":"April 9, 1998","match":["April 9"]}
+{"id":"po-control-06","class":"control-covered","text":"My roommate Brooke Sandoval keeps telling me I should talk to someone.","identifier":"Brooke Sandoval","match":["Brooke","Sandoval"]}
+{"id":"po-none-01","class":"control-none","text":"I have been sleeping badly and I cannot focus in class.","identifier":null,"match":[]}
+{"id":"po-none-02","class":"control-none","text":"I think the breathing exercise helped a little, but I forget to do it.","identifier":null,"match":[]}
+{"id":"po-none-03","class":"control-none","text":"My mom and I argue every time we talk on the phone.","identifier":null,"match":[]}
+{"id":"po-none-04","class":"control-none","text":"I feel better after I exercise, I just never want to start.","identifier":null,"match":[]}

@@ -146,3 +146,196 @@ OPENAI_API_KEY=... node node_modules/.bin/tsx scripts/redaction-shape-eval.mjs \
 
 The output file quotes the synthetic messages and the model's replies
 (including crisis-style refusals); keep it out of the repo.
+
+---
+
+# Addendum (2026-11-26, later the same night): place and organisation names
+
+**Status: measurement only. No prompt, model, tier, threshold, validation or
+product code changed. Needs a PI and owner decision (end of this section).**
+
+## Question
+
+The eval above found one school name ("Timpview High School") left in 12 of 15
+stored outputs. That was one fixture item. How often does redaction leave an
+identifying place or organisation name in an ordinary message, and does the
+leak check that runs after redaction flag the ones it leaves?
+
+## What the two prompts ask for
+
+The redaction prompt (`redaction.service.ts`, unchanged) lists the 18 Safe
+Harbor identifiers. Of the classes measured here:
+
+| Class | In the redaction prompt's list? |
+| --- | --- |
+| Person names, phone, email, street address, date of birth (controls) | Named explicitly (items 1, 2, 3, 4, 6) |
+| Small towns | Named explicitly: item 2, "city" |
+| Neighbourhoods | Covered by item 2's wording ("all geographic subdivisions smaller than state"), not named as such |
+| High schools, universities, campus buildings and dorms | Not named |
+| Employers and small businesses | Not named |
+| Churches, wards and congregations | Not named |
+| Hospitals and clinics | Not named |
+| Named apartment complexes | Not named |
+| Sports teams and clubs | Not named |
+
+The classes marked "not named" can only be reached through item 18 ("any
+other characteristic that could uniquely identify the individual") or by
+reading the name as a location. The same prompt also says "Do not redact any
+information unless it exactly matches a Safe Harbor identifier" and "Be
+strict", which points the other way. A name left in from one of those classes
+is therefore the model following the wording it was given, not the model
+failing; whether the wording should ask for them is a question for the PI.
+
+The leak check's question (`redactionVerifier.service.ts`, unchanged) names
+person names, a street address or city, dates, phone, email, account or
+record numbers, URLs and "any other number or string that identifies a
+specific person". It does not name organisations either, and it says generic
+references such as "the university" are not identifiers.
+
+## Method
+
+- Fixture: `evals/goldens/redaction-place-org.jsonl`, 50 INVENTED ordinary,
+  non-crisis messages (no participant data; place names are invented or are
+  generic public ones). 40 carry exactly one place or organisation name, 5 in
+  each of 8 classes; 6 controls carry one clearly listed identifier (2 full
+  names, phone, email, street address, date of birth); 4 have nothing to
+  redact. Each row lists the strings that must not survive.
+- Runner: `scripts/redaction-place-org-eval.mjs` (opt-in, never in CI).
+  Redaction is the production `redactPHIBatch`: gpt-5, flex tier, reasoning
+  effort low, double pass, same validation and call caps, legacy wording
+  (`REDACTION_PROMPT_VERSION` unset). The 50 messages go through in 5 batches
+  of 10, shuffled per run so every batch mixes classes; 3 runs, so 15 batches
+  and 30 model calls.
+- Leak check: the production `askLeakCheck` on every stored output, with the
+  code default config that migration 110 seeds (backend auto, threshold 0.5).
+  All 150 checks were answered by the Decisions API (gpt-6-luna); none
+  errored. No database was used, so a deployment's own `system_config`
+  threshold, if it differs, was not what ran.
+- Outcome per message and run: `removed` (stored; none of the listed strings
+  left), `survived` (stored; a listed string still there), `rejected` (failed
+  validation; not stored).
+
+## Results
+
+### Redaction
+
+| Class | In the prompt's list | n | Removed | Survived | Rejected |
+| --- | --- | --- | --- | --- | --- |
+| High schools | no | 15 | 0 | 15 | 0 |
+| Universities, campus buildings, dorms | no | 15 | 3 | 12 | 0 |
+| Employers and small businesses | no | 15 | 0 | 15 | 0 |
+| Churches, wards, congregations | no | 15 | 2 | 13 | 0 |
+| Hospitals and clinics | no | 15 | 0 | 15 | 0 |
+| Named apartment complexes | no | 15 | 5 | 10 | 0 |
+| Sports teams and clubs | no | 15 | 0 | 15 | 0 |
+| **All classes not in the list** | | **105** | **10** | **95** | **0** |
+| Small towns and neighbourhoods | yes | 15 | 15 | 0 | 0 |
+| Controls: name, phone, email, street address, date of birth | yes | 18 | 18 | 0 | 0 |
+| Nothing to redact | n/a | 12 | 12 (unchanged) | 0 | 0 |
+
+- **Every identifier the prompt lists was removed every time** (33 of 33:
+  towns, neighbourhoods and the controls). Clearly covered identifiers were
+  never missed.
+- **Place and organisation names the prompt does not list were left in 95 of
+  105 times (90%).** Every one of the 35 messages kept its name in at least
+  one run; 27 kept it in all three. The 10 removals were a dorm (2 of 3
+  runs), a campus building, a ward, a church (1 run each), and four of the
+  five apartment complexes (1 or 2 runs each), all replaced by a LOCATION or
+  NAME placeholder. A survivor was always the message returned word for
+  word: no partial redactions.
+- No output was rejected by validation, and no message with nothing to redact
+  came back changed (0 of 12).
+
+### Leak check on the stored outputs
+
+The leak check gave the same probability every time it saw the same text, and
+the same text recurs across runs, so the honest unit is the distinct output
+text. Both counts are shown.
+
+| | Flagged, by output | Flagged, by distinct text |
+| --- | --- | --- |
+| Outputs where the name survived (should be flagged) | 62 of 95 (65%) | 23 of 35 (66%) |
+| Clean outputs (should not be flagged) | 12 of 55 (22%) | 6 of 25 (24%) |
+
+Catch rate on survivors by class (distinct texts): high schools 4 of 5,
+universities and campus 2 of 5, employers 3 of 5, congregations 4 of 5,
+hospitals and clinics 4 of 5, apartment complexes 4 of 5, teams and clubs 2
+of 5.
+
+- **The leak check missed about a third of the surviving names.** The 12
+  messages it passed, with the probability it gave: BYU (0.01), the
+  Cougarettes (0.14), Helaman Halls (0.27), Monarch Flats (0.29), Ridgeline
+  United (0.31), Utah Valley University (0.32), Skyridge (0.32), Cornerstone
+  Baptist (0.33), Wasatch Peak Solar (0.34), Bluebird Bakery (0.43), the
+  Bonneville Chess Club (0.46), Primary Children's Hospital (0.49). Most sit
+  between 0.3 and 0.5, just under the 0.5 threshold.
+- **Every false flag was on a placeholder, not on leftover text.** The 12
+  falsely flagged outputs were correctly redacted messages: "call me back at
+  [REDACTED: TELEPHONE NUMBER]" (0.53, 3 runs), "send the worksheet to
+  [REDACTED: EMAIL ADDRESS]" (0.68, 3 runs), "I live at [REDACTED:
+  LOCATION]" for the street address (0.60, or 0.85 when the label was
+  ADDRESS; 3 runs), and the redacted dorm and church sentences (0.67 twice,
+  0.86 once). Of the 43 clean outputs that contained a placeholder 12 were
+  flagged; of the 12 with no placeholder none were. So the phone, email and
+  street-address controls were flagged on every run although nothing had
+  leaked, despite the question saying placeholders are not identifiers.
+
+## What was and was not measured
+
+Measured: the legacy wording, gpt-5 on flex, the batch path, batches of 10
+mixed messages, one identifier per message, 3 runs on one night; the leak
+check on the Decisions backend at the default 0.5 threshold.
+
+Not measured, and not to be read into these numbers:
+
+- Real transcripts. The messages are invented, short, and each states its
+  identifier plainly; real sessions are longer, and a name may appear with
+  other identifiers or be alluded to.
+- How identifying each name is. "BYU" in a study recruited at BYU identifies
+  nobody; "resident manager at the Sycamore Lofts" or "Relief Society
+  president in the Edgemont 14th Ward" nearly does. The fixture mixes both on
+  purpose and the table does not weigh them. Whether a class should be
+  redacted is a judgement about re-identification risk that this eval does
+  not make.
+- Independence. Messages in a batch share one model call, and 3 runs of 5
+  items is a small sample: the per-class figures separate "almost always
+  left in" from "always removed", not 80% from 90%.
+- The single-message path, the `v2` wording, any other model, the Responses
+  fallback of the leak check, and any other threshold.
+- Whether the leak check's false flags on placeholders also occur at this
+  rate in stored study data. That can be counted from
+  `metadata.redaction_check` without any model call; it was not looked at
+  here because this eval reads no stage or prod data.
+
+## Cost
+
+Redaction: 30 calls, 40,177 input and 36,330 output tokens (reasoning
+included), all served on flex: about $0.21 at gpt-5 flex rates. Leak check:
+150 Decisions API calls, 41,938 input tokens on gpt-6-luna, on top of that
+(rate not assumed here). The $3 budget was not approached.
+
+## Decision needed
+
+1. **PI: should the redaction wording ask for organisation and facility
+   names** (schools, employers, congregations, clinics, housing complexes,
+   teams) when they point at a person? As written it does not, and the model
+   leaves them in about 9 times in 10. This is a wording and protocol
+   question (what the IRB materials promise is removed), and any new wording
+   needs this fixture and the crisis fixture run against it before it ships,
+   because broader redaction can also remove clinical content.
+2. **Owner: the leak check is not a backstop for this class today.** It
+   passes about a third of the surviving names and flags about a fifth of
+   correctly redacted messages because of their placeholders. Decide whether
+   its question should name organisations and be tested against placeholder
+   text, in step with whatever the PI decides for item 1, so the two prompts
+   ask for the same thing.
+
+## Reproduce
+
+```
+OPENAI_API_KEY=... node node_modules/.bin/tsx scripts/redaction-place-org-eval.mjs \
+  --out /somewhere/outside/the/repo/redaction-place-org.jsonl --runs 3
+```
+
+The output file quotes the synthetic messages and the model's outputs; keep
+it out of the repo.
