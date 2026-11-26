@@ -23,6 +23,7 @@ import {
   getUserById,
   setSquawkUserId,
   setCognitoSub,
+  replaceCognitoSub,
   type CreateUserOptions,
   type UserRow,
 } from '../db/index.js';
@@ -46,6 +47,9 @@ export class AccountSyncError extends Error {
     this.name = 'AccountSyncError';
   }
 }
+
+export const NOT_IN_POOL_MESSAGE =
+  'This account is not in the sign-in service yet. Set a new password for it to move it there.';
 
 export const PASSWORD_REJECTED_MESSAGE = 'The sign-in service did not accept this password. Choose a different one.';
 
@@ -144,7 +148,17 @@ async function updateInPool(userid: number | string, updates: AccountUpdates): P
   if (updates.password === undefined && updates.role === undefined) return updated;
   const username = current?.username ?? updated.username;
   try {
-    if (updates.password !== undefined) await cognitoAdmin.setPassword(username, updates.password);
+    if (updates.password !== undefined) {
+      try {
+        await cognitoAdmin.setPassword(username, updates.password);
+      } catch (err) {
+        if (!isPoolError(err, 'user_not_found')) throw err;
+        // The account predates the pool. A new password is all a pool user
+        // needs, so this is how such an account moves: create it there now,
+        // with the role the row holds after this update.
+        return await moveIntoPool(updated, username, updates.password);
+      }
+    }
     if (updates.role !== undefined) await cognitoAdmin.setRole(username, updates.role);
   } catch (err) {
     log.error({ err, userid }, 'Cognito account update failed; the local change stands');
@@ -152,11 +166,29 @@ async function updateInPool(userid: number | string, updates: AccountUpdates): P
       throw new AccountSyncError(PASSWORD_REJECTED_MESSAGE, err, 'password_rejected');
     }
     if (isPoolError(err, 'user_not_found')) {
-      throw new AccountSyncError('This account does not exist in the sign-in service', err);
+      throw new AccountSyncError(NOT_IN_POOL_MESSAGE, err);
     }
     throw new AccountSyncError('Sign-in service rejected the change', err);
   }
   return updated;
+}
+
+/** Create the pool user for a row that existed before the pool (or whose pool
+ *  user is gone), from a password that was just set for it, and link the row.
+ *  Errors propagate to updateInPool's handler; the local row is never removed
+ *  here, unlike a failed registration: the account is older than this call. */
+async function moveIntoPool(user: UserRow, username: string, password: string): Promise<UserRow> {
+  const { sub } = await cognitoAdmin.createUser(username, password, user.role);
+  log.info({ userid: user.userid, role: user.role }, 'account created in the Cognito pool on a password change');
+  if (!sub) return user;
+  try {
+    // Any subject the row held is of a pool user that no longer exists.
+    await replaceCognitoSub(user.userid, sub);
+  } catch (err) {
+    log.warn({ err, userid: user.userid }, 'could not record the pool subject of a moved account');
+    return user;
+  }
+  return { ...user, cognito_sub: sub };
 }
 
 /** Staff reset of a lost authenticator app (ai-therapist-396): switch the
@@ -174,7 +206,7 @@ export async function resetAuthenticator(userid: number | string): Promise<UserR
   } catch (err) {
     log.error({ err, userid }, 'Cognito authenticator reset failed');
     if (isPoolError(err, 'user_not_found')) {
-      throw new AccountSyncError('This account does not exist in the sign-in service', err);
+      throw new AccountSyncError(NOT_IN_POOL_MESSAGE, err);
     }
     throw new AccountSyncError('Sign-in service rejected the change', err);
   }
