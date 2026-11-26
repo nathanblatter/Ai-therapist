@@ -132,6 +132,8 @@ interface MFAStatus {
   enabled: boolean;
   backupCodesRemaining: number;
   enabledAt?: string;
+  /** Set when a sign-in service holds the authenticator, not this app. */
+  managedBy?: 'cognito';
 }
 
 export default function MFASetup() {
@@ -278,6 +280,31 @@ export default function MFASetup() {
     return (
       <div className="p-6">
         <p className="text-gray-500">Loading MFA settings...</p>
+      </div>
+    );
+  }
+
+  if (mfaStatus?.managedBy === 'cognito') {
+    return (
+      <div className="p-6 space-y-6">
+        <h2 className="text-2xl font-bold flex items-center gap-2">
+          <Shield className="text-royal" />
+          Sign-in security
+        </h2>
+        <div className="bg-white p-6 rounded-lg shadow space-y-3">
+          <p className="text-gray-700">
+            Your password and authenticator app are held by the study sign-in service, not by this screen.
+          </p>
+          <p className="text-gray-700">
+            {mfaStatus.enabled
+              ? 'Your account signs in with a password and a code from your authenticator app.'
+              : 'An authenticator app is not required for your account.'}
+          </p>
+          <p className="text-sm text-gray-500">
+            New phone, lost authenticator app, or a password to change? Ask a study researcher: they can reset either
+            from User Management, and you set up the new authenticator app the next time you sign in.
+          </p>
+        </div>
       </div>
     );
   }

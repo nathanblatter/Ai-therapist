@@ -15,6 +15,7 @@ vi.stubEnv('APP_URL', 'https://app.test');
 
 const dbMocks = vi.hoisted(() => ({
   getUserByCognitoSub: vi.fn(),
+  getUserById: vi.fn(),
   getUserByUsernameForCognito: vi.fn(),
   setCognitoSub: vi.fn(),
   syncRoleFromCognito: vi.fn(),
@@ -29,6 +30,18 @@ vi.mock('../../services/cognito.service.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/cognito.service.js')>();
   return { ...actual, ...cognitoMocks };
 });
+
+// Staff sign-ins ask the pool whether the account has an authenticator app
+// (cognitoAuth.totp.routes.test.ts covers that path); here every staff
+// account has one.
+const adminMocks = vi.hoisted(() => ({
+  getTotpEnabled: vi.fn(),
+  beginTotpEnrolment: vi.fn(),
+  verifyTotpEnrolment: vi.fn(),
+  setTotpEnabled: vi.fn(),
+}));
+vi.mock('../../services/cognitoAdmin.service.js', () => adminMocks);
+vi.mock('../../services/mfa.service.js', () => ({ generateQRCode: vi.fn() }));
 
 const { CognitoError } = await import('../../services/cognito.service.js');
 const { default: cognitoAuthRoutes } = await import('./cognitoAuth.routes.js');
@@ -97,6 +110,7 @@ beforeEach(() => {
   cognitoMocks.verifyIdToken.mockResolvedValue(claims());
   dbMocks.getUserByCognitoSub.mockResolvedValue(row());
   dbMocks.getUserByUsernameForCognito.mockResolvedValue(null);
+  adminMocks.getTotpEnabled.mockResolvedValue(true);
 });
 
 describe('GET /api/auth/cognito/config', () => {

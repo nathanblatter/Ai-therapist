@@ -86,6 +86,12 @@ async function raiseFor(resp: Response): Promise<Json> {
   throw new CognitoError(resp.status, code, detail);
 }
 
+/** `openid` for the ID token. `aws.cognito.signin.user.admin` so the access
+ *  token of a staff sign-in can enrol an authenticator app for that same user
+ *  (cognitoAdmin.service.ts); the token stays on the server and is dropped
+ *  when it is not needed. The app client must allow both scopes. */
+export const SCOPE = 'openid aws.cognito.signin.user.admin';
+
 // ── Hosted page URLs ────────────────────────────────────────────────────────
 
 export function authorizeUrl(p: { state: string; challenge: string; nonce: string }): string {
@@ -93,7 +99,7 @@ export function authorizeUrl(p: { state: string; challenge: string; nonce: strin
     response_type: 'code',
     client_id: CLIENT_ID,
     redirect_uri: redirectUri(),
-    scope: 'openid',
+    scope: SCOPE,
     state: p.state,
     nonce: p.nonce,
     code_challenge: p.challenge,

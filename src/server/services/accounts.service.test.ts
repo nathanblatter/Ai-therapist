@@ -55,6 +55,7 @@ const pool = vi.hoisted(() => {
     setRole: vi.fn(),
     deleteUser: vi.fn(),
     getUserSub: vi.fn(),
+    setTotpEnabled: vi.fn(),
   };
 });
 vi.mock('./cognitoAdmin.service.js', () => pool);
@@ -62,7 +63,7 @@ vi.mock('./cognitoAdmin.service.js', () => pool);
 const email = vi.hoisted(() => ({ clearEmailIfIneligible: vi.fn() }));
 vi.mock('./researcherEmail.service.js', () => email);
 
-const { registerAccount, updateAccount, removeAccount, PASSWORD_REJECTED_MESSAGE } = await import(
+const { registerAccount, updateAccount, removeAccount, resetAuthenticator, PASSWORD_REJECTED_MESSAGE } = await import(
   './accounts.service.js'
 );
 
@@ -294,6 +295,32 @@ describe('Cognito configured', () => {
       await expect(removeAccount(99)).rejects.toThrow('User not found');
       expectNoPoolCalls();
     });
+  });
+});
+
+describe('resetAuthenticator', () => {
+  it('switches the code challenge off in the pool for the account', async () => {
+    cognito.enabled.mockReturnValue(true);
+    pool.setTotpEnabled.mockResolvedValue(undefined);
+    await expect(resetAuthenticator(7)).resolves.toMatchObject({ userid: 7, username: 'p_one' });
+    expect(pool.setTotpEnabled).toHaveBeenCalledWith('p_one', false);
+  });
+
+  it('is refused when Cognito is not the provider', async () => {
+    await expect(resetAuthenticator(7)).rejects.toMatchObject({ name: 'AccountSyncError' });
+    squawk.enabled.mockReturnValue(true);
+    await expect(resetAuthenticator(7)).rejects.toMatchObject({ name: 'AccountSyncError' });
+    expect(pool.setTotpEnabled).not.toHaveBeenCalled();
+  });
+
+  it('reports an unknown account, an account the pool does not have, and a pool failure', async () => {
+    cognito.enabled.mockReturnValue(true);
+    db.getUserById.mockResolvedValueOnce(null);
+    await expect(resetAuthenticator(99)).rejects.toThrow('User not found');
+    pool.setTotpEnabled.mockRejectedValueOnce(new pool.CognitoAdminError('user_not_found'));
+    await expect(resetAuthenticator(7)).rejects.toThrow('This account does not exist in the sign-in service');
+    pool.setTotpEnabled.mockRejectedValueOnce(new pool.CognitoAdminError('failed'));
+    await expect(resetAuthenticator(7)).rejects.toMatchObject({ name: 'AccountSyncError' });
   });
 });
 

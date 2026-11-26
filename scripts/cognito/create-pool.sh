@@ -65,7 +65,8 @@ echo "    pool id: $POOL_ID"
 
 echo "==> authenticator-app codes available, optional at the pool level"
 # The pool can only require a second factor for everyone or for no one. Staff
-# are required to have one by the app at sign-in (ai-therapist-396).
+# are required to have one by the app at sign-in, which also enrols it
+# (ai-therapist-396, docs/cognito-auth.md "Authenticator codes for staff").
 aws cognito-idp set-user-pool-mfa-config --region "$REGION" --user-pool-id "$POOL_ID" \
   --software-token-mfa-configuration Enabled=true \
   --mfa-configuration OPTIONAL >/dev/null
@@ -82,13 +83,16 @@ aws cognito-idp create-user-pool-domain --region "$REGION" --user-pool-id "$POOL
 
 echo "==> app client"
 # A server-side client with a secret: only this app's backend exchanges codes.
+# aws.cognito.signin.user.admin lets the backend enrol an authenticator app for
+# the staff member who just signed in (the hosted page does not offer setup
+# while a second factor is optional in the pool).
 CLIENT_JSON="$(aws cognito-idp create-user-pool-client --region "$REGION" --user-pool-id "$POOL_ID" \
   --client-name "ai-therapist-$ENV_NAME-web" \
   --generate-secret \
   --supported-identity-providers COGNITO \
   --allowed-o-auth-flows-user-pool-client \
   --allowed-o-auth-flows code \
-  --allowed-o-auth-scopes openid \
+  --allowed-o-auth-scopes openid aws.cognito.signin.user.admin \
   --callback-urls "$APP_URL/api/auth/cognito/callback" \
   --logout-urls "$APP_URL/login" \
   --prevent-user-existence-errors ENABLED \

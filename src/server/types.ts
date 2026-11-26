@@ -37,6 +37,11 @@ declare module 'express-session' {
     /** In-flight Cognito sign-in (ai-therapist-387): PKCE verifier, state and
      *  nonce, written by /api/auth/cognito/start, consumed by the callback. */
     cognitoAuth?: { state: string; verifier: string; nonce: string; startedAt: number };
+    /** A staff member who signed in at Cognito without an authenticator app
+     *  (ai-therapist-396). NOT a signed-in session: no userId is set. It only
+     *  lets /api/auth/cognito/totp/* enrol one, with the access token of that
+     *  sign-in, which never leaves the server. */
+    cognitoEnrol?: { userId: number; username: string; accessToken: string; startedAt: number; attempts: number };
   }
 }
 

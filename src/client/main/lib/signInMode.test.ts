@@ -20,6 +20,12 @@ describe('planSignIn', () => {
     });
   });
 
+  it('stays on the page while a staff sign-in is held for authenticator setup', () => {
+    expect(planSignIn({ ...base, cognitoEnabled: true, enrolling: true })).toEqual({ mode: 'cognito', redirect: null });
+    // The flag means nothing without Cognito.
+    expect(planSignIn({ ...base, squawkEnabled: true, enrolling: true }).redirect).toBe(SQUAWK_START);
+  });
+
   it('prefers Cognito when both providers are configured', () => {
     expect(planSignIn({ ...base, cognitoEnabled: true, squawkEnabled: true, loginChallenge: 'lc1' }).mode).toBe(
       'cognito',

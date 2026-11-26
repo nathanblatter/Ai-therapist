@@ -28,9 +28,12 @@ export function planSignIn(input: {
   /** ?error= from a provider callback. Never auto-redirect past it: the person
    *  needs to see why sign-in failed, and redirecting would loop. */
   callbackError: string | null;
+  /** ?enrol=totp: the callback is holding a staff sign-in until an
+   *  authenticator app is set up. Stay on the page for that. */
+  enrolling?: boolean;
 }): SignInPlan {
   if (input.cognitoEnabled) {
-    return { mode: 'cognito', redirect: input.callbackError ? null : COGNITO_START };
+    return { mode: 'cognito', redirect: input.callbackError || input.enrolling ? null : COGNITO_START };
   }
   if (input.squawkEnabled) {
     return { mode: 'squawk', redirect: !input.loginChallenge && !input.callbackError ? SQUAWK_START : null };
