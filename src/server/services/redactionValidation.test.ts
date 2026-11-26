@@ -188,6 +188,104 @@ describe('threshold boundaries (review of PR #102: each pinned on both sides)', 
   });
 });
 
+describe('very short messages (follow-up to ai-therapist-382)', () => {
+  // Before these rules the fixed floors (2 new words, 1 dropped word, 10
+  // words per placeholder) covered a whole short message, so each "rejects"
+  // case below was stored as the redaction.
+  it.each([
+    ['help', 'You matter.'],
+    ['die', 'Stay safe'],
+    ['yes', 'Thank you'],
+    ['ok', 'Understood.'],
+    ['no', 'Okay.'],
+    ['...', 'Thank you'],
+    ['…?', 'Take care'],
+    ['John', 'Hello [REDACTED: NAME]'],
+    ['555-123-4567', 'Noted [REDACTED: TELEPHONE NUMBER]'],
+  ])('rejects %j -> %j: no word of the output is from the input', (input, output) => {
+    expect(validateRedaction(input, output)).toMatchObject({ ok: false, reason: 'words_not_in_input' });
+  });
+
+  it.each([
+    ['I want to die', '[REDACTED]'],
+    ['I want to kill myself tonight', '[REDACTED: OTHER]'],
+    ['i cant do this', '[REDACTED]'],
+    ["I'm done", '"[REDACTED]"'],
+    ['what is the point', '[REDACTED: OTHER].'],
+    ['I am [REDACTED: NAME]', '[REDACTED: NAME]'],
+    ['My name is John Smith', '[REDACTED: NAME]'],
+  ])('rejects %j -> %j: a sentence replaced whole by a placeholder', (input, output) => {
+    expect(validateRedaction(input, output)).toMatchObject({ ok: false, reason: 'words_missing' });
+  });
+
+  it.each([
+    // unchanged, one to three words
+    ['help', 'help'],
+    ['die', 'die'],
+    ['ok', 'OK.'],
+    ['yes', '"yes"'],
+    ['I want to die', 'I want to die'],
+    ['no', 'no'],
+    // same letters, other punctuation or spacing
+    ['Im', 'I’m'],
+    ['im fine', "I'm fine"],
+    ['cant', "can't"],
+    // nothing but an identifier, replaced whole
+    ['John', '[REDACTED: NAME]'],
+    ['John Smith', '[REDACTED: NAME]'],
+    ['555-123-4567', '[REDACTED: TELEPHONE NUMBER]'],
+    ['john.smith@example.com', '[REDACTED: EMAIL ADDRESS]'],
+    ['12 Elm Street, Provo, UT 84601', '[REDACTED: ADDRESS]'],
+    ['Portland, ME', '[REDACTED: LOCATION]'],
+    ['10:45 AM', '[REDACTED: TIME]'],
+    ['Jane Doe, DO', '[REDACTED: NAME]'],
+    ['Will Smith', '[REDACTED: NAME]'],
+    ['March 4', '[REDACTED: DATE]'],
+    ['John Smith 555-123-4567', '[REDACTED: NAME] [REDACTED: TELEPHONE NUMBER]'],
+    // heavy but legitimate: the sentence words survive
+    ['hi im john', 'hi im [REDACTED: NAME]'],
+    ["it's John", "it's [REDACTED: NAME]"],
+    ['I am John Smith', 'I am [REDACTED: NAME]'],
+    ['call me at 555-123-4567', 'call me at [REDACTED: TELEPHONE NUMBER]'],
+    [
+      'John Smith, 12 Elm St, Provo UT 84601, 555-123-4567, john@example.com',
+      '[REDACTED: NAME], [REDACTED: ADDRESS], [REDACTED: TELEPHONE NUMBER], [REDACTED: EMAIL]',
+    ],
+    [
+      'My sister Anna lives in Orem and was born 3/4/1990',
+      'My sister [REDACTED: NAME] lives in [REDACTED: LOCATION] and was born [REDACTED: DATE]',
+    ],
+    // no words at all
+    [':(', ':('],
+    ['...', '...'],
+    ['?', '?'],
+    // second pass over a message that is already only a placeholder
+    ['[REDACTED: NAME]', '[REDACTED: NAME]'],
+    ['I am [REDACTED: NAME]', 'I am [REDACTED: NAME]'],
+  ])('accepts %j -> %j', (input, output) => {
+    expect(validateRedaction(input, output)).toEqual({ ok: true });
+  });
+
+  it('still allows two new words when at least one output word is from the input', () => {
+    expect(validateRedaction('hello', 'hello n1 n2').ok).toBe(true);
+    expect(validateRedaction('hello', 'n1 n2')).toMatchObject({ reason: 'words_not_in_input' });
+  });
+
+  it('the whole-message rule needs a sentence word: an identifier-only message of any length may be replaced', () => {
+    expect(validateRedaction('Dr Maria Garcia Lopez, Provo', '[REDACTED: NAME], [REDACTED: LOCATION]').ok).toBe(true);
+    expect(validateRedaction('she', '[REDACTED]')).toMatchObject({ reason: 'words_missing' });
+  });
+
+  it('the stored detail carries counts only', () => {
+    expect(rejectionError(validateRedaction('help', 'You matter.'))).toBe(
+      'Redaction output rejected: words_not_in_input (2/2, none from the input)',
+    );
+    expect(rejectionError(validateRedaction('I want to die', '[REDACTED]'))).toBe(
+      'Redaction output rejected: words_missing (all 4 words removed)',
+    );
+  });
+});
+
 describe('URLs count as one word (review of PR #102)', () => {
   it('accepts a long URL with a query string redacted to one placeholder', () => {
     const input =
