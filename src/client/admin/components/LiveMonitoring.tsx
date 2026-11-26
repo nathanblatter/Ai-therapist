@@ -1,11 +1,30 @@
 import { useState, useEffect, useRef } from 'react';
 import type { Socket } from 'socket.io-client';
-import { Activity, Users, MessageSquare, AlertTriangle, X, Radio, Tool, Volume2, Square, Play } from 'react-feather';
+import {
+  Activity,
+  Users,
+  MessageSquare,
+  AlertTriangle,
+  X,
+  Radio,
+  Tool,
+  Volume2,
+  Square,
+  Play,
+  MicOff,
+} from 'react-feather';
 import { useSocket } from '../hooks/useSocket';
 import { toast } from '../../shared/components/Toast';
 import { getJson, postJson, HttpError } from '../../shared/http';
 import { severityBadgeClass } from '../../shared/severity';
 import { AudioStreamPlayer } from '../lib/audioStreamPlayer';
+import {
+  VOICE_NOTICE_TRANSIENT_MS,
+  VOICE_SILENCE_EVENTS,
+  nextVoiceNotice,
+  voiceSilenceNotice,
+  type VoiceNotice,
+} from '../utils/voiceSilenceNotice';
 
 // ---- Local types ----
 
@@ -107,6 +126,10 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   // later event folded into a page the on-call already has. Stays until
   // dismissed, because by design no text message accompanies it.
   const [pageNotice, setPageNotice] = useState<PageNotice | null>(null);
+  // A voice session that went quiet (utils/voiceSilenceNotice.ts). A notice
+  // that the server is still acting on clears itself; one it has given up on
+  // stays until dismissed.
+  const [voiceNotice, setVoiceNotice] = useState<VoiceNotice | null>(null);
   const { socket: rawSocket, connected } = useSocket();
   const socket = rawSocket as Socket | null;
 
@@ -212,6 +235,12 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     socket.on('session:crisis-unflagged', handleCrisisUnflagged);
     socket.on('session:eligibility-violation', handleEligibilityViolation);
     socket.on('session:page-decision', handlePageDecision);
+    const voiceHandlers = VOICE_SILENCE_EVENTS.map((event) => {
+      const handler = (data: unknown) =>
+        setVoiceNotice((prev) => nextVoiceNotice(prev, voiceSilenceNotice(event, data)));
+      socket.on(event, handler);
+      return { event, handler };
+    });
 
     // Sideband event listeners
     socket.on('sideband:connected', handleSidebandConnected);
@@ -232,6 +261,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
       socket.off('session:crisis-flagged', handleCrisisFlagged);
       socket.off('session:crisis-unflagged', handleCrisisUnflagged);
       socket.off('session:page-decision', handlePageDecision);
+      for (const { event, handler } of voiceHandlers) socket.off(event, handler);
       socket.off('session:eligibility-violation', handleEligibilityViolation);
       socket.off('sideband:connected', handleSidebandConnected);
       socket.off('sideband:disconnected', handleSidebandDisconnected);
@@ -244,6 +274,13 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
       socket.off('admin:sideband-connections', handleSidebandConnectionsList);
     };
   }, [socket]);
+
+  // A transient voice notice clears itself; a newer notice restarts the clock.
+  useEffect(() => {
+    if (!voiceNotice || voiceNotice.persistent) return;
+    const id = setTimeout(() => setVoiceNotice((n) => (n === voiceNotice ? null : n)), VOICE_NOTICE_TRANSIENT_MS);
+    return () => clearTimeout(id);
+  }, [voiceNotice]);
 
   // Feed incoming audio chunks to the player (ref guards against stale closure).
   const audioChunkCountRef = useRef(0);
@@ -977,6 +1014,42 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
               onClick={() => setPageNotice(null)}
               className="p-1 hover:bg-white hover:bg-opacity-25 rounded transition min-h-[44px] min-w-[44px] flex items-center justify-center"
               aria-label="Dismiss paging notice"
+            >
+              <X size={20} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {voiceNotice && (
+        <div
+          className={`border-l-4 p-4 rounded flex items-center justify-between ${
+            voiceNotice.persistent
+              ? 'bg-red-100 border-red-500 text-red-900'
+              : 'bg-amber-100 border-amber-500 text-amber-900'
+          }`}
+          role={voiceNotice.persistent ? 'alert' : 'status'}
+          aria-live={voiceNotice.persistent ? 'assertive' : 'polite'}
+        >
+          <div className="flex items-center gap-3">
+            <MicOff size={24} aria-hidden="true" />
+            <div>
+              <p className="font-bold">{voiceNotice.message}</p>
+              <p className="text-sm">Session: {voiceNotice.sessionId.substring(0, 12)}...</p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => onViewSession(voiceNotice.sessionId, false)}
+              className="px-3 py-1 bg-white bg-opacity-50 rounded hover:bg-opacity-75 transition text-sm font-medium min-h-[44px]"
+              aria-label={`View session ${voiceNotice.sessionId.substring(0, 12)}`}
+            >
+              View Session
+            </button>
+            <button
+              onClick={() => setVoiceNotice(null)}
+              className="p-1 hover:bg-white hover:bg-opacity-25 rounded transition min-h-[44px] min-w-[44px] flex items-center justify-center"
+              aria-label="Dismiss voice notice"
             >
               <X size={20} />
             </button>
