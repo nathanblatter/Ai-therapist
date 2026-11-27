@@ -69,4 +69,11 @@ describe('getFunnel', () => {
     expect(sql).toContain('ended_by IS NOT NULL');
     expect(sql).toContain('>= 60');
   });
+
+  it('a session cut because staff changed or deleted the account is not a graceful end', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{}] });
+    await getFunnel(30);
+    const [sql] = queryMock.mock.calls[0] as [string];
+    expect(sql).toMatch(/ended_by IS NOT NULL\s+AND s\.ended_by <> 'account_changed'/);
+  });
 });

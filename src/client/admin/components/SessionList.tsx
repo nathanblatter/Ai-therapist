@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import FilterBar from './FilterBar';
 import { formatDateTime } from '../../shared/format';
 import { deleteJson, getJson } from '../../shared/http';
+import { endedByLabel } from '../utils/endedBy';
 
 interface Session {
   session_id: string;
@@ -193,7 +194,7 @@ export default function SessionList({ onViewSession }: SessionListProps) {
                             session.ended_by === 'user' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'
                           }`}
                         >
-                          {session.ended_by === 'user' ? 'User' : session.ended_by}
+                          {endedByLabel(session.ended_by)}
                         </span>
                       ) : (
                         <span className="italic text-gray-400">-</span>

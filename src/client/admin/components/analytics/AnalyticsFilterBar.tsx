@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { AnalyticsFilterState } from './types';
+import { ENDED_BY_OPTIONS } from '../../utils/endedBy';
 
 // Date + advanced filter bar for the Usage tab of the analytics dashboard.
 // These filters only affect the main /admin/api/analytics fetch, so the bar
@@ -45,12 +46,6 @@ const STATUS_OPTIONS = [
   { value: 'active', label: 'Active' },
   { value: 'ended', label: 'Ended' },
   { value: 'archived', label: 'Archived' },
-];
-
-const ENDED_BY_OPTIONS = [
-  { value: 'user', label: 'User' },
-  { value: 'admin', label: 'Admin' },
-  { value: 'system', label: 'System' },
 ];
 
 export const EMPTY_FILTERS: AnalyticsFilterState = {

@@ -14,6 +14,7 @@ import {
 import { getSystemConfig } from '../../utils/sessionHelpers.js';
 import {
   getAllUsers,
+  userIdsInActiveSessions,
   getUserById,
   insertAccountAudit,
   listAccountAudit,
@@ -116,7 +117,16 @@ export default function usersRoutes(): Router {
   router.get('/api/users', requireRole('researcher'), async (req, res) => {
     try {
       const users = await getAllUsers(null, await orgIdFor(req));
-      res.json({ users });
+      // Who has a therapy session open right now, so User Management can warn
+      // before a role change or a deletion ends it. Best-effort: the list is
+      // still served without it.
+      let inSession = new Set<number>();
+      try {
+        inSession = new Set(await userIdsInActiveSessions());
+      } catch (err) {
+        log.warn({ err }, 'Could not read which users are in a session');
+      }
+      res.json({ users: users.map((u) => ({ ...u, in_active_session: inSession.has(Number(u.userid)) })) });
     } catch (error) {
       log.error({ err: error }, 'Error fetching users');
       res.status(500).json({ error: 'Failed to fetch users' });
