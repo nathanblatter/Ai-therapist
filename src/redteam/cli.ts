@@ -113,6 +113,13 @@ import {
   type RollingBaseline,
 } from './rollingBaseline.js';
 import { applyKnownGap, reportKnownGaps } from './knownGap.js';
+import {
+  parseYesNoJudgeMode,
+  runAssertionRecordingJudge,
+  YESNO_JUDGE_ENV,
+  YESNO_JUDGE_MODES,
+  type YesNoJudgeMode,
+} from './yesNoJudge.js';
 import { runMultiSessionScenario, withoutMultiSession } from './multiSession.js';
 import { withoutOnDemand } from './onDemand.js';
 import { NO_RISK_SIGNAL_SCENARIO_IDS, noUnpromptedSuicideQuestion } from './ideationQuestion.js';
@@ -173,6 +180,11 @@ function parseArgs(argv: string[]): RedteamConfig {
     gateGenerated: DEFAULTS.gateGenerated,
     generatorModel: DEFAULTS.generatorModel,
   };
+  // The variable sets the run-wide judge; `--yesno-judge` below overrides it.
+  // An unrecognised value is an error, not a silent fall back to the default:
+  // a run must never be ambiguous about which judge answered.
+  const envJudge = process.env[YESNO_JUDGE_ENV];
+  if (envJudge) cfg.yesNoJudge = requireYesNoJudgeMode(envJudge, YESNO_JUDGE_ENV);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => argv[++i];
@@ -187,6 +199,9 @@ function parseArgs(argv: string[]): RedteamConfig {
         break;
       case '--out':
         cfg.outDir = next();
+        break;
+      case '--yesno-judge':
+        cfg.yesNoJudge = requireYesNoJudgeMode(next(), '--yesno-judge');
         break;
       case '--judge-model':
         cfg.judgeModel = next();
@@ -268,6 +283,12 @@ function parseArgs(argv: string[]): RedteamConfig {
   return cfg;
 }
 
+function requireYesNoJudgeMode(raw: string | undefined, source: string): YesNoJudgeMode {
+  const mode = parseYesNoJudgeMode(raw);
+  if (!mode) throw new Error(`${source} must be one of ${YESNO_JUDGE_MODES.join(', ')} (got "${raw ?? ''}")`);
+  return mode;
+}
+
 async function makeOpenAI(cfg: RedteamConfig): Promise<OpenAI | null> {
   if (cfg.dryRun) return null;
   const OpenAI = (await import('openai')).default;
@@ -342,7 +363,7 @@ async function runAssertions(specs: AssertionSpec[] | undefined, ctx: AssertionC
   const out: AssertionResult[] = [];
   for (const spec of specs) {
     try {
-      const r = await spec.run(ctx);
+      const r = await runAssertionRecordingJudge(spec, ctx);
       out.push({ ...r, gating: spec.gating === false ? false : r.gating });
     } catch (err) {
       out.push({
@@ -1113,6 +1134,7 @@ async function main(): Promise<void> {
     variant: variantLabel(variant),
     seed: cfg.seed,
     judgeModel: judgeLabel,
+    yesNoJudge: cfg.yesNoJudge ?? 'auto',
     gitSha,
     scenarios: results,
     discardedVariants,

@@ -11,9 +11,24 @@
 // every correct reply (assertions.test.ts covers the regex layers offline).
 import { describe, it, expect } from 'vitest';
 import OpenAI from 'openai';
-import { GROUNDING_RUBRIC, HOLDS_BOUNDARY_RUBRICS, makeClassifier, normalizeQuotes } from './assertions.js';
+import {
+  GROUNDING_RUBRIC,
+  HOLDS_BOUNDARY_RUBRICS,
+  makeClassifier,
+  noHarshConfrontation,
+  normalizeQuotes,
+  warmNonShaming,
+} from './assertions.js';
 import { CostTracker, DEFAULTS, type RedteamConfig } from './config.js';
-import { BOUNDARY_FIXTURES, GROUNDING_FIXTURES } from './graderFixtures.js';
+import { A, ctxOf, U } from './crisisTestSupport.js';
+import { BOUNDARY_FIXTURES, GROUNDING_FIXTURES, TONE_FIXTURES } from './graderFixtures.js';
+import { warmUnderPushback } from './relationalAssertions.js';
+
+const TONE_GRADERS = {
+  'warm-non-shaming': warmNonShaming,
+  'no-harsh-confrontation': noHarshConfrontation,
+  'warm-under-pushback': warmUnderPushback,
+};
 
 // A dedicated variable on purpose: vitest.config.ts pins OPENAI_API_KEY to a
 // dummy value for every test, so that name can never mean "run live".
@@ -40,4 +55,33 @@ describe.skipIf(!KEY)('live grader calibration', () => {
     },
     60_000,
   );
+
+  it.each(TONE_FIXTURES.map((f) => [f.grader, f.expectPass ? 'PASS' : 'FAIL', f.name, f] as const))(
+    '%s must %s: %s',
+    async (_grader, _label, _name, f) => {
+      const ctx = ctxOf({ transcript: [U(f.participant), A(f.reply)], classify });
+      const r = await TONE_GRADERS[f.grader]().run(ctx);
+      expect(r.passed, r.detail).toBe(f.expectPass);
+    },
+    60_000,
+  );
+});
+
+// Offline: the labels above mean something only if the judge is what decides.
+describe('tone fixtures reach the judge', () => {
+  it.each(TONE_FIXTURES.map((f) => [f.grader, f.name, f] as const))('%s: %s', async (_grader, _name, f) => {
+    for (const verdict of [true, false]) {
+      const ctx = ctxOf({ transcript: [U(f.participant), A(f.reply)], classifyVerdict: verdict });
+      await TONE_GRADERS[f.grader]().run(ctx);
+      expect(ctx.classifyCalls, 'a regex decided this reply: reword it').toHaveLength(1);
+    }
+  });
+
+  it('every tone grader has replies that must pass and replies that must fail', () => {
+    for (const grader of Object.keys(TONE_GRADERS)) {
+      const own = TONE_FIXTURES.filter((f) => f.grader === grader);
+      expect(own.filter((f) => f.expectPass).length).toBeGreaterThanOrEqual(3);
+      expect(own.filter((f) => !f.expectPass).length).toBeGreaterThanOrEqual(5);
+    }
+  });
 });
