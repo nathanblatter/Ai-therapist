@@ -11,6 +11,7 @@ import type { CostBreakdown } from './config.js';
 import { aggregateProgression, computeProgression, type ProgressionMetrics } from './progression.js';
 import type { Pipeline, Turn } from './types.js';
 import { WEEKDAY_NAMES, weekdayIndex, type NightlySample } from './sampling.js';
+import { describeJudgeTally, tallyJudges } from './yesNoJudge.js';
 
 /** The subset of summary.json this module reads (report.ts buildSummaryJson). */
 export interface SummaryFile {
@@ -18,6 +19,8 @@ export interface SummaryFile {
   variant?: { name?: string; description?: string } | null;
   gitSha?: string | null;
   judgeModel?: string;
+  /** `auto`, `llm` or `decisions` (yesNoJudge.ts); absent before 2026-11-27. */
+  yesNoJudge?: string;
   startedAt?: string;
   /** Sampled nightly (sampling.ts); absent when the whole suite ran. */
   sampling?: NightlySample | null;
@@ -25,7 +28,14 @@ export interface SummaryFile {
     id: string;
     passed: boolean;
     error?: string | null;
-    assertions?: Array<{ id: string; passed: boolean; gating: boolean; detail?: string }>;
+    assertions?: Array<{
+      id: string;
+      passed: boolean;
+      gating: boolean;
+      detail?: string;
+      judge?: 'llm' | 'decisions' | 'llm-fallback' | 'mixed';
+      judgeFallback?: string;
+    }>;
     judge?: { scores?: Record<string, number | undefined>; progressionRationale?: string } | null;
     progression?: ProgressionMetrics | null;
     pipeline?: Pipeline;
@@ -175,6 +185,12 @@ export function formatSampling(summary: SummaryFile): string[] {
   return lines;
 }
 
+/** Who answered a failing assertion's yes/no question, ahead of its detail. */
+function judgeTag(a: { judge?: string; judgeFallback?: string }): string {
+  if (!a.judge) return '';
+  return `[judge: ${a.judge}${a.judgeFallback ? `, Decisions ${cell(a.judgeFallback, 80)}` : ''}] `;
+}
+
 export function formatJobSummary(input: JobSummaryInput): string {
   const title = input.title ?? 'Red-team';
   const { summary } = input;
@@ -207,12 +223,21 @@ export function formatJobSummary(input: JobSummaryInput): string {
   lines.push(...formatCost(summary));
 
   const scenarios = summary.scenarios ?? [];
+  // Which yes/no judge answered, so a run is never ambiguous about it. A
+  // summary from before the field existed was judged by the LLM throughout.
+  const tally = tallyJudges(scenarios.flatMap((s) => s.assertions ?? []));
+  lines.push(
+    summary.yesNoJudge
+      ? `Yes/no judge (\`${summary.yesNoJudge}\`): ${describeJudgeTally(tally)}.`
+      : 'Yes/no judge: this summary predates the judge record; every judged assertion was answered by the LLM judge.',
+    '',
+  );
   const failing = scenarios
     .filter(counts)
     .flatMap((s) =>
       (s.assertions ?? [])
         .filter((a) => !a.passed && a.gating !== false)
-        .map((a) => `| \`${s.id}\` | \`${a.id}\` | ${cell(a.detail ?? '')} |`),
+        .map((a) => `| \`${s.id}\` | \`${a.id}\` | ${judgeTag(a)}${cell(a.detail ?? '')} |`),
     );
   if (failing.length) {
     lines.push('### Failing scenarios', '');

@@ -72,7 +72,10 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `voiceSummary.ts` | Markdown job summary for `redteam-voice.yml`. |
 | `voice/` | OpenAI's GPT-Live evaluation guide, our implementation: `timeline.ts` (one clock for audio and events), `metrics.ts` / `aggregate.ts` (latency, response rate, interruptions, silence during delegation, delegation accuracy, consumption, vendor-cut timing; P50/P90), `scenarios.ts` (CRAWL / WALK / RUN suites), `sessionInput.ts` (seeded history), `acoustics.ts` (WALK conditions), `callerPeer.ts` + `runMode.ts` (RUN simulated participant). See docs/redteam.md "GPT-Live evaluation guide". |
 | `assertions.ts` | Assertion library: regex layer plus a temp-0 classifier where semantics matter. |
-| `graderFixtures.ts` | Labelled replies (real nightly replies plus hand-written breaches) that the re-scoped graders must pass or fail. |
+| `yesNoJudge.ts` | The two yes/no judges behind `ctx.classify`: the LLM classifier and the OpenAI Decisions API. Which rubrics default to Decisions (`DECISIONS_DEFAULT_RUBRICS`), the fallback to the LLM judge when Decisions gives no definite answer, and the record of which judge answered each assertion. `--yesno-judge` / `REDTEAM_YESNO_JUDGE` force one. See docs/redteam.md "Yes/no judges". |
+| `judgeAgreement.ts` | `npm run redteam:judge-agreement`: puts the labelled fixtures and the judged assertions of recorded runs to both judges and reports agreement per rubric. Run it before changing a rubric's default judge. |
+| `crisisRubricCases.ts` | One must-pass and one must-fail reply per classifier-backed crisis assertion, shared by `crisisRubrics.live.test.ts` and `judgeAgreement.ts`. |
+| `graderFixtures.ts` | Labelled replies (real nightly replies plus hand-written breaches) that the re-scoped graders must pass or fail, and `TONE_FIXTURES` for the three tone graders. |
 | `graderCalibration.test.ts` | Opt-in live check of the classifier questions against those fixtures; needs `REDTEAM_CALIBRATION_OPENAI_KEY`, skipped otherwise. |
 | `judge.ts` | Wrapper over the v1 LLM judge (`sessionEval.service`) and floor-gating policy. |
 | `diff.ts` | Run-to-run diffing against a baseline summary or stored `harness_runs` row (same variant only). |

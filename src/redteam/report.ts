@@ -10,6 +10,7 @@ import type { DiscardedVariant } from './generatedVariants.js';
 import { mergeBreakdowns } from './config.js';
 import type { RunCostNotes } from './sessionCost.js';
 import type { NightlySample } from './sampling.js';
+import { describeJudgeTally, tallyJudges } from './yesNoJudge.js';
 
 export interface RunSummary {
   startedAt: string;
@@ -19,6 +20,10 @@ export interface RunSummary {
   variant?: VariantLabel;
   seed: number;
   judgeModel: string;
+  /** How the yes/no judge was chosen for this run (yesNoJudge.ts): `auto`
+   *  (each rubric's default), or `llm` / `decisions` forced for every
+   *  question. Absent in older summaries, which were all LLM-judged. */
+  yesNoJudge?: string;
   gitSha?: string | null;
   scenarios: ScenarioResult[];
   /** --generated-variants only: variants the validity guard (or a failed
@@ -59,11 +64,25 @@ export function buildJUnit(summary: RunSummary): string {
       const cases = s.assertions
         .map((a) => {
           const name = xmlEscape(a.id);
-          if (a.passed) return `    <testcase classname="${xmlEscape(s.id)}" name="${name}"/>`;
+          // Which yes/no judge answered, on passing cases too: a pass must
+          // say who gave it. Assertions no judge answered are unchanged.
+          const judge = a.judge
+            ? `      <properties>\n        <property name="judge" value="${xmlEscape(a.judge)}"/>\n` +
+              (a.judgeFallback
+                ? `        <property name="judge-fallback" value="${xmlEscape(a.judgeFallback)}"/>\n`
+                : '') +
+              `      </properties>\n`
+            : '';
+          if (a.passed) {
+            return judge
+              ? `    <testcase classname="${xmlEscape(s.id)}" name="${name}">\n${judge}    </testcase>`
+              : `    <testcase classname="${xmlEscape(s.id)}" name="${name}"/>`;
+          }
           const tag = a.gating && gates ? 'failure' : 'skipped';
           const msg = xmlEscape(marker + a.detail);
           return (
             `    <testcase classname="${xmlEscape(s.id)}" name="${name}">\n` +
+            judge +
             `      <${tag} message="${msg}">${msg}</${tag}>\n` +
             `    </testcase>`
           );
@@ -164,6 +183,7 @@ export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
     variant: summary.variant ?? null,
     seed: summary.seed,
     judgeModel: summary.judgeModel,
+    yesNoJudge: summary.yesNoJudge ?? 'auto',
     gitSha: summary.gitSha ?? null,
     ...(summary.sampling ? { sampling: summary.sampling } : {}),
     scenarios,
@@ -182,6 +202,8 @@ export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
         ...(summary.costNotes ?? {}),
       },
       judge: judgeStats(scripted),
+      // Which yes/no judge answered the classifier-backed assertions.
+      yesNoJudges: tallyJudges(scripted.flatMap((s) => s.assertions)),
       progression: aggregateProgression(scripted.map((s) => s.progression)),
       // P50/P90 across repeats, per risk band and for crisis turns (voice/aggregate.ts).
       voice: aggregateVoice(scripted),
@@ -268,6 +290,10 @@ export function printConsole(summary: RunSummary): boolean {
       ` (recorded $${split.recordedUsd.toFixed(4)}, estimated $${split.estimatedUsd.toFixed(4)})`,
   );
   for (const line of costNoteLines(summary.costNotes)) console.log(`   ${line}`);
+  console.log(
+    `   Yes/no judge (${summary.yesNoJudge ?? 'auto'}): ` +
+      describeJudgeTally(tallyJudges(summary.scenarios.flatMap((s) => s.assertions))),
+  );
   console.log('─────────────────────────────────────────────────────────────\n');
   return allPass;
 }

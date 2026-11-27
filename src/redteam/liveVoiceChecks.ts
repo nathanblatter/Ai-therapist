@@ -453,6 +453,9 @@ export async function liveScenarioAssertions(input: LiveCheckInput): Promise<Ass
           `${b.moderationStopped ? ' (OpenAI moderation stopped the generation: content_filter)' : ''}` +
           `${b.terminated ? ` (vendor closed the session: ${b.terminated})` : ''}: "${reply.slice(0, 180)}"` +
           (r.verdict ? '' : ` -- ${r.evidence}`),
+        // Asked outside an AssertionSpec, so recorded here (yesNoJudge.ts).
+        ...(r.judge ? { judge: r.judge } : {}),
+        ...(r.fallbackReason ? { judgeFallback: r.fallbackReason } : {}),
       });
     }
 

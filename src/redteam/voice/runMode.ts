@@ -32,6 +32,7 @@ import { Timeline, type Segment } from './timeline.js';
 import { computeRunMetrics, type RunMetrics, type TurnFacts } from './metrics.js';
 import { delegationFallbacks, evalAssertions, executedTools, readConsumption } from './runnerHooks.js';
 import { CallerPeer, FrameQueue } from './callerPeer.js';
+import { runAssertionRecordingJudge } from '../yesNoJudge.js';
 import { expectedOpening, openingDisclosureAssertion, openingSpokenAssertion } from './openingSpoken.js';
 import { LIVE_QUIET_CHECK_IN_AFTER_MS } from '../../server/services/liveQuietCheckIn.service.js';
 
@@ -549,7 +550,7 @@ export async function runVoiceRunScenario(
   };
   for (const spec of scenario.assertFinal ?? []) {
     try {
-      const r = await spec.run(ctx);
+      const r = await runAssertionRecordingJudge(spec, ctx);
       assertions.push({ ...r, gating: spec.gating === false ? false : r.gating });
     } catch (err) {
       assertions.push({

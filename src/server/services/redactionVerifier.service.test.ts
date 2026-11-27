@@ -75,7 +75,7 @@ describe('Decisions API adapter', () => {
       questions: KINDS.map((name) => ({
         type: 'predicate',
         name,
-        instructions: expect.stringMatching(/NOT an identifier/),
+        instructions: expect.stringMatching(/placeholder such as \[REDACTED/),
       })),
     });
     expect(body).not.toHaveProperty('question');
