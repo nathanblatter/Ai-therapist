@@ -35,10 +35,12 @@
 //
 //   OPENAI_API_KEY=... node node_modules/.bin/tsx scripts/redaction-place-org-eval.mjs \
 //     --out /somewhere/outside/the/repo/redaction-place-org.jsonl \
-//     [--runs 3] [--batch 10] [--seed 1] [--concurrency 5] [--skip-leak-check]
+//     [--runs 3] [--batch 10] [--seed 1] [--concurrency 5] [--skip-leak-check] \
+//     [--wording evals/candidates/redaction-wording-orgs.json]
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import OpenAI from 'openai';
+import { applyCandidateWording } from './redaction-eval-wording.mjs';
 import { redactPHIBatch } from '../src/server/services/redaction.service.js';
 import { countPlaceholders } from '../src/server/services/redactionValidation.js';
 import { askLeakCheck, DEFAULT_VERIFIER_CONFIG } from '../src/server/services/redactionVerifier.service.js';
@@ -88,6 +90,8 @@ function patchUsage(resource) {
 const probe = new OpenAI({ apiKey: 'unused' });
 patchUsage(probe.responses);
 patchUsage(probe.decisions);
+// --wording <file>: measure a candidate wording (see redaction-eval-wording.mjs).
+const WORDING = applyCandidateWording(probe.responses, arg('wording', ''));
 
 /** Deterministic shuffle, so a run can be repeated with the same batches. */
 function shuffled(list, seed) {
@@ -127,7 +131,9 @@ for (let run = 1; run <= RUNS; run++) {
   }
 }
 writeFileSync(OUT, '');
-console.log(`${cases.length} messages x ${RUNS} runs in ${jobs.length} batches of up to ${BATCH} -> ${OUT}`);
+console.log(
+  `${cases.length} messages x ${RUNS} runs in ${jobs.length} batches of up to ${BATCH} -> ${OUT} (${WORDING})`,
+);
 
 const rows = [];
 let stop = null;

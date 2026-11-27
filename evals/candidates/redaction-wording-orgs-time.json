@@ -1,0 +1,10 @@
+[
+  {
+    "find": "18. Any other characteristic that could uniquely identify the individual",
+    "replace": "18. Any other characteristic that could uniquely identify the individual. This includes the proper name of a specific organization or facility connected to the individual: a school, college or university (and its named buildings, dorms and teams), an employer or business, a hospital or clinic, a church, ward or congregation, an apartment complex, a sports team or club. Replace each with \"[REDACTED: ORGANIZATION]\". A generic reference without a proper name (\"my school\", \"the hospital\", \"work\", \"my ward\") is not an identifier and must be left as written"
+  },
+  {
+    "find": "3. All elements (except years) of dates related to an individual (including birthdate, admission date, discharge date, date of death, and exact age if over 89)",
+    "replace": "3. All elements (except years) of dates related to an individual (including birthdate, admission date, discharge date, date of death, and exact age if over 89). Relative or general time expressions (\"tonight\", \"last night\", \"today\", \"this week\", \"twenty minutes ago\", a weekday, a time of day) are not dates and must be left as written"
+  }
+]

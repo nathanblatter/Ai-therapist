@@ -28,11 +28,13 @@
 //
 //   OPENAI_API_KEY=... node node_modules/.bin/tsx scripts/redaction-shape-eval.mjs \
 //     --out /tmp/redaction-shape.jsonl [--conditions single,batch1,batch3] [--runs 2] \
-//     [--only rc-explicit-id-01,...] [--concurrency 8]
+//     [--only rc-explicit-id-01,...] [--concurrency 8] \
+//     [--wording evals/candidates/redaction-wording-orgs-time.json]
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import OpenAI from 'openai';
+import { applyCandidateWording } from './redaction-eval-wording.mjs';
 import redactPHI, { redactPHIBatch } from '../src/server/services/redaction.service.js';
 import { countPlaceholders } from '../src/server/services/redactionValidation.js';
 
@@ -106,6 +108,10 @@ responsesProto.create = function patchedCreate(...a) {
     return response;
   });
 };
+// --wording <file>: measure a candidate wording (see redaction-eval-wording.mjs).
+// Applied after the recorder above, so the recorder sees the request as the
+// production code built it and the model receives the candidate.
+console.log(applyCandidateWording(new OpenAI({ apiKey: 'unused' }).responses, arg('wording', '')));
 
 const REFUSAL_REASONS = new Set(['refusal', 'added_crisis_resource', 'model_refusal']);
 const REPLY_LIKE_RE =
