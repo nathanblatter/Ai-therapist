@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { RefreshCw, Save, Check, AlertCircle, User, MessageSquare } from 'react-feather';
 import { formatDateTime } from '../../shared/format';
 import { getJson, postJson } from '../../shared/http';
+import { leftoverCapitalisedWords } from '../../../shared/leftoverNames';
 
 interface RedactionCheck {
   /** Absent on rows written before ai-therapist-288. */
@@ -9,6 +10,9 @@ interface RedactionCheck {
   p_leak: number;
   /** null when the check errored (unknown, not clean). */
   flagged: boolean | null;
+  /** Did the model's answer alone reach the threshold? Absent on rows checked
+   *  before ai-therapist-409, where the model was the only reason to flag. */
+  model_flagged?: boolean;
   backend: string;
   model: string;
   checked_at: string;
@@ -24,6 +28,12 @@ interface RedactMessage {
   content_redacted: string | null;
   /** Decision-model leak-check verdict (ai-therapist-262); null when never checked. */
   redaction_check?: RedactionCheck | null;
+}
+
+/** At most six words, then a count of the rest. */
+function summariseWords(words: string[]): string {
+  const shown = words.slice(0, 6).join(', ');
+  return words.length > 6 ? `${shown} and ${words.length - 6} more` : shown;
 }
 
 /** The leak check did not produce an answer (ai-therapist-288). Older rows carry only `error`. */
@@ -175,15 +185,29 @@ export default function RedactionReview() {
                     </span>
                     <span className="text-sm text-gray-500">{message.message_type}</span>
                     <span className="text-sm text-gray-400">{formatDate(message.created_at)}</span>
-                    {message.redaction_check?.flagged && !message.redaction_check.reviewed && (
-                      <span
-                        className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-amber-100 text-amber-800"
-                        title={`Leak-check (${message.redaction_check.backend}, ${message.redaction_check.model}) says an identifier may remain`}
-                      >
-                        <AlertCircle size={12} />
-                        Possible leak, p={message.redaction_check.p_leak.toFixed(2)}
-                      </span>
-                    )}
+                    {message.redaction_check?.flagged &&
+                      !message.redaction_check.reviewed &&
+                      (message.redaction_check.model_flagged ?? true) && (
+                        <span
+                          className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-amber-100 text-amber-800"
+                          title={`Leak-check (${message.redaction_check.backend}, ${message.redaction_check.model}) says an identifier may remain`}
+                        >
+                          <AlertCircle size={12} />
+                          Possible leak, p={message.redaction_check.p_leak.toFixed(2)}
+                        </span>
+                      )}
+                    {message.redaction_check?.flagged &&
+                      !message.redaction_check.reviewed &&
+                      leftoverCapitalisedWords(message.content_redacted ?? '').length > 0 && (
+                        <span
+                          className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-amber-100 text-amber-800"
+                          title="These words are still capitalised like a name. Redaction leaves in the names of schools, employers, clinics and congregations, so check each one."
+                        >
+                          <AlertCircle size={12} />
+                          Possible name left in:{' '}
+                          {summariseWords(leftoverCapitalisedWords(message.content_redacted ?? ''))}
+                        </span>
+                      )}
                     {leakCheckErrored(message.redaction_check) && !message.redaction_check?.reviewed && (
                       <span
                         className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-800"
