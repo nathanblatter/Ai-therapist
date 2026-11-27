@@ -164,7 +164,16 @@ export async function redactSession(sessionId: string): Promise<void> {
       // chain, so it never delays the wipe, naming or insights.
       .then(() => import('./allianceRating.service.js'))
       .then((m) => m.maybeRateAllianceForSession(sessionId))
-      .catch((err) => console.error('[AllianceRating] could not start (non-fatal):', err));
+      .catch((err) => console.error('[AllianceRating] could not start (non-fatal):', err))
+      // Structured session features (ai-therapist-172): the same position
+      // and the same rules as the alliance rating above (after the leak
+      // check has settled, redacted text only, enrolled participants only,
+      // stale rows replaced). OFF unless system_config.session_features
+      // .enabled is true. Chained after the alliance hook's catch, so it
+      // runs whether or not that one started.
+      .then(() => import('./sessionFeatures.service.js'))
+      .then((m) => m.maybeExtractFeaturesForSession(sessionId))
+      .catch((err) => console.error('[SessionFeatures] could not start (non-fatal):', err));
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`Session redaction failed for ${sessionId}:`, errorMessage);

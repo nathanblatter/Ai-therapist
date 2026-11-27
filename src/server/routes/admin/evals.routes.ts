@@ -12,6 +12,7 @@ import { parsePagination } from '../../utils/pagination.js';
 import {
   getSessionEval,
   getLatestAllianceRating,
+  getLatestSessionFeatures,
   getSession,
   getSessionHumanRatings,
   upsertSessionHumanRating,
@@ -32,6 +33,7 @@ import {
   type RatingQueueStatus,
 } from '../../db/index.js';
 
+import { summariseSessionFeatures } from '../../services/sessionFeatures.js';
 import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('evalsRoutes');
@@ -225,6 +227,46 @@ export default function evalsRoutes(): Router {
       } catch (err) {
         log.error({ err }, 'Failed to fetch alliance rating');
         res.status(500).json({ error: 'Failed to fetch alliance rating' });
+      }
+    },
+  );
+
+  // GET /admin/api/sessions/:sessionId/session-features - the structured
+  // per-session features of a session (ai-therapist-172): what the codebook
+  // judge coded it as from the redacted transcript, arranged by codebook
+  // group. The same guards as the alliance read above, for the same reasons:
+  // a research measure, so researcher-only; org scope from
+  // requireSessionClientAccess; read only; withheld while the caller still
+  // owes a blind human rating for the session. Probabilities, states and
+  // codebook text only; the table holds no transcript text and the stored
+  // error message is not returned. `stale` is true when the session's
+  // readable transcript has changed since the row was computed.
+  router.get(
+    '/admin/api/sessions/:sessionId/session-features',
+    requireRole('researcher'),
+    requireSessionClientAccess(),
+    async (req, res) => {
+      try {
+        const { blind } = await blindStateFor(req.params.sessionId, req.session.userId!);
+        if (blind) return res.json({ features: null, blind: true });
+        const row = await getLatestSessionFeatures(req.params.sessionId);
+        if (!row) return res.status(404).json({ error: 'No session features for this session yet' });
+        res.json({
+          features: {
+            status: row.status,
+            stale: row.stale,
+            feature_set_version: row.feature_set_version,
+            model: row.model,
+            extracted_at: row.extracted_at,
+            transcript_truncated: row.transcript_truncated,
+            unknown_count: row.unknown_count,
+            groups: row.status === 'extracted' ? summariseSessionFeatures(row.features) : [],
+          },
+          blind: false,
+        });
+      } catch (err) {
+        log.error({ err }, 'Failed to fetch session features');
+        res.status(500).json({ error: 'Failed to fetch session features' });
       }
     },
   );

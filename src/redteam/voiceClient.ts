@@ -62,6 +62,7 @@ import {
 } from './liveVoiceChecks.js';
 import type { LiveSessionTiming } from './liveVoiceClient.js';
 import { beginTextHandoff, finishTextHandoff, type HandoffRecord, type PendingHandoff } from './textHandoffChecks.js';
+import { runAssertionRecordingJudge } from './yesNoJudge.js';
 import {
   type AssertionContext,
   type AssertionResult,
@@ -1294,7 +1295,7 @@ export async function runVoiceScenario(
       };
       for (const spec of beat.assertAfter ?? []) {
         try {
-          const r = await spec.run(ctx);
+          const r = await runAssertionRecordingJudge(spec, ctx);
           assertions.push({ ...r, gating: spec.gating === false ? false : r.gating });
         } catch (err) {
           assertions.push({
@@ -1480,7 +1481,7 @@ export async function runVoiceScenario(
   const finalsGate = skippedBeats.length === 0;
   for (const spec of scenario.assertFinal ?? []) {
     try {
-      const r = await spec.run(finalCtx);
+      const r = await runAssertionRecordingJudge(spec, finalCtx);
       assertions.push({
         ...r,
         gating: finalsGate && spec.gating !== false && r.gating,

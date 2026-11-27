@@ -39,6 +39,12 @@ function notifyAllianceRatingOfReview(messageId: string): void {
   import('../../services/allianceRating.service.js')
     .then((m) => m.maybeRateAllianceAfterLeakReview(messageId))
     .catch((err) => log.error({ err }, 'alliance rating after review could not start (non-fatal)'));
+  // The session-features judge (ai-therapist-172) reads the same messages
+  // under the same rule: same notification, behind its own switch
+  // (system_config.session_features, default off).
+  import('../../services/sessionFeatures.service.js')
+    .then((m) => m.maybeExtractFeaturesAfterLeakReview(messageId))
+    .catch((err) => log.error({ err }, 'session features after review could not start (non-fatal)'));
 }
 
 export default function redactionRoutes(): Router {

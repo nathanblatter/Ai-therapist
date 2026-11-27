@@ -39,7 +39,7 @@ export const RESERVED_PARTICIPANT_USERID_MIN = 1_900_000_000;
 /** The env var the harness CLI sets in its own process. */
 export const HARNESS_PROCESS_ENV = 'REDTEAM_HARNESS_PROCESS';
 
-export type PostSessionJob = 'redaction' | 'naming' | 'insights' | 'alliance';
+export type PostSessionJob = 'redaction' | 'naming' | 'insights' | 'alliance' | 'features';
 
 let processSignal: boolean | null = null;
 const optedIn = new Set<string>();

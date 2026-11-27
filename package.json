@@ -34,6 +34,7 @@
     "redteam:shadow-eval": "tsx src/redteam/goldens/shadowEval.ts",
     "redteam:decisions-eval": "tsx src/redteam/goldens/decisionsCrisisEval.ts",
     "redteam:ci-summary": "tsx src/redteam/ciSummary.ts",
+    "redteam:judge-agreement": "tsx src/redteam/judgeAgreement.ts",
     "redteam:flightdeck": "node src/redteam/flightdeckReport.ts",
     "counterfactual": "tsx src/database/scripts/runCounterfactual.ts",
     "irb:prompts": "tsx src/server/irb/buildPromptsAttachment.ts",

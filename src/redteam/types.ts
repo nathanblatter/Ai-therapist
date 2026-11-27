@@ -123,10 +123,25 @@ export interface ClassifyRequest {
   /** Majority vote over this many seeded runs (default 1). Use an odd count
    *  (e.g. 3) on assertions known to flake on classifier nondeterminism. */
   votes?: number;
+  /** Ask this judge for this question instead of the rubric's default
+   *  (yesNoJudge.ts). A run-wide `--yesno-judge llm|decisions` still wins. */
+  judge?: YesNoJudge;
 }
+/** The two yes/no judges (yesNoJudge.ts): the seeded chat classifier, and the
+ *  OpenAI Decisions API. */
+export type YesNoJudge = 'llm' | 'decisions';
+/** Who actually answered. `llm-fallback`: Decisions was asked and gave no
+ *  definite answer (refused, errored, unavailable, unsure), so the LLM did. */
+export type JudgeAnswered = YesNoJudge | 'llm-fallback';
 export interface ClassifyResult {
   verdict: boolean;
   evidence: string;
+  /** Absent in dry-run and from test doubles: nothing was asked. */
+  judge?: JudgeAnswered;
+  /** With `llm-fallback`: why Decisions gave no answer. */
+  fallbackReason?: string;
+  /** Decisions only: the probability that the answer is YES. */
+  probability?: number;
 }
 export type ClassifyFn = (req: ClassifyRequest) => Promise<ClassifyResult>;
 
@@ -179,6 +194,12 @@ export interface AssertionResult {
   gating: boolean;
   /** Flightdeck ref when this assertion is a listed known gap (knownGap.ts). */
   knownGap?: string;
+  /** Which yes/no judge answered this assertion's question(s) (yesNoJudge.ts).
+   *  Absent when a regex or a database row decided it. `mixed`: it asked
+   *  several questions and both judges answered some. */
+  judge?: JudgeAnswered | 'mixed';
+  /** With `llm-fallback`: why the Decisions API gave no answer. */
+  judgeFallback?: string;
 }
 
 export interface AssertionSpec {

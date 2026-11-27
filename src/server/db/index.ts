@@ -85,3 +85,5 @@ export * from './qualtricsResponses.queries.js';
 export * from './mail.queries.js';
 // Linguistic working-alliance ratings (ai-therapist-173, migration 134).
 export * from './allianceRatings.queries.js';
+// Structured per-session features (ai-therapist-172, migration 135).
+export * from './sessionFeatures.queries.js';
