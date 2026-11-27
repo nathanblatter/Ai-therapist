@@ -700,10 +700,12 @@ audio level). So it is assembled into a turn and treated as one everywhere:
   watch it reads as "the participant is talking";
 - and, on the vendor's side, it is a participant turn the model may answer.
 
-**There is no guard, on purpose.** Dropping a real utterance (a disclosure
-above all) is far worse than keeping a phantom, so a guard may act only on a
-positive, reliable "the microphone was muted for this whole utterance", and
-the server has no such signal today:
+**The guard (ai-therapist-412, 2026-11-26): mark, never drop, and only on
+complete evidence.** Dropping or not scoring a real utterance (a disclosure
+above all) is far worse than keeping a phantom, so the guard acts only on a
+positive "the microphone was muted from well before this turn until after it
+closed", and every missing, late, lost or ambiguous case is treated as real
+speech exactly as before. The difficulties it has to get around:
 
 - Mute is a browser-local act (`track.enabled`). The server is not told when
   it happens.
@@ -717,28 +719,96 @@ the server has no such signal today:
   speaks.
 - `mic_timeline` is sent once, at the end of the session.
 
-What is recorded instead: each participant turn's `metadata.mic_audio`
-(`{ received_ms, muted_ms, unmuted_ms, unmuted_rms_dbfs }`, numbers only) is
-what had arrived of that track when the turn closed
-(`participantMicEvidence`). The turn is stored and scored exactly as before. A
-turn with `unmuted_ms: 0` is a candidate phantom to review against the
-recording sidecar's muted ranges, never a verdict; the key is absent when the
-session has no participant track. It is not on the redacted-metadata allowlist
-(`metadataProjection.ts`), so exports do not carry it yet.
+Every participant turn is stored at once with `metadata.mic_audio`
+(`{ received_ms, muted_ms, unmuted_ms, unmuted_rms_dbfs }`, numbers only): what
+had arrived of that track when the turn closed (`participantMicEvidence`). That
+snapshot alone is never a verdict; the key is absent when the session has no
+participant track.
 
-What a real guard needs: the mic state reported to the server as it changes
-and acknowledged before it takes effect. Concretely, the browser posts every
+The verdict comes from `watchForMutedTurn` (`recorder.service`), started when
+the turn closes. It answers `no_speech` only when all of this holds:
+
+1. The participant track is open, sequenced, and nothing about its delivery
+   was ever irregular in this session: no gap, no repeated or out-of-order
+   chunk, no batch without `seq`, no write error. One lost chunk (it may have
+   been speech) and the session never gets a verdict again.
+2. No chunk the browser did not mark muted has arrived since 120 s before the
+   turn started (`MUTED_TURN_WINDOW_MS`). The start is the server's estimate:
+   the earlier of the first transcript fragment's arrival and "now minus the
+   audio the vendor says the turn spans".
+3. Every chunk marked muted in that window is exact digital silence. The flag
+   is `track.enabled` read on the main thread after the audio was captured,
+   and a disabled track reaches the tee as zeros; a muted-flagged chunk
+   holding anything else was captured with the microphone live, and there is
+   no verdict.
+4. The track has been received past the moment the turn closed, shown without
+   comparing clocks: the uploader keeps one request in flight and cuts the
+   next batch only after the previous one is answered, so the second batch
+   appended after the turn closed was sent after it closed, and its `pushed`
+   count covers everything captured up to then. The check waits for every
+   chunk up to that index plus one more second of audio, all of it muted.
+5. Capture is proven continuous across the turn. The tee's AudioContext can be
+   suspended while WebRTC already carries the live microphone to the vendor (a
+   recovery session before the first tap, a backgrounded tab); words spoken
+   then are in no chunk, and a participant who mutes afterwards leaves a track
+   that is muted from its first chunk. So there must be a batch that had
+   arrived at least 5 s before the turn started (`MUTED_TURN_LEAD_MS`; not the
+   track's first batch) and a batch sent after the turn closed, with the audio
+   captured between them (the difference of their `pushed` counts) matching
+   the wall clock between their sends to within 750 ms
+   (`MUTED_TURN_CONTINUITY_TOLERANCE_MS`). Each batch was sent between the
+   previous batch's last append and its own arrival, so the comparison uses
+   this server's clock only. A track that started after the turn did, or a
+   pause in capture longer than the tolerance, means no verdict. A turn in
+   the first seconds of a session therefore never gets one.
+
+Until then the turn waits, for at most 5 s (`MUTED_TURN_TIMEOUT_MS`). Unmuted
+audio arriving ends the wait at once as real speech; a timeout, an irregular
+chunk or the recording closing ends it as real speech too. So the cost of the
+guard is a delay, never a skip: a real turn whose audio had not reached the
+server when it closed is scored when its first unmuted chunk lands, and at
+worst (an upload stalled for seconds) 5 s late. A turn that was never a
+candidate (no track, unmuted audio inside the window, an irregular track) is
+scored immediately, exactly as before.
+
+A `no_speech` turn:
+
+- keeps its row and its text, and gains `metadata.unverified_speech: true`,
+  `unverified_speech_reason: 'mic_muted'` and `mic_audio.state: 'muted'` with
+  the evidence at the verdict (`markMessageUnverifiedSpeech`);
+- is not sent through the crisis pipeline, so it has no risk assessment and
+  adds nothing to the session's risk history; if the mark cannot be written,
+  the turn is scored instead (an unmarked turn is always scored);
+- is left out of the context later turns are scored with
+  (`getRecentSessionMessages`, and the in-memory copy via `forgetTurn`);
+- is labelled, not hidden, in the session transcript and the live monitor
+  (`sideband:transcript-unverified`);
+- is kept in the exports and marked: `transcripts.csv` has an
+  `unverified_speech` column, and the message exports carry the flag in
+  `extras`. `unverified_speech`, `unverified_speech_reason` and `mic_audio`
+  are on the redacted-metadata allowlist (`metadataProjection.ts`) with their
+  values shaped to a flag, a fixed reason and numbers; a browser cannot write
+  them (`stripServerOnlySpeechKeys` on `/logs/batch`).
+
+What the guard does not do. It is scoped to the GPT-Live sideband (not Grok
+voice). The vendor still heard a participant turn and may answer it; the
+opening watch still counts the phantom's first fragment as the participant
+speaking (since ai-therapist-315 that only cancels the re-send, see the
+opening section). Session summaries, insights, evaluations and the participant's own
+transcript still read the row. A session without a consented recording, or
+with any lost audio, gets no verdicts. Turns stored before 2026-11-27 carry no
+mark; `mic_audio` exists from 2026-11-26.
+
+What would do more: the mic state reported to the server as it changes and
+acknowledged before it takes effect. Concretely, the browser posts every
 toggle (and the initial state) to an authenticated route and enables the track
 on unmute only once the server has acknowledged it, or after a timeout longer
 than the server keeps believing "muted" without a fresh report, so a lost
-request can only ever fail towards "not muted". With that, a muted interval is
-one in which the vendor was sent exact zeros, and a transcript wholly inside
-it (with a margin at both ends) cannot be the participant's voice. The server
-could then either mark such a turn as not participant speech (kept, excluded
-from scoring and exports), or prevent it at the source with
-`session.input_audio.mute` on the sideband while the mic is off
-(`muteInput`); whether the vendor still transcribes a muted input has not been
-measured. The cost is a short wait on unmute over a bad connection.
+request can only ever fail towards "not muted". With that the server could
+prevent the phantom at the source with `session.input_audio.mute` on the
+sideband while the mic is off (`muteInput`); whether the vendor still
+transcribes a muted input has not been measured. The cost is a short wait on
+unmute over a bad connection.
 
 Because fragments carry no item id, admin transcript rows are keyed by
 `role` + turn using a stable synthetic id (`live-user` / `live-assistant`), which

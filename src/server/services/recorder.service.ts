@@ -66,7 +66,43 @@ interface ActiveRecording {
   timelineIntact: boolean;
   muted: SampleRange[];
   mutedTruncated: boolean;
+  // Muted-turn check (ai-therapist-412). When the last chunk NOT marked muted
+  // arrived (wall clock), null when none has; whether anything about the
+  // track's delivery was ever out of the ordinary (a gap, a stale chunk, a
+  // batch without `seq`, a write error); and the turns waiting for a verdict.
+  lastUnmutedAt: number | null;
+  irregular: boolean;
+  waiters: Set<MutedTurnWaiter>;
+  // When the last chunk marked muted that was NOT exact digital silence
+  // arrived: the flag and the audio disagree, so neither is believed.
+  lastMutedSignalAt: number | null;
+  // When the last chunk was appended, and one mark per HTTP batch (the newest
+  // MAX_BATCH_MARKS): what proves the microphone was being captured without a
+  // pause across a turn (CONTINUOUS CAPTURE below).
+  lastAppendAt: number | null;
+  batchMarks: BatchMark[];
+  // Chunks of different sizes arrived, so a chunk count is not a duration.
+  unevenChunks: boolean;
 }
+
+/**
+ * One HTTP batch of a track, for the continuity proof. The uploader keeps one
+ * request in flight and cuts the next batch only after the previous one was
+ * answered, and the server answers after appending. So the batch was sent at
+ * some moment between `earliestSentAt` (the previous batch's last append) and
+ * `arrivedAt`, both on this server's clock, and `pushed` is how many chunks
+ * the browser had captured at that moment.
+ */
+interface BatchMark {
+  /** Null for a track's first batch: nothing bounds when it was sent. */
+  earliestSentAt: number | null;
+  arrivedAt: number;
+  /** Null when the batch did not say, or said less than an earlier batch. */
+  pushed: number | null;
+}
+
+/** Batch marks kept per track: several minutes at the uploader's 400 ms batches. */
+export const MAX_BATCH_MARKS = 1024;
 
 /** Per-chunk metadata from the client (ai-therapist-372, -384); all optional. */
 export interface ChunkMeta {
@@ -76,6 +112,8 @@ export interface ChunkMeta {
   muted?: boolean;
   /** Chunks the client had captured on this track when it sent the batch (ai-therapist-384). */
   pushed?: number;
+  /** This chunk is the first of its HTTP batch (ai-therapist-412). */
+  batchStart?: boolean;
 }
 
 /**
@@ -184,6 +222,13 @@ export function appendChunk(
       timelineIntact: true,
       muted: [],
       mutedTruncated: false,
+      lastUnmutedAt: null,
+      irregular: false,
+      waiters: new Set(),
+      lastMutedSignalAt: null,
+      lastAppendAt: null,
+      batchMarks: [],
+      unevenChunks: false,
     };
     // A WriteStream with no 'error' listener throws (and can crash the process)
     // on a write failure. Capture it instead so we stop counting bytes that
@@ -191,6 +236,8 @@ export function appendChunk(
     // would over-report the real audio.
     stream.on('error', (err) => {
       rec!.errored = true;
+      rec!.irregular = true;
+      settleWaiters(rec!);
       log.error({ err }, `[rec] write stream error for ${key}`);
     });
     recordings.set(key, rec);
@@ -200,6 +247,12 @@ export function appendChunk(
     rec.clientPushed = meta.pushed;
   }
   const missing = acceptSeq(sessionId, track, rec, meta.seq);
+  // Anything but an in-order, sequenced chunk ends the muted-turn check for
+  // this track for good: the account of the microphone is no longer complete.
+  if (missing !== 0 || meta.seq === undefined || rec.errored) {
+    rec.irregular = true;
+    settleWaiters(rec);
+  }
   if (missing === null) return;
   if (rec.errored) return; // stream is dead; don't count bytes we can't persist
   const buf = Buffer.from(base64Pcm16, 'base64');
@@ -215,16 +268,49 @@ export function appendChunk(
   rec.stream.write(buf);
   rec.byteLength += buf.length;
   rec.chunksReceived += 1;
-  if (samples > 0) rec.chunkSamples = samples;
+  if (samples > 0) {
+    if (rec.chunkSamples !== null && rec.chunkSamples !== samples) rec.unevenChunks = true;
+    rec.chunkSamples = samples;
+  }
+  let mark: BatchMark | null = null;
+  if (meta.batchStart) {
+    const last = rec.batchMarks[rec.batchMarks.length - 1];
+    const valid = meta.pushed !== undefined && Number.isInteger(meta.pushed) && meta.pushed >= 0;
+    const backwards = valid && last?.pushed != null && meta.pushed! < last.pushed;
+    mark = { earliestSentAt: rec.lastAppendAt, arrivedAt: now, pushed: valid && !backwards ? meta.pushed! : null };
+    rec.batchMarks.push(mark);
+    if (rec.batchMarks.length > MAX_BATCH_MARKS) rec.batchMarks.shift();
+  }
+  rec.lastAppendAt = now;
 
   if (window) window.last = now;
   else arrivals.set(sessionId, { first: now, last: now });
 
-  if (meta.muted) rec.mutedSamples += samples;
-  else if (track === 'participant') {
+  if (meta.muted) {
+    rec.mutedSamples += samples;
+    // A disabled microphone track reaches the tee as exact zeros (audioTee.ts
+    // copies the samples as they are), and the flag is `track.enabled` read
+    // on the main thread after the audio was captured. A chunk flagged muted
+    // that holds anything else was captured while the microphone was live.
+    if (track === 'participant' && !isDigitalSilence(buf)) rec.lastMutedSignalAt = now;
+  } else if (track === 'participant') {
     rec.unmutedSamples += samples;
     rec.unmutedSumSquares += pcm16SumSquares(buf);
+    rec.lastUnmutedAt = now;
   }
+  if (rec.waiters.size > 0) {
+    if (mark) noteBatchForWaiters(rec, mark);
+    settleWaiters(rec);
+  }
+}
+
+/** Whether every byte of a chunk is zero. */
+export function isDigitalSilence(pcm: Buffer): boolean {
+  for (let offset = 0; offset < pcm.length; offset += ZERO_SLICE.length) {
+    const end = Math.min(pcm.length, offset + ZERO_SLICE.length);
+    if (pcm.compare(ZERO_SLICE, 0, end - offset, offset, end) !== 0) return false;
+  }
+  return true;
 }
 
 /**
@@ -355,8 +441,9 @@ export interface ParticipantMicEvidence {
  * the microphone (400 ms batches, coalesced and retried for many seconds on a
  * poor connection, sometimes lost), and it is the browser's own account. So
  * `unmuted_ms: 0` means "no unmuted audio had REACHED the server yet", which
- * is also true for a moment after a participant unmutes and speaks. It must
- * never be used to drop or down-weight a participant turn.
+ * is also true for a moment after a participant unmutes and speaks. On its own
+ * it must never be used to drop or down-weight a participant turn; the only
+ * verdict is watchForMutedTurn's, which waits for the track to catch up.
  */
 export function participantMicEvidence(sessionId: string): ParticipantMicEvidence | null {
   const rec = recordings.get(recKey(sessionId, 'participant'));
@@ -369,6 +456,246 @@ export function participantMicEvidence(sessionId: string): ParticipantMicEvidenc
     unmuted_ms: toMs(rec.unmutedSamples),
     unmuted_rms_dbfs: Number.isFinite(level) ? Math.round(level * 10) / 10 : null,
   };
+}
+
+/**
+ * MUTED-TURN CHECK (ai-therapist-412). The voice vendor sometimes produces a
+ * participant transcript out of a muted microphone (exact zeros). This is the
+ * one place that may say so, and it says so only on positive, complete
+ * evidence; every other outcome means "treat the turn as real speech".
+ *
+ * `no_speech` requires ALL of:
+ *
+ * 1. A participant track is open, every chunk of it so far arrived in order
+ *    with a sequence index, and nothing was lost, repeated or failed to write
+ *    (`irregular` is false). One gap or one retried batch, ever, and the
+ *    session gets no verdict again: lost chunks may have been speech.
+ * 2. No chunk the browser did NOT mark muted has arrived since
+ *    MUTED_TURN_WINDOW_MS before the turn started. Arrival is never earlier
+ *    than capture, so unmuted audio captured in that window cannot have
+ *    arrived before it.
+ * 3. Every chunk marked muted since then really is digital silence. The flag
+ *    is `track.enabled` read on the main thread after the audio was captured;
+ *    a disabled track reaches the tee as exact zeros. A chunk flagged muted
+ *    that holds anything but zeros was captured with the microphone live.
+ * 4. The track has been received past the moment the check started, proven
+ *    without comparing clocks: the uploader keeps one request in flight and
+ *    cuts the next batch only after the previous one is answered, and the
+ *    server answers after appending. So the SECOND batch appended after the
+ *    check started was sent after it started, and its `pushed` (chunks
+ *    captured when it was sent) covers everything captured up to then. The
+ *    verdict waits until every chunk up to that index, plus
+ *    MUTED_TURN_TAIL_MS more, has arrived, all of it marked muted.
+ * 5. CONTINUOUS CAPTURE: the track covers the whole turn. Rules 1 to 4 only
+ *    describe the audio that was captured. The tee runs in an AudioContext
+ *    that can sit suspended while WebRTC already carries the live microphone
+ *    to the vendor (a recovery session before the first tap; a tab put in the
+ *    background), and a participant can speak then and mute afterwards: every
+ *    chunk ever captured is muted, and the words were real. So the check also
+ *    needs proof that the browser was capturing from before the turn started
+ *    until after it closed, with no pause:
+ *    - a batch J (not the track's first) that had ARRIVED by
+ *      MUTED_TURN_LEAD_MS before the turn started, and
+ *    - a batch K sent after the check started (as in rule 4), such that
+ *    - the audio captured between them (`pushed` of K minus `pushed` of J,
+ *      as a duration) is no less than the longest the wall clock allows
+ *      between the two sends (K's arrival minus the append before J), less
+ *      MUTED_TURN_CONTINUITY_TOLERANCE_MS.
+ *    Each batch was sent between the previous batch's last append and its own
+ *    arrival, so that is a bound on real elapsed time, on this server's clock
+ *    alone. A context suspended for longer than the tolerance captures less
+ *    audio than the clock ran, and no pair of batches can satisfy it. A track
+ *    that started after the turn did has no batch J at all.
+ *
+ * If that has not happened within the timeout, or the recording closes, the
+ * answer is `unknown`. Unmuted audio arriving at any point answers `speech`
+ * at once, so a real turn whose audio was merely late is held only until its
+ * first unmuted chunk lands.
+ *
+ * Known limits:
+ * - A batch the browser gave up on (its last attempt aborted) that still
+ *   reaches the server later, in order, breaks the causal chain in (4) and
+ *   (5) without a stale chunk to show for it. The tail margin and the window
+ *   in (2) are there for that; it would additionally need the whole utterance
+ *   to fall after the covered index.
+ * - A pause shorter than the tolerance in (5) cannot be told from upload
+ *   latency and the uploader's 400 ms batch timer.
+ * - A turn in the first seconds of a session (before two batches had arrived
+ *   MUTED_TURN_LEAD_MS ahead of it) never gets a verdict.
+ */
+export type MutedTurnVerdict = 'no_speech' | 'speech' | 'unknown';
+
+export interface MutedTurnResult {
+  verdict: MutedTurnVerdict;
+  /** The track as received when the verdict was reached; null when it had closed. */
+  evidence: ParticipantMicEvidence | null;
+}
+
+/** How long a turn waits for its verdict before it is treated as real speech. */
+export const MUTED_TURN_TIMEOUT_MS = 5_000;
+/** Audio that must arrive, all muted, beyond the index proven to be after the check began. */
+export const MUTED_TURN_TAIL_MS = 1_000;
+/**
+ * Unmuted microphone audio (or a muted-flagged chunk that is not silence)
+ * arriving at any time from this long before a participant turn started means
+ * no `no_speech` verdict. A participant who spoke and then muted within this
+ * window simply gets none.
+ */
+export const MUTED_TURN_WINDOW_MS = 120_000;
+/**
+ * The track must be proven captured from at least this long before the turn
+ * started. The start is this server's estimate from the vendor's transcript
+ * events, which arrive after the words; this is the margin for that delay.
+ */
+export const MUTED_TURN_LEAD_MS = 5_000;
+/**
+ * Slack allowed between captured audio and the wall clock across a turn: the
+ * uploader's 400 ms batch timer, upload latency and one chunk of rounding.
+ */
+export const MUTED_TURN_CONTINUITY_TOLERANCE_MS = 750;
+/** Captured audio may exceed the wall-clock bound by one chunk of rounding plus this; more is a clock step. */
+const CLOCK_SLOP_MS = 100;
+
+interface MutedTurnWaiter {
+  sessionId: string;
+  since: number;
+  /**
+   * Continuity reference (rule 5): the largest "earliest send time minus
+   * audio captured by then" over the batches that had arrived early enough.
+   */
+  reference: number;
+  /** Whether capture has been proven continuous up to a batch sent after the check began. */
+  continuous: boolean;
+  /** Batches appended in order since the check began. */
+  batches: number;
+  /** Chunk index the track must reach; null until the second batch names it. */
+  target: number | null;
+  timer: ReturnType<typeof setTimeout>;
+  resolve: (result: MutedTurnResult) => void;
+}
+
+function finishWaiter(rec: ActiveRecording, waiter: MutedTurnWaiter, verdict: MutedTurnVerdict, open = true): void {
+  if (!rec.waiters.delete(waiter)) return;
+  clearTimeout(waiter.timer);
+  let evidence: ParticipantMicEvidence | null = null;
+  try {
+    evidence = open ? participantMicEvidence(waiter.sessionId) : null;
+  } catch {
+    evidence = null;
+  }
+  waiter.resolve({ verdict, evidence });
+}
+
+/** Duration of `chunks` chunks of this track, in ms. */
+function chunksMs(rec: ActiveRecording, chunks: number): number {
+  return ((chunks * (rec.chunkSamples ?? 0)) / rec.sampleRate) * 1000;
+}
+
+/**
+ * The continuity reference for a turn (rule 5), or null when no batch proves
+ * the track was being captured by `coveredFrom`. Only batches sent no earlier
+ * than `since` count, so rule 2 covers every chunk captured after them.
+ */
+function continuityReference(rec: ActiveRecording, since: number, coveredFrom: number): number | null {
+  let best: number | null = null;
+  for (const mark of rec.batchMarks) {
+    if (mark.earliestSentAt === null || mark.pushed === null) continue;
+    if (mark.earliestSentAt < since || mark.arrivedAt > coveredFrom) continue;
+    const offset = mark.earliestSentAt - chunksMs(rec, mark.pushed);
+    if (best === null || offset > best) best = offset;
+  }
+  return best;
+}
+
+/** A batch's first chunk was appended in order: count it for every waiting turn. */
+function noteBatchForWaiters(rec: ActiveRecording, mark: BatchMark): void {
+  for (const waiter of [...rec.waiters]) {
+    waiter.batches += 1;
+    // The first batch after the check began may have been sent before it.
+    if (waiter.batches < 2) continue;
+    const chunkSamples = rec.chunkSamples ?? 0;
+    if (mark.pushed === null || chunkSamples <= 0 || rec.unevenChunks) {
+      finishWaiter(rec, waiter, 'unknown');
+      continue;
+    }
+    if (waiter.target === null) {
+      const tailChunks = Math.ceil((MUTED_TURN_TAIL_MS / 1000) * (rec.sampleRate / chunkSamples));
+      waiter.target = Math.max(mark.pushed, rec.nextSeq ?? 0) + Math.max(1, tailChunks);
+    }
+    if (waiter.continuous) continue;
+    // Wall clock the two sends can be apart at most, minus the audio captured
+    // between them: what a pause in capture would leave behind.
+    const shortfall = mark.arrivedAt - chunksMs(rec, mark.pushed) - waiter.reference;
+    if (shortfall < -(chunksMs(rec, 1) + CLOCK_SLOP_MS)) {
+      // More audio than time: this server's clock stepped, or the counts are
+      // wrong. Either way nothing is proven.
+      finishWaiter(rec, waiter, 'unknown');
+    } else if (shortfall <= MUTED_TURN_CONTINUITY_TOLERANCE_MS) {
+      waiter.continuous = true;
+    }
+  }
+}
+
+/** Answer every waiting turn that can be answered now. */
+function settleWaiters(rec: ActiveRecording): void {
+  for (const waiter of [...rec.waiters]) {
+    if (rec.irregular || rec.errored || rec.unevenChunks) finishWaiter(rec, waiter, 'unknown');
+    else if (rec.lastUnmutedAt !== null && rec.lastUnmutedAt >= waiter.since) finishWaiter(rec, waiter, 'speech');
+    else if (rec.lastMutedSignalAt !== null && rec.lastMutedSignalAt >= waiter.since) {
+      finishWaiter(rec, waiter, 'unknown');
+    } else if (waiter.continuous && waiter.target !== null && rec.nextSeq !== null && rec.nextSeq >= waiter.target) {
+      finishWaiter(rec, waiter, 'no_speech');
+    }
+  }
+}
+
+/** The recording is closing: every waiting turn is treated as real speech. */
+function closeWaiters(rec: ActiveRecording): void {
+  for (const waiter of [...rec.waiters]) finishWaiter(rec, waiter, 'unknown', false);
+}
+
+/**
+ * Start a muted-turn check for a participant turn that has just closed.
+ * `turnStartedAt` is the wall-clock time the turn's words began, as well as
+ * this server can tell (never later than its first transcript fragment).
+ *
+ * Returns null when the turn cannot be judged a muted-microphone phantom on
+ * what is known right now (no participant track, an irregular one, unmuted
+ * audio inside the window, a muted-flagged chunk that was not silence, or no
+ * proof the track was being captured before the turn started): the caller
+ * carries on exactly as it would without this check. Otherwise a promise that
+ * never rejects (see MUTED-TURN CHECK above).
+ */
+export function watchForMutedTurn(
+  sessionId: string,
+  turnStartedAt: number,
+  timeoutMs: number = MUTED_TURN_TIMEOUT_MS,
+): Promise<MutedTurnResult> | null {
+  const rec = recordings.get(recKey(sessionId, 'participant'));
+  if (!rec || rec.irregular || rec.errored) return null;
+  if (!rec.sequenced || rec.unsequenced || rec.nextSeq === null) return null;
+  if (!Number.isFinite(rec.sampleRate) || rec.sampleRate <= 0) return null;
+  if (!rec.chunkSamples || rec.unevenChunks) return null;
+  if (!Number.isFinite(turnStartedAt)) return null;
+  const since = turnStartedAt - MUTED_TURN_WINDOW_MS;
+  if (rec.lastUnmutedAt !== null && rec.lastUnmutedAt >= since) return null;
+  if (rec.lastMutedSignalAt !== null && rec.lastMutedSignalAt >= since) return null;
+  const reference = continuityReference(rec, since, turnStartedAt - MUTED_TURN_LEAD_MS);
+  if (reference === null) return null;
+  return new Promise<MutedTurnResult>((resolve) => {
+    const waiter: MutedTurnWaiter = {
+      sessionId,
+      since,
+      reference,
+      continuous: false,
+      batches: 0,
+      target: null,
+      timer: setTimeout(() => finishWaiter(rec, waiter, 'unknown'), Math.max(0, timeoutMs)),
+      resolve,
+    };
+    waiter.timer.unref?.();
+    rec.waiters.add(waiter);
+  });
 }
 
 /** Whether a session currently has buffered audio on any track. */
@@ -393,7 +720,10 @@ export async function finalize(sessionId: string): Promise<void> {
   // finalize.
   markFinalized(sessionId);
   if (tracks.length === 0) return;
-  for (const { track } of tracks) recordings.delete(recKey(sessionId, track));
+  for (const { track, rec } of tracks) {
+    recordings.delete(recKey(sessionId, track));
+    closeWaiters(rec);
+  }
 
   const window = arrivals.get(sessionId);
   arrivals.delete(sessionId);
@@ -727,6 +1057,7 @@ export function abort(sessionId: string): void {
   if (tracks.length === 0) return;
   for (const track of TRACKS) recordings.delete(recKey(sessionId, track));
   for (const rec of tracks) {
+    closeWaiters(rec);
     rec.stream.destroy();
     void cleanupTemp(rec.filePath);
   }

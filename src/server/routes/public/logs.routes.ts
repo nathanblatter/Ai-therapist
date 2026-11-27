@@ -17,6 +17,7 @@ import { getSystemPrompt } from '../../utils/sessionHelpers.js';
 import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
 import { rememberSessionAccount } from '../../utils/sessionAccounts.js';
 import { rememberSessionStart, rememberTurn } from '../../utils/recentTurns.js';
+import { stripServerOnlySpeechKeys } from '../../db/unverifiedSpeech.js';
 import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
 
 import { createLogger } from '../../utils/logger.js';
@@ -54,7 +55,9 @@ export default function logsRoutes(): Router {
           message_type: type as string,
           content: (message as string | null) ?? null,
           content_redacted: null,
-          metadata: (extras as Record<string, unknown> | null) || null,
+          // The unverified-speech mark and microphone evidence are the
+          // server's to write (ai-therapist-412), never the browser's.
+          metadata: stripServerOnlySpeechKeys((extras as Record<string, unknown> | null) || null),
           created_at: new Date(timestamp as string | number),
         });
       }

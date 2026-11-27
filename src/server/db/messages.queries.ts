@@ -2,6 +2,7 @@
 // edit (with re-redaction on therapist edits), and delete.
 import { pool } from '../config/db.js';
 import redactPHI from '../services/redaction.service.js';
+import { UNVERIFIED_SPEECH_KEY } from './unverifiedSpeech.js';
 
 export interface MessageRow {
   message_id: number;
@@ -199,6 +200,32 @@ export async function updateMessage(
   } finally {
     client.release();
   }
+}
+
+/**
+ * Mark a stored participant voice message as unverified speech. Merges into
+ * the row's metadata: the flag, the reason, and the microphone evidence the
+ * verdict rests on (numbers only). Content is untouched. Throws when no row
+ * was updated, so the caller can fall back to treating the turn as real.
+ */
+export async function markMessageUnverifiedSpeech(
+  messageId: number | string,
+  micAudio: Record<string, unknown>,
+): Promise<void> {
+  const result = await pool.query(
+    `UPDATE messages
+     SET metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb
+     WHERE message_id = $1 AND role = 'user'`,
+    [
+      messageId,
+      JSON.stringify({
+        [UNVERIFIED_SPEECH_KEY]: true,
+        unverified_speech_reason: 'mic_muted',
+        mic_audio: { ...micAudio, state: 'muted' },
+      }),
+    ],
+  );
+  if (!result.rowCount) throw new Error('Message not found');
 }
 
 /** Delete a message; refuses to delete the last message in a session. */

@@ -147,6 +147,7 @@ export default function sessionsRoutes(): Router {
         appendChunk(sessionId, pcm, sampleRate, recordingTrack, {
           seq: firstSeq === undefined ? undefined : firstSeq + i,
           muted: mutedSet.has(i),
+          batchStart: i === 0,
           ...(pushed === undefined ? {} : { pushed: pushed as number }),
         });
       } catch {

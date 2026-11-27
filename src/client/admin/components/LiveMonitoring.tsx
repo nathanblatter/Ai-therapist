@@ -87,6 +87,8 @@ interface TranscriptTurn {
   text: string;
   final: boolean;
   timestamp: string;
+  /** The server found the microphone was muted for this whole turn (ai-therapist-412). */
+  unverified?: boolean;
 }
 
 interface TranscriptMap {
@@ -249,6 +251,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     socket.on('sideband:error', handleSidebandError);
     socket.on('sideband:tool-call', handleSidebandToolCall);
     socket.on('sideband:transcript', handleSidebandTranscript);
+    socket.on('sideband:transcript-unverified', handleSidebandTranscriptUnverified);
     socket.on('audio:chunk', handleAudioChunk);
     socket.on('session:openai-update', handleOpenAIUpdate);
     socket.on('admin:sideband-connections', handleSidebandConnectionsList);
@@ -269,6 +272,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
       socket.off('sideband:error', handleSidebandError);
       socket.off('sideband:tool-call', handleSidebandToolCall);
       socket.off('sideband:transcript', handleSidebandTranscript);
+      socket.off('sideband:transcript-unverified', handleSidebandTranscriptUnverified);
       socket.off('audio:chunk', handleAudioChunk);
       socket.off('session:openai-update', handleOpenAIUpdate);
       socket.off('admin:sideband-connections', handleSidebandConnectionsList);
@@ -390,6 +394,20 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   }, [selectedSidebandSession]);
 
   // Accumulate live transcript deltas (keyed by item_id) into ordered turns.
+  // A participant turn already shown turned out to be the vendor's invention
+  // from a muted microphone: keep the row, label it.
+  const handleSidebandTranscriptUnverified = (data: { sessionId: string; itemId: string | null }) => {
+    if (!data.itemId) return;
+    setTranscripts((prev) => {
+      const turns = prev[data.sessionId];
+      if (!turns || !turns.some((t) => t.itemId === data.itemId)) return prev;
+      return {
+        ...prev,
+        [data.sessionId]: turns.map((t) => (t.itemId === data.itemId ? { ...t, unverified: true } : t)),
+      };
+    });
+  };
+
   const handleSidebandTranscript = (data: {
     sessionId: string;
     role: 'assistant' | 'user';
@@ -1556,6 +1574,14 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                               </div>
                               <span>{turn.text}</span>
                               {!turn.final && <span className="inline-block ml-1 animate-pulse">▍</span>}
+                              {turn.unverified && (
+                                <div className="mt-1 text-[11px] font-semibold bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded flex items-start gap-1">
+                                  <MicOff size={12} aria-hidden="true" className="mt-0.5 shrink-0" />
+                                  <span>
+                                    Unverified speech: the recording shows the microphone muted. Not risk-scored.
+                                  </span>
+                                </div>
+                              )}
                             </div>
                           </div>
                         ))

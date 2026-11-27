@@ -10,6 +10,7 @@
 //
 // The research_pseudonyms table itself is NEVER selected into any artifact.
 import { pool } from '../config/db.js';
+import { notUnverifiedSpeechSql } from './unverifiedSpeech.js';
 
 // Every export row is a flat string/number/bool/null map keyed by column name.
 export type DatasetRow = Record<string, unknown>;
@@ -449,6 +450,7 @@ export async function getTranscriptsExport(asOf: string): Promise<DatasetRow[]> 
        m.message_type AS message_type,
        COALESCE(m.content_redacted, '') AS content_redacted,
        (m.content_redacted IS NULL) AS redaction_pending,
+       (NOT ${notUnverifiedSpeechSql('m')}) AS unverified_speech,
        ${tsUtc('m.created_at')} AS created_at
      FROM messages m
      JOIN sess ON sess.session_id = m.session_id

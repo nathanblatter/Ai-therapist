@@ -10,6 +10,7 @@ import {
   _resetRecentTurnsForTests,
   forgetParticipantTurns,
   forgetSessionTurns,
+  forgetTurn,
   forgetTurnsBefore,
   recentTurns,
   recentTurnsSessionCount,
@@ -232,5 +233,25 @@ describe('dropped at once', () => {
     rememberTurn('s1', 'user', 'kept');
     expect(forgetTurnsBefore(Number.NaN)).toBe(0);
     expect(contents('s1')).toEqual(['user:kept']);
+  });
+});
+
+// ai-therapist-412: a voice transcript found to be the vendor's invention
+// from a muted microphone is not context for the turns after it.
+describe('forgetTurn', () => {
+  it('drops that one turn and keeps the others', () => {
+    rememberTurn('s1', 'assistant', 'How are you feeling?');
+    const phantom = rememberTurn('s1', 'user', 'a purple');
+    rememberTurn('s1', 'user', 'not great');
+    expect(forgetTurn('s1', phantom)).toBe(true);
+    expect(contents('s1')).toEqual(['assistant:How are you feeling?', 'user:not great']);
+  });
+
+  it('is a no-op for a turn that is not held, a null turn or an unknown session', () => {
+    const turn = rememberTurn('s1', 'user', 'kept');
+    expect(forgetTurn('s1', null)).toBe(false);
+    expect(forgetTurn('nobody', turn)).toBe(false);
+    expect(forgetTurn('s1', turn)).toBe(true);
+    expect(forgetTurn('s1', turn)).toBe(false);
   });
 });

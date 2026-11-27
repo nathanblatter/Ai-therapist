@@ -95,6 +95,7 @@ describe('POST /api/sessions/:id/audio recording-consent gate (039/086)', () => 
     expect(recorderMocks.appendChunk).toHaveBeenCalledWith(SESSION_ID, 'AAAA', 24000, 'participant', {
       seq: undefined,
       muted: false,
+      batchStart: true,
     });
   });
 
@@ -104,9 +105,9 @@ describe('POST /api/sessions/:id/audio recording-consent gate (039/086)', () => 
       .send({ chunks: ['AAAA', 'BBBB', 'CCCC'], sampleRate: 48000, track: 'participant', seq: 7, muted: [1] });
     expect(res.status).toBe(204);
     expect(recorderMocks.appendChunk.mock.calls.map((c) => c[4])).toEqual([
-      { seq: 7, muted: false },
-      { seq: 8, muted: true },
-      { seq: 9, muted: false },
+      { seq: 7, muted: false, batchStart: true },
+      { seq: 8, muted: true, batchStart: false },
+      { seq: 9, muted: false, batchStart: false },
     ]);
   });
 
@@ -116,8 +117,8 @@ describe('POST /api/sessions/:id/audio recording-consent gate (039/086)', () => 
       .send({ chunks: ['AAAA', 'BBBB'], sampleRate: 48000, track: 'participant', seq: 3, pushed: 9 });
     expect(res.status).toBe(204);
     expect(recorderMocks.appendChunk.mock.calls.map((c) => c[4])).toEqual([
-      { seq: 3, muted: false, pushed: 9 },
-      { seq: 4, muted: false, pushed: 9 },
+      { seq: 3, muted: false, batchStart: true, pushed: 9 },
+      { seq: 4, muted: false, batchStart: false, pushed: 9 },
     ]);
   });
 

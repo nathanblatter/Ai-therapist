@@ -22,6 +22,7 @@ const {
   getSystemConfigMock,
   getActiveModalityMock,
   insertMessagesBatchMock,
+  markUnverifiedMock,
   insertToolInvocationMock,
   recordLlmUsageMock,
   recordLiveUsageMock,
@@ -30,6 +31,7 @@ const {
   broadcastMock,
   safetyIdentifierMock,
 } = vi.hoisted(() => ({
+  markUnverifiedMock: vi.fn(),
   queryMock: vi.fn(),
   getSystemConfigMock: vi.fn(),
   getActiveModalityMock: vi.fn(),
@@ -87,6 +89,7 @@ vi.mock('ws', () => {
 vi.mock('../config/db.js', () => ({ pool: { query: queryMock } }));
 vi.mock('../db/index.js', () => ({
   insertMessagesBatch: insertMessagesBatchMock,
+  markMessageUnverifiedSpeech: markUnverifiedMock,
   insertToolInvocation: insertToolInvocationMock,
   recordLlmUsage: recordLlmUsageMock,
   // The opening's records (liveOpening.service.ts, ai-therapist-315).
@@ -136,7 +139,7 @@ import { ToolTimeoutError, toolTimeoutMessage, toolTimeoutMs } from './toolTimeo
 import { EXPECTED_OVERLAY, OUTCOME_CASES, OVERLAY_ARGS, REGISTRY_RESULT } from './toolOverlays.testTable.js';
 import { OVERLAY_NOT_SHOWN_NOTE, OVERLAY_UNCONFIRMED_NOTE } from '../../shared/toolOverlayPolicy.js';
 import { getVoiceToolOutcome } from './toolOverlays.js';
-import { appendChunk, abort as abortRecording } from './recorder.service.js';
+import { appendChunk, abort as abortRecording, MUTED_TURN_TIMEOUT_MS } from './recorder.service.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Internal = any;
@@ -186,6 +189,7 @@ beforeEach(() => {
     return Promise.resolve({ rows: [] });
   });
   insertMessagesBatchMock.mockReset().mockResolvedValue([{ message_id: 42 }]);
+  markUnverifiedMock.mockReset().mockResolvedValue(undefined);
   insertToolInvocationMock.mockReset().mockResolvedValue(undefined);
   recordLlmUsageMock.mockReset().mockResolvedValue(undefined);
   recordLiveUsageMock.mockReset().mockResolvedValue(undefined);
@@ -389,6 +393,13 @@ describe('user turn -> crisis pipeline', () => {
         await fire(sessionId, userDelta('I want to kill myself', 0, 1500));
         await vi.advanceTimersByTimeAsync(TURN_GAP_MS);
         await flush();
+        // Stored at once. Two seconds of track that began with the turn
+        // prove nothing about the microphone while the words were spoken, so
+        // there is no muted-turn check and the turn is scored as real speech.
+        expect(userRows()).toHaveLength(1);
+        await vi.advanceTimersByTimeAsync(MUTED_TURN_TIMEOUT_MS);
+        await flush();
+        expect(markUnverifiedMock).not.toHaveBeenCalled();
 
         expect(userRows()).toHaveLength(1);
         expect(userRows()[0]).toMatchObject({ role: 'user', message_type: 'voice', content: 'I want to kill myself' });
@@ -417,6 +428,280 @@ describe('user turn -> crisis pipeline', () => {
       expect(userRows()).toHaveLength(1);
       expect(userRows()[0].metadata).toEqual({ channel: 'live', start_ms: 0, end_ms: 400 });
       expect(runCrisisPipelineMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ai-therapist-412. A participant transcript the vendor produced while the
+  // microphone was muted is kept and marked, and not risk-scored. The mark
+  // needs the recorder's complete, positive evidence (watchForMutedTurn);
+  // anything short of it and the turn is scored exactly as before.
+  describe('a participant turn from a muted microphone is marked unverified, and only on complete evidence', () => {
+    // 100 ms chunks, four to an HTTP batch, one batch every 400 ms: the
+    // uploader's rhythm, so captured audio keeps pace with the clock.
+    const CHUNK = 4800;
+    const BATCH_MS = 400;
+    const silentChunk = Buffer.alloc(CHUNK * 2).toString('base64');
+    const voicedChunk = Buffer.from(new Int16Array(CHUNK).fill(3277).buffer).toString('base64');
+    const userRows = () =>
+      insertMessagesBatchMock.mock.calls.map((c) => c[0][0]).filter((row: Internal) => row.role === 'user');
+    const tracks = new Map<string, { nextSeq: number; lastBatchAt: number }>();
+    const trackOf = (sessionId: string) => {
+      let track = tracks.get(sessionId);
+      if (!track) {
+        track = { nextSeq: 0, lastBatchAt: Date.now() };
+        tracks.set(sessionId, track);
+      }
+      return track;
+    };
+    /** One HTTP batch on the participant track, arriving now. */
+    function batch(sessionId: string, opts: { muted?: boolean; skip?: number } = {}) {
+      const track = trackOf(sessionId);
+      const seq = track.nextSeq + (opts.skip ?? 0);
+      for (let i = 0; i < 4; i++) {
+        appendChunk(sessionId, opts.muted === false ? voicedChunk : silentChunk, 48000, 'participant', {
+          seq: seq + i,
+          muted: opts.muted !== false,
+          batchStart: i === 0,
+          pushed: seq + 4,
+        });
+      }
+      track.nextSeq = seq + 4;
+      track.lastBatchAt = Date.now();
+    }
+    /** Let `ms` pass with the microphone captured and uploaded throughout, muted. */
+    async function capture(sessionId: string, ms: number) {
+      const track = trackOf(sessionId);
+      const until = Date.now() + ms;
+      while (track.lastBatchAt + BATCH_MS <= until) {
+        await vi.advanceTimersByTimeAsync(track.lastBatchAt + BATCH_MS - Date.now());
+        batch(sessionId);
+      }
+      await vi.advanceTimersByTimeAsync(until - Date.now());
+    }
+    /** Let `ms` pass with capture suspended: no chunk exists for this stretch. */
+    async function suspended(sessionId: string, ms: number) {
+      await vi.advanceTimersByTimeAsync(ms);
+      trackOf(sessionId).lastBatchAt = Date.now();
+    }
+    /**
+     * A session whose microphone has been captured, muted, for 8 s, and a turn
+     * the vendor produced anyway. Capture carries on while the turn closes.
+     */
+    async function phantomTurn(sessionId: string, text = 'a purple') {
+      await attach(sessionId);
+      await capture(sessionId, 8000);
+      await fire(sessionId, userDelta(text, 0, 400));
+      await capture(sessionId, TURN_GAP_MS);
+      await flush();
+    }
+
+    beforeEach(() => tracks.clear());
+
+    it('muted before, during and after the turn: stored, marked, not scored, not kept as context', async () => {
+      const { recentTurns, _resetRecentTurnsForTests } = await import('../utils/recentTurns.js');
+      _resetRecentTurnsForTests();
+      const sessionId = 's-phantom';
+      try {
+        await phantomTurn(sessionId);
+        // Stored at once, like any turn; no verdict yet.
+        expect(userRows()).toHaveLength(1);
+        expect(userRows()[0]).toMatchObject({ role: 'user', message_type: 'voice', content: 'a purple' });
+        expect(recentTurns(sessionId)?.turns.map((t) => t.content)).toEqual(['a purple']);
+        expect(markUnverifiedMock).not.toHaveBeenCalled();
+        expect(runCrisisPipelineMock).not.toHaveBeenCalled();
+
+        // The track keeps arriving, in order, all muted, past the turn.
+        await capture(sessionId, 2400);
+        await flush();
+
+        expect(markUnverifiedMock).toHaveBeenCalledTimes(1);
+        const [markedId, evidence] = markUnverifiedMock.mock.calls[0];
+        expect(markedId).toBe(42);
+        expect(evidence).toEqual({
+          received_ms: expect.any(Number),
+          muted_ms: evidence.received_ms,
+          unmuted_ms: 0,
+          unmuted_rms_dbfs: null,
+        });
+        expect(evidence.received_ms).toBeGreaterThan(8000 + TURN_GAP_MS);
+        expect(runCrisisPipelineMock).not.toHaveBeenCalled();
+        expect(recentTurns(sessionId)?.turns ?? []).toEqual([]);
+        expect(broadcastMock).toHaveBeenCalledWith(
+          expect.anything(),
+          'sideband:transcript-unverified',
+          expect.objectContaining({ sessionId, messageId: 42, reason: 'mic_muted' }),
+          sessionId,
+        );
+        // Still not scored once the wait would have run out.
+        await vi.advanceTimersByTimeAsync(MUTED_TURN_TIMEOUT_MS * 2);
+        await flush();
+        expect(runCrisisPipelineMock).not.toHaveBeenCalled();
+      } finally {
+        abortRecording(sessionId);
+      }
+    });
+
+    // Review of #146. A recovery session: the microphone is on with no user
+    // gesture, so the tee's AudioContext is still suspended while WebRTC
+    // already carries live audio. The participant speaks, then taps mute; the
+    // tap resumes the context and the track starts at index 0, all muted.
+    it('the recording started only after the words were spoken (mute tapped afterwards): scored at once, never marked', async () => {
+      const sessionId = 's-late-track';
+      await attach(sessionId);
+      try {
+        await vi.advanceTimersByTimeAsync(3000); // speaking; nothing is captured
+        await fire(sessionId, userDelta('I want to kill myself', 0, 2500));
+        trackOf(sessionId); // the tap on mute: capture starts now, muted
+        await capture(sessionId, TURN_GAP_MS);
+        await flush();
+        expect(runCrisisPipelineMock).toHaveBeenCalledExactlyOnceWith(
+          { sessionId, messageId: 42, content: 'I want to kill myself' },
+          'realtime',
+        );
+        // The track goes on arriving in order, all muted: still no mark.
+        await capture(sessionId, MUTED_TURN_TIMEOUT_MS * 2);
+        await flush();
+        expect(markUnverifiedMock).not.toHaveBeenCalled();
+        expect(runCrisisPipelineMock).toHaveBeenCalledTimes(1);
+      } finally {
+        abortRecording(sessionId);
+      }
+    });
+
+    it('capture was suspended mid-session while the participant spoke, then resumed muted: scored, never marked', async () => {
+      const sessionId = 's-suspended';
+      await attach(sessionId);
+      try {
+        await capture(sessionId, 12_000); // captured and uploaded normally, muted
+        await suspended(sessionId, 3000); // backgrounded tab: the words are in no chunk
+        await fire(sessionId, userDelta('I want to kill myself', 0, 2500));
+        await suspended(sessionId, 500);
+        await capture(sessionId, TURN_GAP_MS); // muted, and capture resumes
+        await flush();
+        // The track is whole and all muted, well past the turn; the pause in
+        // it means there is no verdict, and the wait ends in scoring.
+        await capture(sessionId, MUTED_TURN_TIMEOUT_MS + 1000);
+        await flush();
+        expect(markUnverifiedMock).not.toHaveBeenCalled();
+        expect(runCrisisPipelineMock).toHaveBeenCalledExactlyOnceWith(
+          { sessionId, messageId: 42, content: 'I want to kill myself' },
+          'realtime',
+        );
+      } finally {
+        abortRecording(sessionId);
+      }
+    });
+
+    it('a chunk flagged muted that holds real audio: scored, never marked', async () => {
+      const sessionId = 's-flag-lies';
+      try {
+        await phantomTurn(sessionId, 'I want to kill myself');
+        expect(runCrisisPipelineMock).not.toHaveBeenCalled();
+        const track = trackOf(sessionId);
+        appendChunk(sessionId, voicedChunk, 48000, 'participant', {
+          seq: track.nextSeq,
+          muted: true,
+          batchStart: true,
+          pushed: track.nextSeq + 1,
+        });
+        await flush();
+        expect(markUnverifiedMock).not.toHaveBeenCalled();
+        expect(runCrisisPipelineMock).toHaveBeenCalledTimes(1);
+      } finally {
+        abortRecording(sessionId);
+      }
+    });
+
+    it('the participant had unmuted and spoken, the audio just arrived late: scored as soon as it lands', async () => {
+      const sessionId = 's-late-audio';
+      try {
+        await phantomTurn(sessionId, 'I want to kill myself');
+        expect(runCrisisPipelineMock).not.toHaveBeenCalled();
+        batch(sessionId);
+        batch(sessionId, { muted: false });
+        await flush();
+        expect(markUnverifiedMock).not.toHaveBeenCalled();
+        expect(runCrisisPipelineMock).toHaveBeenCalledExactlyOnceWith(
+          { sessionId, messageId: 42, content: 'I want to kill myself' },
+          'realtime',
+        );
+      } finally {
+        abortRecording(sessionId);
+      }
+    });
+
+    it('the participant spoke earlier in the window: scored at once, no wait', async () => {
+      const sessionId = 's-spoke-recently';
+      await attach(sessionId);
+      try {
+        batch(sessionId, { muted: false });
+        await capture(sessionId, 30_000);
+        await fire(sessionId, userDelta('I want to kill myself', 0, 400));
+        await capture(sessionId, TURN_GAP_MS);
+        await flush();
+        expect(runCrisisPipelineMock).toHaveBeenCalledTimes(1);
+        expect(markUnverifiedMock).not.toHaveBeenCalled();
+      } finally {
+        abortRecording(sessionId);
+      }
+    });
+
+    it('chunks of the track were lost while waiting: scored, never marked', async () => {
+      const sessionId = 's-lost-chunks';
+      try {
+        await phantomTurn(sessionId, 'I want to kill myself');
+        expect(runCrisisPipelineMock).not.toHaveBeenCalled();
+        batch(sessionId);
+        batch(sessionId, { skip: 12 });
+        await capture(sessionId, 2400);
+        await flush();
+        expect(markUnverifiedMock).not.toHaveBeenCalled();
+        expect(runCrisisPipelineMock).toHaveBeenCalledTimes(1);
+      } finally {
+        abortRecording(sessionId);
+      }
+    });
+
+    it('the session ends while waiting: scored, never marked', async () => {
+      const sessionId = 's-ends-waiting';
+      await phantomTurn(sessionId, 'I want to kill myself');
+      expect(runCrisisPipelineMock).not.toHaveBeenCalled();
+      abortRecording(sessionId);
+      await flush();
+      expect(markUnverifiedMock).not.toHaveBeenCalled();
+      expect(runCrisisPipelineMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('the mark cannot be written: the turn is scored (an unmarked turn is always scored)', async () => {
+      const sessionId = 's-mark-fails';
+      markUnverifiedMock.mockRejectedValue(new Error('connection terminated'));
+      try {
+        await phantomTurn(sessionId);
+        await capture(sessionId, 2400);
+        await flush();
+        expect(markUnverifiedMock).toHaveBeenCalledTimes(1);
+        expect(runCrisisPipelineMock).toHaveBeenCalledExactlyOnceWith(
+          { sessionId, messageId: 42, content: 'a purple' },
+          'realtime',
+        );
+      } finally {
+        abortRecording(sessionId);
+      }
+    });
+
+    it('the turn could not be stored: scored at once, since there is no row to mark', async () => {
+      const sessionId = 's-insert-fails';
+      insertMessagesBatchMock.mockRejectedValue(new Error('connection terminated'));
+      try {
+        await phantomTurn(sessionId);
+        expect(runCrisisPipelineMock).toHaveBeenCalledExactlyOnceWith(
+          { sessionId, messageId: null, content: 'a purple' },
+          'realtime',
+        );
+        expect(markUnverifiedMock).not.toHaveBeenCalled();
+      } finally {
+        abortRecording(sessionId);
+      }
     });
   });
 
