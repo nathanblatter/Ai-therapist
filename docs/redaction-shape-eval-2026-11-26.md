@@ -468,3 +468,14 @@ are still all on placeholders.
 2. Add the sentence that keeps relative time expressions (B)?
 3. If either: is "Relief Society president" (an office in a congregation,
    without the congregation's name) something to redact or to keep?
+
+## Outcome (2026-11-26, same evening)
+
+The study owner decided to adopt candidate B. It is now the wording in
+`src/server/services/redaction.service.ts` (the same two sentences, word for
+word), the IRB prompts attachment was regenerated from it, and the two
+candidate files were removed because their edits no longer apply. The
+`--wording` option on the runners stays for the next candidate. Open after
+this change: "Relief Society"-style generic offices are sometimes redacted,
+the prompt's second example still redacts a clock time, and refused lone
+crisis messages are unchanged.

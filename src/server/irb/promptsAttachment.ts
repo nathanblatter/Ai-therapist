@@ -148,7 +148,7 @@ import { EMBEDDING_MODEL } from '../services/embeddings.service.js';
 import { MODERATION_MODEL } from '../services/moderation.service.js';
 
 /** Date shown on the attachment. Bump when the prompts change and it is re-submitted. */
-export const PREPARED = 'November 19, 2026 (supersedes the September 4, 2026 version)';
+export const PREPARED = 'November 26, 2026 (supersedes the November 19, 2026 version)';
 
 /** Repo-relative path of the committed attachment. */
 export const ATTACHMENT_PATH = 'docs/irb-phase2-instruments/prompts.html';

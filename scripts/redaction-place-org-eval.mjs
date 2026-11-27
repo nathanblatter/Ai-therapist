@@ -36,7 +36,7 @@
 //   OPENAI_API_KEY=... node node_modules/.bin/tsx scripts/redaction-place-org-eval.mjs \
 //     --out /somewhere/outside/the/repo/redaction-place-org.jsonl \
 //     [--runs 3] [--batch 10] [--seed 1] [--concurrency 5] [--skip-leak-check] \
-//     [--wording evals/candidates/redaction-wording-orgs.json]
+//     [--wording path/to/candidate.json]
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import OpenAI from 'openai';
