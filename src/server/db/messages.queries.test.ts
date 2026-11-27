@@ -170,7 +170,7 @@ describe('updateMessage', () => {
     const meta = { edited_by: 'dr_t', edited_at: '2026-01-01' };
     await expect(updateMessage(5, 'Alice said hi', 'content', meta)).resolves.toBe(ROW);
 
-    expect(redactMock).toHaveBeenCalledWith('Alice said hi');
+    expect(redactMock).toHaveBeenCalledWith('Alice said hi', { passedThrough: expect.any(Set) });
     expect(clientSql()).toEqual(['BEGIN', 'UPDATE', 'COMMIT']);
     const [sql, params] = clientQueryMock.mock.calls[1] as [string, unknown[]];
     expect(sql).toMatch(

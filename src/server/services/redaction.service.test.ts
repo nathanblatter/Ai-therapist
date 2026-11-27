@@ -9,15 +9,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const createMock = vi.hoisted(() => vi.fn());
+const decisionsMock = vi.hoisted(() => vi.fn());
 vi.mock('openai', () => ({
   default: class MockOpenAI {
     responses = { create: createMock };
+    decisions = { create: decisionsMock };
   },
 }));
 vi.mock('../config/secrets.js', () => ({ getOpenAIKey: async () => 'test-key' }));
 
 import redactPHI, {
   MAX_SINGLE_MESSAGE_CALLS,
+  PASSTHROUGH_MAX_P,
   REDACTION_BATCH_INSTRUCTIONS,
   REDACTION_BATCH_INSTRUCTIONS_V2,
   REDACTION_PROMPT,
@@ -56,6 +59,10 @@ const GOOD = batchReply([
 
 beforeEach(() => {
   createMock.mockReset();
+  // The identifier check for refused messages (ai-therapist-409) has no answer
+  // unless a test gives it one, so a refused message stays rejected.
+  decisionsMock.mockReset();
+  decisionsMock.mockRejectedValue(new Error('decisions not mocked'));
   _resetRedactionStateForTests();
   // Most suites below pin the v2 wording (strict schema, every call in the
   // batch format). The default, legacy wording has its own suite at the end.
@@ -525,5 +532,102 @@ describe('legacy wording (the default; review of PR #102)', () => {
   it('redactPHI still rejects a bare-text refusal', async () => {
     createMock.mockResolvedValueOnce(REFUSAL);
     await expect(redactPHI('I have my pills ready tonight')).rejects.toBeInstanceOf(RedactionRejectedError);
+  });
+});
+
+// ai-therapist-409: the model refuses a lone crisis message. When a classifier
+// that writes no text finds nothing in it to redact, the message is stored as
+// it stands instead of waiting for a person.
+describe('a refused message with nothing to redact', () => {
+  const KINDS = ['person_name', 'organization', 'place', 'date', 'contact_or_number'];
+  const kinds = (p: number, usage = { input_tokens: 300, output_tokens: 0 }) => ({
+    model: 'gpt-6-luna',
+    answers: KINDS.map((name, i) => ({ type: 'predicate', name, probability: i === 1 ? p : 0 })),
+    usage,
+  });
+  const CRISIS = 'i am going to kill myself tonight';
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('is stored unrewritten when the identifier check is confident there is nothing in it', async () => {
+    createMock.mockResolvedValue(REFUSAL);
+    decisionsMock.mockResolvedValue(kinds(0.01));
+    const rejected = new Map<number, string>();
+    const passedThrough = new Set<number>();
+    const usage: Array<{ model: string; tokensIn: number | null; tokensOut: number | null }> = [];
+    const out = await redactPHIBatch([{ id: 5, content: CRISIS }], { rejected, passedThrough, usage });
+    expect(out.get(5)).toBe(CRISIS);
+    expect([...passedThrough]).toEqual([5]);
+    expect(rejected.size).toBe(0);
+    expect(decisionsMock).toHaveBeenCalledTimes(1);
+    expect(decisionsMock.mock.calls[0][0]).toMatchObject({ model: 'gpt-6-luna', input: CRISIS });
+    // The classifier call is accounted for like any other.
+    expect(usage.map((u) => u.model)).toContain('gpt-6-luna');
+  });
+
+  it('stays rejected at or above the cut-off, which is far below the leak check threshold', async () => {
+    expect(PASSTHROUGH_MAX_P).toBeLessThanOrEqual(0.1);
+    createMock.mockResolvedValue(REFUSAL);
+    decisionsMock.mockResolvedValue(kinds(PASSTHROUGH_MAX_P));
+    const rejected = new Map<number, string>();
+    const passedThrough = new Set<number>();
+    const out = await redactPHIBatch([{ id: 5, content: CRISIS }], { rejected, passedThrough });
+    expect(out.has(5)).toBe(false);
+    expect(rejected.get(5)).toMatch(/^Redaction output rejected: /);
+    expect(passedThrough.size).toBe(0);
+  });
+
+  it('a word capitalised like a name keeps it rejected without asking the classifier', async () => {
+    createMock.mockResolvedValue(REFUSAL);
+    decisionsMock.mockResolvedValue(kinds(0));
+    const rejected = new Map<number, string>();
+    const out = await redactPHIBatch([{ id: 5, content: 'i told Priya i am going to kill myself tonight' }], {
+      rejected,
+    });
+    expect(out.has(5)).toBe(false);
+    expect(rejected.has(5)).toBe(true);
+    expect(decisionsMock).not.toHaveBeenCalled();
+  });
+
+  it('a classifier error or refusal keeps it rejected', async () => {
+    createMock.mockResolvedValue(REFUSAL);
+    decisionsMock.mockRejectedValueOnce(new Error('boom'));
+    const rejected = new Map<number, string>();
+    expect((await redactPHIBatch([{ id: 5, content: CRISIS }], { rejected })).has(5)).toBe(false);
+    const refusedAnswer = kinds(0);
+    (refusedAnswer.answers as Array<Record<string, unknown>>)[0] = { type: 'refusal', name: 'person_name' };
+    decisionsMock.mockResolvedValueOnce(refusedAnswer);
+    expect((await redactPHIBatch([{ id: 5, content: CRISIS }], { rejected })).has(5)).toBe(false);
+    expect(rejected.has(5)).toBe(true);
+  });
+
+  it('only refusals qualify: an output that changed the words is never passed through', async () => {
+    createMock.mockResolvedValue(batchReply([{ i: 0, text: 'something else entirely was written here instead' }]));
+    decisionsMock.mockResolvedValue(kinds(0));
+    const rejected = new Map<number, string>();
+    const out = await redactPHIBatch([{ id: 5, content: CRISIS }], { rejected });
+    expect(out.has(5)).toBe(false);
+    expect(decisionsMock).not.toHaveBeenCalled();
+  });
+
+  it('REDACTION_REFUSAL_PASSTHROUGH=off never makes the classifier call', async () => {
+    vi.stubEnv('REDACTION_REFUSAL_PASSTHROUGH', 'off');
+    createMock.mockResolvedValue(REFUSAL);
+    decisionsMock.mockResolvedValue(kinds(0));
+    const rejected = new Map<number, string>();
+    const out = await redactPHIBatch([{ id: 5, content: CRISIS }], { rejected });
+    expect(out.has(5)).toBe(false);
+    expect(rejected.has(5)).toBe(true);
+    expect(decisionsMock).not.toHaveBeenCalled();
+  });
+
+  it('redactPHI (therapist edit) returns the text and reports the pass-through', async () => {
+    createMock.mockResolvedValue(REFUSAL);
+    decisionsMock.mockResolvedValue(kinds(0.02));
+    const passedThrough = new Set<number>();
+    await expect(redactPHI(CRISIS, { passedThrough })).resolves.toBe(CRISIS);
+    expect(passedThrough.size).toBe(1);
   });
 });

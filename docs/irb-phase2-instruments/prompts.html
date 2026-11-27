@@ -683,7 +683,7 @@ The 18 HIPAA Safe Harbor identifiers are:
 15. Internet Protocol (IP) Address
 16. Finger or voice print
 17. Photographic image - Photographic images are not limited to images of the face.
-18. Any other characteristic that could uniquely identify the individual. This includes the proper name of a specific organization or facility connected to the individual: a school, college or university (and its named buildings, dorms and teams), an employer or business, a hospital or clinic, a church, ward or congregation, an apartment complex, a sports team or club. Replace each with &quot;[REDACTED: ORGANIZATION]&quot;. A generic reference without a proper name (&quot;my school&quot;, &quot;the hospital&quot;, &quot;work&quot;, &quot;my ward&quot;) is not an identifier and must be left as written
+18. Any other characteristic that could uniquely identify the individual. This includes the proper name of a specific organization or facility connected to the individual: a school, college or university (and its named buildings, dorms and teams), an employer or business, a hospital or clinic, a church, ward or congregation, an apartment complex, a sports team or club. Replace each with &quot;[REDACTED: ORGANIZATION]&quot;. A generic reference without a proper name (&quot;my school&quot;, &quot;the hospital&quot;, &quot;work&quot;, &quot;my ward&quot;) is not an identifier and must be left as written. The name of a kind of group or office found in many places (&quot;Relief Society&quot;, &quot;student council&quot;, &quot;PTA&quot;, &quot;the bishopric&quot;), without the name of the specific organization, is not an identifier either
 
 &#x27;&#x27;&#x27;For each input, review the entire text and identify the presence and format of each specific Safe Harbor identifier listed above. Replace each instance strictly corresponding to one of the 18 identifiers with a matching placeholder (e.g., &quot;[REDACTED: NAME]&quot;, &quot;[REDACTED: DATE OF BIRTH]&quot;, etc.). Do not redact any information unless it exactly matches a Safe Harbor identifier. Redaction must cover partial or full identifiers, using the safest reasonable interpretation while avoiding unnecessary over-redaction.
 
@@ -718,11 +718,11 @@ Input Example 2:
 Reasoning:
 - &quot;Jane Doe&quot; matches the &#x27;Names&#x27; identifier.
 - &quot;MRN 00123&quot; matches &#x27;Medical record numbers&#x27;.
-- &quot;10:45AM&quot; within medical context may be associated with times.
+- &quot;10:45AM&quot; is a time of day, not a date: left as written.
 - &quot;123-45-6789&quot; matches &#x27;Social Security numbers&#x27;.
 
 Output:
-&quot;Admission records show [REDACTED: NAME], [REDACTED: MEDICAL RECORD NUMBER], arrived at [REDACTED: TIME] with a social security number [REDACTED: SSN].&quot;
+&quot;Admission records show [REDACTED: NAME], [REDACTED: MEDICAL RECORD NUMBER], arrived at 10:45AM with a social security number [REDACTED: SSN].&quot;
 
 Edge Cases/Considerations:
 - Be strict: redact only when data matches a HIPAA Safe Harbor identifier.

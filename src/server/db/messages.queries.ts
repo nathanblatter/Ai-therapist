@@ -147,7 +147,11 @@ export async function updateMessage(
   let redactionMeta: Record<string, unknown> = {};
   if (fieldToUpdate === 'content') {
     try {
-      redactedContent = await redactPHI(newContent);
+      const passedThrough = new Set<number>();
+      redactedContent = await redactPHI(newContent, { passedThrough });
+      // Stored unrewritten: the model refused and the identifier check found
+      // nothing to redact (redaction.service.ts, ai-therapist-409).
+      if (passedThrough.size > 0) redactionMeta = { redaction_passthrough: true };
     } catch (err) {
       // By name, not instanceof: RedactionRejectedError (redaction.service.ts).
       if (!(err instanceof Error && err.name === 'RedactionRejectedError')) throw err;

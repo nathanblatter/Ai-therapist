@@ -13,6 +13,8 @@ interface RedactionCheck {
   /** Did the model's answer alone reach the threshold? Absent on rows checked
    *  before ai-therapist-409, where the model was the only reason to flag. */
   model_flagged?: boolean;
+  /** Kinds of identifier the model thinks remain, e.g. ["organization"]. */
+  kinds?: string[];
   backend: string;
   model: string;
   checked_at: string;
@@ -29,6 +31,15 @@ interface RedactMessage {
   /** Decision-model leak-check verdict (ai-therapist-262); null when never checked. */
   redaction_check?: RedactionCheck | null;
 }
+
+/** Reviewer wording for the leak check's kinds (identifierCheck.ts). */
+const KIND_LABELS: Record<string, string> = {
+  person_name: 'a name',
+  organization: 'an organisation',
+  place: 'a place',
+  date: 'a date',
+  contact_or_number: 'a contact detail or number',
+};
 
 /** At most six words, then a count of the rest. */
 function summariseWords(words: string[]): string {
@@ -193,7 +204,11 @@ export default function RedactionReview() {
                           title={`Leak-check (${message.redaction_check.backend}, ${message.redaction_check.model}) says an identifier may remain`}
                         >
                           <AlertCircle size={12} />
-                          Possible leak, p={message.redaction_check.p_leak.toFixed(2)}
+                          Possible leak
+                          {message.redaction_check.kinds?.length
+                            ? ` (${message.redaction_check.kinds.map((k) => KIND_LABELS[k] ?? k).join(', ')})`
+                            : ''}
+                          , p={message.redaction_check.p_leak.toFixed(2)}
                         </span>
                       )}
                     {message.redaction_check?.flagged &&

@@ -479,3 +479,93 @@ candidate files were removed because their edits no longer apply. The
 this change: "Relief Society"-style generic offices are sometimes redacted,
 the prompt's second example still redacts a clock time, and refused lone
 crisis messages are unchanged.
+
+# Addendum 4 (2026-11-26, late): refused messages with nothing to redact, and a leak check per kind
+
+Decided by the study owner the same evening; shipped in one change.
+
+## 1. The leak check asks one question per kind of identifier
+
+`src/server/services/identifierCheck.ts`: five yes/no questions in one
+Decisions API request (a person's name, an organisation, a place, a date, a
+contact detail or number). The probability of a leak is the largest of the
+five, and the row records which kinds reached the threshold, so the review
+screen says what is suspected. The single broad question it replaces did not
+name organisations and flagged placeholders.
+
+Measured on outputs already on hand (454 Decisions calls, no redaction calls):
+
+| Material | Single question (addendum 1) | Five questions, threshold 0.5 |
+| --- | --- | --- |
+| 95 old-wording outputs with an organisation name left in | 62 flagged | 95 flagged, all as "organization" |
+| 55 old-wording clean outputs | 12 falsely flagged | 3 falsely flagged |
+| 150 new-wording clean outputs | 14 falsely flagged | 3 falsely flagged |
+| 78 new-wording clean crisis outputs | not run | 0 flagged |
+
+The remaining false flags are all the date question firing on a sentence
+with a LOCATION or ORGANIZATION placeholder.
+
+## 2. A refused message with nothing in it is stored as it stands
+
+The redaction model answers a lone crisis message instead of redacting it.
+Validation catches that every time, but the message then waits for a person,
+and most such messages hold no identifier. Now, for a message whose only
+failure is a refusal (or a prose reply where JSON was asked for), the same
+five questions are asked of the message itself. If every probability is
+under 0.1 and no word is capitalised like a name, the text is stored
+unrewritten and marked `redaction_passthrough`. Otherwise it is left for a
+person exactly as before. `REDACTION_REFUSAL_PASSTHROUGH=off` turns it off.
+
+Why 0.1: asked of the raw fixture messages, all 62 that hold an identifier
+scored 0.9 or more, and the 14 that hold none scored 0.07 or less except one
+ordinary sentence at 0.41 (which would simply go to a person).
+
+On the real code path, crisis fixture, 3 runs (60 crisis message-runs per
+request shape):
+
+| Request shape | Stored before (first part of this document) | Stored now |
+| --- | --- | --- |
+| Single message (therapist edit, re-send) | 5 of 60 | 37 of 60 |
+| Batch of one | 40% | 49 of 60 |
+| Batch of 12 | 73% | 55 of 60 |
+| Whole fixture as one batch | 40 of 40 | 52 of 60 |
+
+- Explicit suicidal intent with no identifiers, single message: 9 of 9
+  stored (it was 0 of 24).
+- Of the stored single messages, 29 were stored unrewritten. None of them is
+  a message the fixture lists an identifier for. Across all 312 message-runs
+  no identifier was left in and no "keep" phrase was lost.
+- What still waits for a person is mostly crisis messages that DO hold an
+  identifier (14 of the 23 refused single messages): the model refuses them
+  and the check correctly declines to store them unrewritten. That part is
+  not solved.
+- The whole-fixture batch was refused outright in 1 of these 3 runs (it was
+  never refused in the earlier runs); the re-sends then stored all but 7.
+  Three runs cannot say whether that is chance or the prompt edits below.
+
+## 3. Two prompt clean-ups
+
+- The second example no longer redacts the clock time "10:45AM": it
+  contradicted the sentence that says a time of day is not a date.
+- Item 18 also says the name of a kind of group or office found in many
+  places ("Relief Society", "student council", "PTA", "the bishopric"),
+  without the specific organisation's name, is not an identifier.
+
+Place and organisation fixture after these edits, 3 runs: 0 of 105 names left
+in, 33 of 33 listed identifiers removed, 0 rejections, 0 of 12
+nothing-to-redact messages changed, 3 of 150 clean outputs flagged by the
+new leak check.
+
+## Limits
+
+- Small invented fixtures, one evening, one snapshot each of gpt-5 and
+  gpt-6-luna. 62 of 62 and 0 of 29 are not guarantees. The capitalised-word
+  check is the second net under the classifier, and the leak check still runs
+  on every stored message afterwards, including the unrewritten ones.
+- The refused-message check sends the message text to the Decisions API,
+  which has no per-request "do not store" setting; retention follows the
+  OpenAI organisation's data controls. The redaction call itself sets
+  `store: false`.
+- Cost of this addendum: 617 gpt-5 flex calls (about 0.8M input and 0.32M
+  output tokens, roughly $2.10) and about 1,060 Decisions calls (about 0.9M
+  input tokens, no output tokens; the price was not checked).
