@@ -31,6 +31,9 @@
 //        --dry-run (no OpenAI calls at all; reply rows get a canned reply)
 //        --ids a,b  --category c  --limit n  --out <dir>  --baseline <summary.json>
 //        --max-usd n (stop before recorded spend passes n; default 2)
+//        --file <rows.jsonl> (detector only: run another file of rows in the
+//          detector format, for example evals/goldens/detector-language.jsonl,
+//          instead of evals/goldens/detector.jsonl)
 //
 // `--layer keyword` runs with no OpenAI key in the process: the risk assessor
 // and the free moderation screen both fail fast, so every score is the stage-1
@@ -91,6 +94,7 @@ interface Args {
   limit?: number;
   out?: string;
   baseline?: string;
+  file?: string;
   maxUsd: number;
   reviewSheet: boolean;
   check: boolean;
@@ -133,6 +137,9 @@ function parseArgs(argv: string[]): Args {
         break;
       case '--baseline':
         a.baseline = next();
+        break;
+      case '--file':
+        a.file = next();
         break;
       case '--max-usd':
         a.maxUsd = Number(next());
@@ -406,7 +413,12 @@ async function runDetectorRow(
       `SELECT crisis_flagged, crisis_severity FROM therapy_sessions WHERE session_id = $1`,
       [sessionId],
     );
-    const factors = (risk[0]?.score_factors ?? {}) as { method?: string; llm_error?: string };
+    const factors = (risk[0]?.score_factors ?? {}) as {
+      method?: string;
+      llm_error?: string;
+      third_party?: boolean;
+      harm_to_others?: boolean;
+    };
     return {
       sessionId,
       llmError: factors.llm_error ?? null,
@@ -414,6 +426,7 @@ async function runDetectorRow(
         id: row.id,
         riskScore: risk[0] ? Number(risk[0].risk_score) : null,
         method: factors.method ?? null,
+        subject: factors.third_party ? 'third_party' : factors.harm_to_others ? 'harm_to_others' : null,
         paged: pages > pagesBefore,
         flagged: flag[0]?.crisis_flagged === true,
         flagSeverity: (flag[0]?.crisis_severity as string | null) ?? null,
@@ -746,7 +759,10 @@ async function flushAndExit(code: number): Promise<never> {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  const detector = loadDetectorGoldens();
+  if (args.file && (args.set !== 'detector' || args.reviewSheet)) {
+    throw new Error('--file is for a detector run (not the reply set, not --review-sheet)');
+  }
+  const detector = args.file ? loadDetectorGoldens(path.resolve(args.file)) : loadDetectorGoldens();
   const reply = loadReplyGoldens();
   const errors = [...detector.errors, ...reply.errors];
   if (errors.length) {
@@ -792,7 +808,14 @@ async function main(): Promise<void> {
   const layerLabel =
     args.set === 'detector' ? (args.dryRun ? 'keyword (dry-run)' : args.layer) : args.dryRun ? 'dry-run' : 'chat';
   const outDir = path.resolve(
-    args.out ?? path.join('redteam-results', 'goldens', args.set === 'detector' ? `detector-${args.layer}` : 'reply'),
+    args.out ??
+      path.join(
+        'redteam-results',
+        'goldens',
+        args.set === 'detector'
+          ? `detector-${args.layer}${args.file ? `-${path.basename(args.file, '.jsonl')}` : ''}`
+          : 'reply',
+      ),
   );
   fs.mkdirSync(outDir, { recursive: true });
   const summaryPath = path.join(outDir, 'summary.json');

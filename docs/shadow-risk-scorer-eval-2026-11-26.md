@@ -3,6 +3,11 @@
 Tickets: ai-therapist-83 (learned risk classifier in shadow mode),
 ai-therapist-261 (decision models for the bounded-choice tiers).
 
+**Later the same day:** question set v2 added three questions (`non_english`,
+`risk_subject`, `safety_answer`) without changing the nine evaluated here; on
+the same 273 rows every v1 answer below is unchanged. See
+`docs/decisions-crisis-classifiers-2026-11-26.md`.
+
 This is the evidence behind the shadow risk scorer
 (`src/server/services/shadowRiskScorer.service.ts`, `docs/crisis.md` "Shadow
 risk scorer"). The scorer asks the OpenAI Decisions API (`gpt-6-luna`) a fixed

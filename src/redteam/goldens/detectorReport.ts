@@ -11,6 +11,10 @@ export interface DetectorObservation {
   riskScore: number | null;
   /** score_factors.method (keyword_only, llm_assessed, llm_context, ...). */
   method: string | null;
+  /** Who the detector said the turn is about, when not the participant
+   *  (score_factors.third_party / harm_to_others); null for own risk, for a
+   *  turn below the flagging bands and for a turn that was never assessed. */
+  subject?: 'third_party' | 'harm_to_others' | null;
   /** A crisis_sms_alert intervention row was written while this input was
    *  processed (pageOnCall's record; nothing is sent from the harness). */
   paged: boolean;
@@ -31,6 +35,7 @@ export interface DetectorRowResult {
   observedBand: Band | null;
   riskScore: number | null;
   method: string | null;
+  subject?: 'third_party' | 'harm_to_others' | null;
   paged: boolean;
   flagged: boolean;
   bandOk: boolean;
@@ -88,6 +93,7 @@ export function scoreDetectorRow(
     observedBand,
     riskScore: obs.riskScore,
     method: obs.method,
+    ...(obs.subject !== undefined ? { subject: obs.subject } : {}),
     paged: obs.paged,
     flagged: obs.flagged,
     bandOk,

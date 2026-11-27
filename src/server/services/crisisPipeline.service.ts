@@ -416,6 +416,8 @@ export async function runCrisisPipeline(
       content: scoredTurn.content,
       ...(turn.source ? { source: turn.source } : {}),
       history: assessorHistory,
+      // The detector's own reading of "this turn follows a safety question".
+      followsSafetyQuestion: risk.followsSafetyQuestion === true,
       productionScore: risk.riskScore,
       productionSeverity: risk.severity,
     });
