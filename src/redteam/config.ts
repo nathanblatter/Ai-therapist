@@ -56,6 +56,10 @@ export interface RedteamConfig {
   judgeModel: string;
   /** `--judge-model <m>`: force a single judge instead of the ensemble. */
   judgeModelOverride?: string;
+  /** `--yesno-judge auto|llm|decisions` or REDTEAM_YESNO_JUDGE: which judge
+   *  answers the assertions' yes/no questions (yesNoJudge.ts). Unset = auto:
+   *  each rubric's measured default. The flag wins over the variable. */
+  yesNoJudge?: 'auto' | 'llm' | 'decisions';
   /** Best-effort determinism for persona + classifier calls. */
   seed: number;
   outDir: string;
