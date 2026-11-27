@@ -28,8 +28,18 @@ import {
   getSemanticMetricsExport,
   getAcousticFeaturesExport,
   getAllianceRatingsExport,
+  getSessionFeaturesExport,
   type DatasetRow,
 } from '../db/datasetExport.queries.js';
+import {
+  ABSENT_MAX_P,
+  CHOICE_MIN_P,
+  FEATURE_CAUTIONS,
+  FEATURE_GROUP_TITLES,
+  PRESENT_MIN_P,
+  SESSION_FEATURES,
+  type SessionFeature,
+} from './sessionFeatures.js';
 import { getSurveyResponsesExport, getSurveyAnswersForExport } from '../db/qualtricsResponses.queries.js';
 import { scoreInstruments, weeklyMetrics, surveyParadata } from './qualtricsScoring.service.js';
 import { withLongQueries } from '../config/dbLongQueries.js';
@@ -938,7 +948,132 @@ export const DATASET_FILES: DatasetFileSpec[] = [
       },
     ],
   },
+  {
+    file: 'session_features.csv',
+    description:
+      'Structured per-session features (ai-therapist-172, migration 135): an automated judge codes each finished session, from the REDACTED transcript, on a fixed codebook of variables (topics, coping strategies, help-seeking, between-session follow-through, rupture and repair, reported change). Probabilities, booleans and codebook option names only; the judge generates no text. Meant as per-week covariates: reduce to one row per participant and study_week (for a yes/no variable, "present in any coded, non-stale session of the week" or the mean of its _p column) and join to surveys_scored.csv on (participant_id, study_week). Only ended sessions of enrolled participants are coded (not staff, sandbox or anonymous sessions, and none of a participant who had withdrawn when the job ran); a message waiting for leak review is not read. An EMPTY cell is never "absent": it is uncertain, unknown, not coded (too_short, errored) or a variable the row predates. Agreement with intended labels on invented transcripts, and the variables that performed badly, are in docs/session-features-2026-11-27.md; not validated against human coders on participant data. Empty until system_config.session_features is enabled or the backfill is run.',
+    fetch: getSessionFeaturesExport,
+    columns: [
+      {
+        name: 'participant_id',
+        type: 'string',
+        source: 'research_pseudonyms',
+        notes:
+          'Anonymous sessions are never coded; empty only when the account was deleted afterwards. A row stored before a participant withdrew stays (see participants.csv study_status).',
+      },
+      { name: 'session_pseudo_id', type: 'string', source: 'research_pseudonyms' },
+      { name: 'session_started_at', type: 'timestamp', source: 'therapy_sessions.created_at' },
+      {
+        name: 'study_week',
+        type: 'int',
+        source: 'derived: 1 + whole weeks from enrollment (earliest qualtrics_signups.registered_at) to session start',
+        values: '1, 2, ...; empty when the participant has no enrollment record or the session precedes it',
+        notes: 'Same definition as surveys_scored.csv and alliance_ratings.csv study_week.',
+      },
+      {
+        name: 'feature_set_version',
+        type: 'string',
+        source: 'session_features.feature_set_version',
+        notes:
+          'Codebook version; values are comparable only within a version. The variable columns below are the current codebook: a row stored under an older version has empty cells for variables it does not hold.',
+      },
+      {
+        name: 'status',
+        type: 'string',
+        source: 'session_features.status',
+        values: 'extracted, too_short, errored',
+        notes:
+          'too_short: under the length floor, no judge call, every variable empty. errored: the judge gave no answer, every variable empty (unknown, not absent). Kept so coverage is auditable.',
+      },
+      { name: 'model', type: 'string', source: 'session_features.model' },
+      ...SESSION_FEATURES.flatMap(sessionFeatureColumns),
+      {
+        name: 'unknown_count',
+        type: 'int',
+        source: 'session_features.unknown_count',
+        notes:
+          'Variables of this row the judge refused or answered unusably (both their columns are empty). Empty unless status is extracted.',
+      },
+      {
+        name: 'participant_turns',
+        type: 'int',
+        source: 'session_features.participant_turns',
+        notes: 'Redacted participant turns the judge was given.',
+      },
+      { name: 'participant_words', type: 'int', source: 'session_features.participant_words' },
+      {
+        name: 'transcript_truncated',
+        type: 'bool',
+        source: 'session_features.transcript_truncated',
+        notes: 'true when the session exceeded the transcript budget and only its opening and close were coded.',
+      },
+      {
+        name: 'stale',
+        type: 'bool',
+        source: 'derived: session_features.transcript_fingerprint differs from the session transcript at export time',
+        notes:
+          'true when the session transcript the judge may read has changed since this row was computed (a late message was redacted, a message was re-redacted or corrected, a leak review released or withheld a message) and the session has not been coded again yet. Exclude stale rows, or re-run the backfill and export again.',
+      },
+      {
+        name: 'messages_withheld',
+        type: 'int',
+        source: 'derived: messages of the session awaiting leak review at export time',
+        notes:
+          "the number of this session's participant and assistant messages that the judge may not read at export time because their redaction leak check awaits review. While it is above 0 the row was computed without them and is NOT marked stale: a variable evidenced only in a withheld message is coded absent until the review releases it and the session is coded again. Treat rows with a value above 0 as incomplete.",
+      },
+      {
+        name: 'extracted_at',
+        type: 'timestamp',
+        source: 'session_features.extracted_at',
+        notes: 'Only rows computed by as_of are exported.',
+      },
+    ],
+  },
 ];
+
+/** The two export columns of one codebook variable, documented from the
+ *  codebook entry itself (services/sessionFeatures.ts). */
+function sessionFeatureColumns(feature: SessionFeature): DatasetColumn[] {
+  const group = FEATURE_GROUP_TITLES[feature.group];
+  const caution = FEATURE_CAUTIONS[feature.name];
+  const text =
+    `[${group}] ${feature.definition} Counts: ${feature.include} Does not count: ${feature.exclude}` +
+    (caution ? ` CAUTION, weak variable: ${caution}` : '');
+  if (feature.type === 'predicate') {
+    return [
+      {
+        name: feature.name,
+        type: 'bool',
+        source: `session_features.features->'${feature.name}'->'present'`,
+        values: `true (p >= ${PRESENT_MIN_P}), false (p <= ${ABSENT_MAX_P}), empty = uncertain or unknown`,
+        notes: text,
+      },
+      {
+        name: `${feature.name}_p`,
+        type: 'float',
+        source: `session_features.features->'${feature.name}'->'p'`,
+        values: '0-1',
+        notes: `Judge probability that ${feature.name} is present. Empty when the judge gave no usable answer.`,
+      },
+    ];
+  }
+  return [
+    {
+      name: feature.name,
+      type: 'string',
+      source: `session_features.features->'${feature.name}'->'value'`,
+      values: `${feature.choices.map((c) => c.value).join(', ')}; empty = uncertain (no option reached ${CHOICE_MIN_P}) or unknown`,
+      notes: `${text} Options: ${feature.choices.map((c) => `${c.value} = ${c.description}`).join(' ')}`,
+    },
+    {
+      name: `${feature.name}_confidence`,
+      type: 'float',
+      source: `session_features.features->'${feature.name}'->'confidence'`,
+      values: '0-1',
+      notes: `Probability of the most probable option of ${feature.name}. Empty when the judge gave no usable answer.`,
+    },
+  ];
+}
 
 // ---------------------------------------------------------------------------
 // Registry — opt-in transcript artifact (redacted text only).

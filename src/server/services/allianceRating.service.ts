@@ -60,6 +60,7 @@ import {
 } from '../db/index.js';
 import { createLogger } from '../utils/logger.js';
 import { shouldSkipPostSessionWork } from './harnessPostSession.service.js';
+import { enqueueSessionJudgeJob } from './sessionJudgeQueue.js';
 import {
   ALLIANCE_JUDGE_VERSION,
   ALLIANCE_MODEL,
@@ -238,8 +239,8 @@ async function rateClaimedSession(sessionId: string, options: RateOptions): Prom
 // The automatic hooks rate one session at a time in this process. Each rating
 // holds one pool connection for its claim while the judge answers; without
 // the queue a burst of session ends (or the redaction sweep working through a
-// backlog) would hold one each and starve the live app of connections.
-let hookQueue: Promise<void> = Promise.resolve();
+// backlog) would hold one each and starve the live app of connections. The
+// queue is shared with the session-features judge (sessionJudgeQueue.ts).
 
 /**
  * Fire-and-forget hook for the end of the redaction job (after its leak
@@ -256,8 +257,7 @@ export function maybeRateAllianceForSession(sessionId: string): Promise<void> {
     if (await shouldSkipPostSessionWork(sessionId, 'alliance')) return;
     await rateSessionAlliance(sessionId);
   };
-  hookQueue = hookQueue.then(run).catch((err) => log.error({ err }, `alliance rating failed for ${sessionId}`));
-  return hookQueue;
+  return enqueueSessionJudgeJob(run, (err) => log.error({ err }, `alliance rating failed for ${sessionId}`));
 }
 
 /**

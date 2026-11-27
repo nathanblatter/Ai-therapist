@@ -13,6 +13,9 @@ import { pool } from '../config/db.js';
 import { notUnverifiedSpeechSql } from './unverifiedSpeech.js';
 import { studyWeekSql } from './qualtricsResponses.queries.js';
 import { allianceRatingStaleSql } from './allianceRatings.queries.js';
+import { sessionFeaturesStaleSql } from './sessionFeatures.queries.js';
+import { judgeWithheldCountSql } from './sessionJudge.queries.js';
+import { SESSION_FEATURES, featureExportCells, type SessionFeatureValues } from '../services/sessionFeatures.js';
 
 // Every export row is a flat string/number/bool/null map keyed by column name.
 export type DatasetRow = Record<string, unknown>;
@@ -734,4 +737,73 @@ export async function getAllianceRatingsExport(asOf: string): Promise<DatasetRow
     [asOf],
   );
   return rows;
+}
+
+/**
+ * session_features.csv: one row per (in-scope session, feature-set version)
+ * of the structured per-session features (migration 135, ai-therapist-172),
+ * with one pair of columns per codebook variable (featureExportCells). The
+ * stored JSON object is flattened here from the codebook in
+ * services/sessionFeatures.ts, so the columns are always the current
+ * codebook's: a variable a row does not hold (it was stored under an older
+ * feature set) is empty, never false.
+ *
+ * Rows of every status are exported so coverage is auditable; a too_short or
+ * errored row has every variable empty. An uncertain or unknown variable is
+ * empty too (the probability column tells the two apart: it is filled for
+ * uncertain, empty for unknown).
+ *
+ * As-of, stale, participant_id and study_week: exactly as
+ * getAllianceRatingsExport above.
+ */
+export async function getSessionFeaturesExport(asOf: string): Promise<DatasetRow[]> {
+  const { rows } = await pool.query(
+    `SELECT pp.pseudonym AS participant_id,
+            sp.pseudonym AS session_pseudo_id,
+            ${tsUtc('ts.created_at')} AS session_started_at,
+            ${studyWeekSql('ts.user_id', 'ts.created_at')} AS study_week,
+            sf.feature_set_version,
+            sf.status,
+            sf.model,
+            sf.features,
+            sf.unknown_count,
+            sf.participant_turns,
+            sf.participant_words,
+            sf.transcript_truncated,
+            ${sessionFeaturesStaleSql('sf')} AS stale,
+            ${judgeWithheldCountSql('sf.session_id')} AS messages_withheld,
+            ${tsUtc('sf.extracted_at')} AS extracted_at
+     FROM session_features sf
+     JOIN therapy_sessions ts ON ts.session_id = sf.session_id
+     JOIN research_pseudonyms sp ON sp.entity_type = 'session' AND sp.entity_key = sf.session_id
+     LEFT JOIN research_pseudonyms pp ON pp.entity_type = 'participant' AND pp.entity_key = ts.user_id::text
+     WHERE ts.is_demo IS NOT TRUE AND ts.created_at <= $1 AND sf.extracted_at <= $1
+     ORDER BY sp.pseudonym, sf.feature_set_version`,
+    [asOf],
+  );
+  return rows.map((r) => {
+    const {
+      features,
+      unknown_count,
+      participant_turns,
+      participant_words,
+      transcript_truncated,
+      stale,
+      messages_withheld,
+      extracted_at,
+      ...head
+    } = r as Record<string, unknown> & { features: SessionFeatureValues | null };
+    const cells: DatasetRow = { ...head };
+    for (const feature of SESSION_FEATURES) Object.assign(cells, featureExportCells(feature, features?.[feature.name]));
+    return {
+      ...cells,
+      unknown_count,
+      participant_turns,
+      participant_words,
+      transcript_truncated,
+      stale,
+      messages_withheld,
+      extracted_at,
+    };
+  });
 }

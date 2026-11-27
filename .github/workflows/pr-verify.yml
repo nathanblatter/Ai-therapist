@@ -154,9 +154,14 @@ jobs:
       - name: SQL tests against the migrated database
         env:
           ALLIANCE_SQL_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/rt_sql_tests
+          SESSION_FEATURES_SQL_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/rt_sql_tests
         run: |
           set -o pipefail
+          # One file per vitest run, one after the other: each file's backfill
+          # test walks every waiting session in the database, so the two must
+          # not have rows in it at the same time. Each cleans up after itself.
           npx vitest run src/server/services/allianceRating.live.test.ts 2>&1 | tee sql-tests.log
+          npx vitest run src/server/services/sessionFeatures.live.test.ts 2>&1 | tee -a sql-tests.log
           # A file that skipped itself (wrong variable, wrong database name)
           # must fail the job, not pass it.
           if grep -Eq 'skipped' sql-tests.log; then

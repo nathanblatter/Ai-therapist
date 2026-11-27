@@ -11,6 +11,7 @@ import ConversationBubble from './ConversationBubble';
 import SessionInsightsPanel from './SessionInsightsPanel';
 import SessionEvalPanel from './SessionEvalPanel';
 import SessionAlliancePanel from './SessionAlliancePanel';
+import SessionFeaturesPanel from './SessionFeaturesPanel';
 import RiskTimeline from './RiskTimeline';
 import SessionCrisisEvents from './SessionCrisisEvents';
 import SessionHandoffLinks from './SessionHandoffLinks';
@@ -862,6 +863,10 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
           {/* Working-alliance markers (ai-therapist-173): researcher-only, shown only when a rating exists */}
           {!loading && userRole === 'researcher' && session?.status === 'ended' && (
             <SessionAlliancePanel sessionId={sessionId} />
+          )}
+          {/* Structured session features (ai-therapist-172): researcher-only, shown only when a row exists */}
+          {!loading && userRole === 'researcher' && session?.status === 'ended' && (
+            <SessionFeaturesPanel sessionId={sessionId} />
           )}
           {/* Cost/token tracking (ai-therapist-25c) + participant feedback (ai-therapist-25b) */}
           {!loading && (cost || feedback) && (
