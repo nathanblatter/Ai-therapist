@@ -117,7 +117,9 @@ the percentages as rough.
 ## Cost
 
 812 model calls, 0.91 M input and 0.52 M output tokens (output includes
-reasoning tokens): about $3.20 at gpt-5 flex rates. If flex capacity was
+reasoning tokens): about $3.20 at gpt-5 flex rates (an estimate from token
+counts, written before the rule that cost figures come from the billing API;
+the costs API shows $17.40 for the UTC day of 2026-11-26 in total). If flex capacity was
 unavailable for some calls they were billed at the standard rate (double).
 
 ## Decision needed from the owner
@@ -310,7 +312,8 @@ Not measured, and not to be read into these numbers:
 ## Cost
 
 Redaction: 30 calls, 40,177 input and 36,330 output tokens (reasoning
-included), all served on flex: about $0.21 at gpt-5 flex rates. Leak check:
+included), all served on flex: about $0.21 at gpt-5 flex rates (a token-count
+estimate, not a billing figure). Leak check:
 150 Decisions API calls, 41,938 input tokens on gpt-6-luna, on top of that
 (rate not assumed here). The $3 budget was not approached.
 
@@ -459,8 +462,9 @@ are still all on placeholders.
 - The prompt's own second example redacts a clock time ("10:45AM") as TIME.
   B's sentence and that example pull in different directions; a final wording
   should settle which it is.
-- Cost of this addendum: 890 redaction calls, about 1.13M input and 0.56M
-  output tokens on gpt-5 flex, plus 300 leak-check calls; roughly $3.50.
+- Volume of this addendum: 890 redaction calls, about 1.13M input and 0.56M
+  output tokens on gpt-5 flex, plus 300 leak-check calls. Cost: see the
+  billing reading under addendum 4; no per-addendum figure exists.
 
 ## For the PI
 
@@ -602,6 +606,7 @@ classifier alone: the rules do not see them.
   which has no per-request "do not store" setting; retention follows the
   OpenAI organisation's data controls. The redaction call itself sets
   `store: false`.
-- Cost of this addendum: about 1,050 gpt-5 flex calls (about 1.5M input and
-  0.57M output tokens, roughly $3.80) and about 1,300 Decisions calls (about
-  1M input tokens, no output tokens; the price was not checked).
+- Volume of this addendum: about 1,050 gpt-5 flex calls (about 1.5M input and
+  0.57M output tokens) and about 1,300 Decisions calls (about 1M input
+  tokens, no output tokens).
+- Cost. OpenAI costs API, read 2026-11-27 05:34 UTC: $12.27 billed so far for the UTC day of 2026-11-27, which holds every paid run of this evening (addenda 3 and 4 and the unrelated crisis and voice runs made at the same time), and $17.40 for 2026-11-26. The API reports by UTC day and does not break spend out per run.
