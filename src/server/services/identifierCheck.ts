@@ -54,18 +54,25 @@ export const IDENTIFIER_QUESTIONS = [
   },
   {
     name: 'date',
+    // Reworded 2026-11-27 (with contact_or_number below). The first wording
+    // ("Does this text still contain a specific calendar date ...") answered
+    // yes to ordinary messages with no date in them ("Hi", "Yeah", "Bye."):
+    // 501 of 2,442 stage messages at 0.5 or more. A statement that says most
+    // messages contain none does not (2 of 2,442), and still finds every
+    // dated message tried (docs/redaction-shape-eval-2026-11-26.md, addendum 5).
     instructions:
-      'Does this text still contain a specific calendar date other than a year (for example a birth date, ' +
-      '"March 3rd", "12/04")? Relative or general time expressions ("tonight", "last week", a weekday, a time of ' +
-      'day) are NOT dates.' +
-      NOT_IDENTIFIERS,
+      'The text contains a calendar date that identifies a particular day: a month together with a day number, or ' +
+      'a numeric date such as 12/04 or 3/14/2004. Most messages contain no date; greetings, feelings, weekdays, ' +
+      'years alone, times of day and relative words ("today", "tonight", "last week", "in March") do not count, ' +
+      'and neither does a placeholder such as [REDACTED: DATE].',
   },
   {
     name: 'contact_or_number',
     instructions:
-      'Does this text still contain a phone number, email address, URL, social media handle, or an account, ' +
-      'record, licence or other number or code that identifies a specific person?' +
-      NOT_IDENTIFIERS,
+      'The text contains a phone number, an email address, a web address, a social media handle, or an account, ' +
+      'record, licence, plate or ID number that belongs to a specific person. Most messages contain none. Public ' +
+      'crisis and emergency numbers (988, 911, 741741), ages, counts, scores, amounts, times of day and a ' +
+      'placeholder such as [REDACTED: TELEPHONE NUMBER] do not count.',
   },
 ] as const;
 

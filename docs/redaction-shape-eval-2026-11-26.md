@@ -610,3 +610,105 @@ classifier alone: the rules do not see them.
   0.57M output tokens) and about 1,300 Decisions calls (about 1M input
   tokens, no output tokens).
 - Cost. OpenAI costs API, read 2026-11-27 05:34 UTC: $12.27 billed so far for the UTC day of 2026-11-27, which holds every paid run of this evening (addenda 3 and 4 and the unrelated crisis and voice runs made at the same time), and $17.40 for 2026-11-26. The API reports by UTC day and does not break spend out per run.
+
+# Addendum 5 (2026-11-27): the identifier questions on realistic text, a fault found and fixed, and a pre-screen measured
+
+Asked for by the study owner: could the Decisions API classify messages
+BEFORE redaction, so that only messages holding an identifier go to the
+rewrite model? Measured, not built. The measurement also found a fault in the
+per-kind leak check shipped in addendum 4, which is fixed in the same change.
+
+## Material
+
+Stage's 2,521 redacted messages (fake data, read through a read-only
+transaction; the raw text of stage messages no longer exists, the content
+wipe has replaced it with the redacted text):
+
+- 2,442 hold no placeholder: redaction left them exactly as written, so they
+  stand for ordinary messages with nothing to redact;
+- 79 hold a placeholder. For 69 of them (the other 10 hold only TIME
+  placeholders) each placeholder was refilled with an invented identifier of
+  the same kind, once with names capitalised and once in lower case: 138
+  realistic messages known to hold an identifier.
+
+Plus the three fixtures (116 invented messages) and 19 invented dated ones.
+
+## The fault: the date question said yes to almost anything
+
+With the questions as shipped in addendum 4, 613 of the 2,442 ordinary
+messages scored 0.5 or more, 501 of them on the date question alone: "Hi",
+"Yeah", "Bye.", "Got it. Thank you so much." The fixtures had not shown it (3
+false flags in 150) because their sentences are longer. On stage this would
+have sent about a quarter of all messages to the review queue and kept them
+out of researcher search. It was live on stage for about two hours (stage data is fake) and never on
+production.
+
+Three rewordings of the date question were tried on 408 ordinary messages
+(220 of them ones the first wording had flagged) and 21 dated ones:
+
+| Wording | Dated messages at 0.5 or more | Ordinary messages at 0.5 or more |
+| --- | --- | --- |
+| As shipped ("Does this text still contain a specific calendar date ...") | 21 of 21 | 221 of 408 |
+| A longer question with examples and exclusions | 21 of 21 | 0 of 408 |
+| A bare statement ("This text names a specific day of a specific month") | 21 of 21 | 0 of 408 |
+| A statement that also says most messages contain no date (adopted) | 21 of 21 | 0 of 408 |
+
+The contact question was reworded the same way (it had flagged 87 ordinary
+messages, largely the assistant's own crisis-line numbers; public crisis and
+emergency numbers are now named as not counting). The name, organisation and
+place questions are unchanged: rewording them the same way cut their recall
+on lower-case names and gained nothing (they flagged 13, 12 and 19 ordinary
+messages, most of which are real leftovers: a pet's name, a shop, an airport
+and city).
+
+With the two questions replaced and the other three kept:
+
+| Material | Before | After |
+| --- | --- | --- |
+| 2,442 ordinary stage messages at 0.5 or more | 613 | 46 |
+| 69 refilled messages (capitalised names) at 0.5 or more | 69 | 66 |
+| 69 refilled messages (lower-case names) at 0.5 or more | 68 | 64 |
+| Fixture messages holding a date, phone, email, handle, id or plate, caught by the new date or contact question | n/a | all of them (8 others in that digit-or-@ group hold a ward number or a street address and are caught by the organisation or place question) |
+
+The refilled messages that now fall under 0.5 are of two kinds: assistant
+opening messages where the refilled number sits in the crisis-line sentence
+(the new wording exempts public crisis numbers, and an invented private
+number put in that slot reads as one), and an unusual first name typed in
+lower case ("tevita"), which the unchanged name question scores 0.2 to 0.36.
+The second is a real weakness of the name question.
+
+## The pre-screen, measured
+
+Rule: a message skips the rewrite only if no hard rule objects (a digit, an
+"@" or web address, a word capitalised like a name, all capitals) and every
+kind is under 0.1.
+
+| | Would skip the rewrite |
+| --- | --- |
+| 2,442 ordinary stage messages | 1,918 (76% of all 2,521 stage messages); 267 more are under 0.1 on the classifier but stopped by a hard rule, almost all for a digit |
+| 138 refilled messages holding an identifier | 0 |
+| 90 fixture messages holding an identifier (scored with all five questions reworded, and in addendum 4 with the original five; not re-scored with the exact adopted mix) | 0 |
+
+So on this material about three quarters of messages would never be sent to
+the rewrite model, and none of the 228 messages known to hold an identifier
+would have skipped it.
+
+Not built, because it is a change to the data flow for every message and
+deserves its own decision:
+
+- Every message's raw text would go to the Decisions API, which has no
+  per-request "do not store" setting. Today only refused messages do.
+- For a skipped message the only independent check is the hard rules. The
+  leak check afterwards asks the same model the same questions.
+- The weak spot is known: a lower-case unusual first name scored as low as
+  0.2 on the name question; 0.1 held in every case here, with little room.
+- 228 positives is a small number to rest every message on.
+
+## Cost
+
+OpenAI costs API, organisation month to date: $178.9154 at 2026-11-27
+06:33:51 UTC before the first call of this addendum and $179.0796 at
+06:39:02 UTC after the last. Other work was spending in the same minutes and
+the API lags, so the difference is not this addendum's cost; no narrower
+figure exists. Volume: about 5,800 Decisions requests and roughly 7M input tokens, no output
+tokens.
