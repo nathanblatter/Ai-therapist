@@ -23,6 +23,15 @@ vi.mock('./surveyData.service.js', () => surveyMocks);
 
 vi.mock('../config/secrets.js', () => ({ getOpenAIKey: vi.fn().mockResolvedValue('sk-test') }));
 
+const configMocks = vi.hoisted(() => ({ getSystemConfig: vi.fn() }));
+vi.mock('../utils/sessionHelpers.js', () => configMocks);
+
+const agentsMocks = vi.hoisted(() => ({ runTurn: vi.fn() }));
+vi.mock('./assistantAgentsApi.service.js', () => ({
+  agentsApiBackend: { id: 'agents_api', runTurn: agentsMocks.runTurn },
+}));
+
+import { createHash } from 'node:crypto';
 import {
   assistantSystemPrompt,
   CLINICAL_CALL_RULE,
@@ -51,6 +60,85 @@ function fakeClient(script: Array<{ output_text?: string; output?: unknown[] }>)
 beforeEach(() => {
   vi.clearAllMocks();
   poolMocks.pool.query.mockResolvedValue({ rows: [] });
+  configMocks.getSystemConfig.mockResolvedValue({ features: {} });
+});
+
+describe('backend selection (features.assistant_agents_api_enabled)', () => {
+  // The exact request the stateless backend has always sent. Pinned so the
+  // flag-off path stays byte-for-byte what it was before the seam existed.
+  const EXPECTED_STATELESS_REQUEST = {
+    model: 'gpt-5.2',
+    input: [
+      {
+        role: 'system',
+        content: [
+          'You are the admin data assistant for a mental-health research platform. You answer staff questions strictly from the results of your tools, which run under the asker’s own access scope.',
+          'The asker is cw with role "caseworker". Available tools: session_stats, crisis_events, escalations, work_queue, caseload_roster, user_lookup.',
+          'Rules:',
+          '- Only state facts that appear in tool results. If the tools cannot answer, say so and name the panel that can.',
+          '- You have no access to session transcripts, message bodies, or any verbatim participant text, for any role. If asked, explain that the assistant only works with aggregates, scores, and statuses.',
+          '- Never speculate about clinical state or give clinical advice; point to the relevant clinician workflow instead.',
+          CLINICAL_CALL_RULE,
+          '- Be concise. Use plain sentences or small markdown tables. No emojis.',
+          '- End answers derived from data with a one-line note of which tools you used.',
+        ].join('\n'),
+      },
+      { role: 'user', content: 'hi' },
+    ],
+    store: false,
+    tool_choice: 'auto',
+  };
+
+  // SHA-256 of JSON.stringify(request) for the turn below, taken from main at
+  // 4440562 (before the backend seam existed) with this same test. It covers
+  // every byte sent to OpenAI: the prompt, the tool definitions and their
+  // order, store:false and tool_choice. A deliberate change to the stateless
+  // request has to update this value in the same commit.
+  const STATELESS_REQUEST_SHA256 = '3805f2e5544fccc0917f9e04d07f3774e39720224fc82bd9f717b42638fd2e1d';
+
+  for (const features of [
+    undefined,
+    {},
+    { assistant_agents_api_enabled: false },
+    { assistant_agents_api_enabled: 'true' },
+    { assistant_agents_api_enabled: 1 },
+  ]) {
+    it(`uses the stateless backend, unchanged, when features = ${JSON.stringify(features)}`, async () => {
+      configMocks.getSystemConfig.mockResolvedValue(features === undefined ? {} : { features });
+      const { client, create } = fakeClient([{ output_text: 'Hello.' }]);
+      setAssistantClientForTest(client as never);
+      const result = await runAssistantTurn(CTX_CASEWORKER, [{ role: 'user', content: 'hi' }]);
+      expect(result).toEqual({ answer: 'Hello.', toolCalls: [] });
+      expect(agentsMocks.runTurn).not.toHaveBeenCalled();
+      expect(create).toHaveBeenCalledTimes(1);
+      const req = create.mock.calls[0][0] as Record<string, unknown>;
+      expect(req).toMatchObject(EXPECTED_STATELESS_REQUEST);
+      expect(createHash('sha256').update(JSON.stringify(req)).digest('hex')).toBe(STATELESS_REQUEST_SHA256);
+      expect(Object.keys(req).sort()).toEqual(['input', 'model', 'store', 'tool_choice', 'tools']);
+      expect((req.tools as Array<{ name: string }>).map((t) => t.name)).toEqual([
+        'session_stats',
+        'crisis_events',
+        'escalations',
+        'work_queue',
+        'caseload_roster',
+        'user_lookup',
+      ]);
+      // Audit row keeps the bare model name it always recorded.
+      const auditArgs = poolMocks.pool.query.mock.calls.at(-1)![1] as unknown[];
+      expect(auditArgs[4]).toBe('gpt-5.2');
+    });
+  }
+
+  it('routes to the Agents API backend only when the flag is exactly true', async () => {
+    configMocks.getSystemConfig.mockResolvedValue({ features: { assistant_agents_api_enabled: true } });
+    agentsMocks.runTurn.mockResolvedValue({ answer: 'From agents.', toolCalls: [] });
+    const { client, create } = fakeClient([{ output_text: 'unused' }]);
+    setAssistantClientForTest(client as never);
+    const result = await runAssistantTurn(CTX_RESEARCHER, [{ role: 'user', content: 'hi' }]);
+    expect(result.answer).toBe('From agents.');
+    expect(agentsMocks.runTurn).toHaveBeenCalledWith(CTX_RESEARCHER, [{ role: 'user', content: 'hi' }]);
+    expect(create).not.toHaveBeenCalled();
+  });
 });
 
 describe('runAssistantTurn', () => {
