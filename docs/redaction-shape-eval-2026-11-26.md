@@ -381,3 +381,90 @@ Read these with care:
 This is a net for the reviewer, not a fix: the names are still in the stored
 text until someone edits them out. Whether the redaction wording should ask
 for organisation names is still the PI's question (item 1 above).
+
+# Addendum 3 (2026-11-26, evening): two candidate wordings, measured, not shipped
+
+Nothing in the product changed. The wording production sends is still the
+one in `src/server/services/redaction.service.ts`; changing it needs the PI's
+sign-off and a regenerated IRB prompts attachment. This addendum gives the PI
+before-and-after numbers for two candidate additions.
+
+## The candidates
+
+Both are edits to the numbered identifier list, applied to the request only
+inside the eval runners (`--wording <file>`, `scripts/redaction-eval-wording.mjs`).
+
+- **A, organisations** (`evals/candidates/redaction-wording-orgs.json`). Item
+  18 gains: "This includes the proper name of a specific organization or
+  facility connected to the individual: a school, college or university (and
+  its named buildings, dorms and teams), an employer or business, a hospital
+  or clinic, a church, ward or congregation, an apartment complex, a sports
+  team or club. Replace each with "[REDACTED: ORGANIZATION]". A generic
+  reference without a proper name ("my school", "the hospital", "work", "my
+  ward") is not an identifier and must be left as written".
+- **B, organisations and time words**
+  (`evals/candidates/redaction-wording-orgs-time.json`). A, plus item 3
+  gains: "Relative or general time expressions ("tonight", "last night",
+  "today", "this week", "twenty minutes ago", a weekday, a time of day) are
+  not dates and must be left as written".
+
+## Place and organisation fixture (50 messages, 3 runs, batches of 10)
+
+| Wording | Names left in (of 105) | Listed identifiers removed (of 33) | Rejected | Nothing-to-redact messages changed (of 12) | Clean outputs the leak check flagged |
+| --- | --- | --- | --- | --- | --- |
+| Production (addendum 1) | 95 | 33 | 0 | 0 | 12 of 55 |
+| A | 0 | 33 | 0 | 0 | 15 of 150 |
+| B | 0 | 33 | 0 | 0 | 14 of 150 |
+
+Under both candidates every one of the 105 names became an ORGANIZATION (or
+LOCATION) placeholder and nothing else in those messages was touched, with
+two exceptions: "Relief Society" (a generic office, not a named congregation)
+was redacted as an organisation in 3 of the 6 runs (2 of 3 under A, 1 of 3
+under B), and under A "two in the morning" became a TIME placeholder in 1 of
+3 runs. The leak check's false flags
+are still all on placeholders.
+
+## Crisis fixture (26 messages, 3 runs, whole-fixture batch and batch of 12)
+
+156 message-runs per wording, production wording re-run the same evening.
+
+| Wording | Stored | Refused | Rejected | Stored outputs with a "keep" phrase lost | Stored outputs with an identifier left in |
+| --- | --- | --- | --- | --- | --- |
+| Production | 142 | 14 | 0 | 17 | 4 (the school name) |
+| A | 139 | 15 | 2 | 17 | 0 |
+| B | 141 | 15 | 0 | 0 | 0 |
+
+- Every lost "keep" phrase was a time expression ("tonight" 10 of the 17
+  under production). B lost none in 141 stored outputs, and still redacted
+  the calendar date in the fixture ("March 3rd") every time.
+- The school name that survived under production was removed under A and B.
+- Refusals did not move (14, 15, 15, all in the batch of 12; none in the
+  whole-fixture batch under any wording). Neither candidate is a fix for
+  refused lone crisis messages; that is the separate request-shape question
+  in the first part of this document.
+
+## Limits
+
+- One evening, one model snapshot (gpt-5-2025-08-07, flex), invented
+  messages, small counts. 0 of 105 does not mean never.
+- The fixtures were written before the candidates, but the candidate lists
+  the same classes the fixture tests, so this is the favourable case. Classes
+  the wording does not name (a named gym, a support group, a military unit, a
+  small online community) were not tested.
+- Over-redaction was looked for only where the fixtures can show it: the
+  nothing-to-redact messages, the "keep" phrases, and reading the 2-placeholder
+  outputs. Whether A or B removes large, non-identifying organisation names a
+  researcher would want kept (a national retailer, a streaming service) was
+  not measured; the fixture has none.
+- The prompt's own second example redacts a clock time ("10:45AM") as TIME.
+  B's sentence and that example pull in different directions; a final wording
+  should settle which it is.
+- Cost of this addendum: 890 redaction calls, about 1.13M input and 0.56M
+  output tokens on gpt-5 flex, plus 300 leak-check calls; roughly $3.50.
+
+## For the PI
+
+1. Add organisation and facility names to the redaction wording (A)?
+2. Add the sentence that keeps relative time expressions (B)?
+3. If either: is "Relief Society president" (an office in a congregation,
+   without the congregation's name) something to redact or to keep?
