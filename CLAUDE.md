@@ -26,3 +26,12 @@ style (single quotes, 120 columns); docs, SQL, workflow YAML and scripts in
 other languages are ignored on purpose. Run
 `git config blame.ignoreRevsFile .git-blame-ignore-revs` once per checkout so
 the initial format commit does not pollute blame.
+
+## Cost figures (hard rule, since 2026-11-26)
+
+Any spend figure, anywhere (a reply, a PR body, a doc, a commit, Flightdeck),
+comes from the OpenAI costs API, never from token counts or a price list:
+`GET https://api.openai.com/v1/organization/costs?start_time=<unix>&limit=31`
+with `OPENAI_ADMIN_KEY` from the repo `.env`. Read it before and after a paid
+run and give both readings with their times. It reports by UTC day and lags;
+when a single run cannot be isolated, say so and give the day's total.
