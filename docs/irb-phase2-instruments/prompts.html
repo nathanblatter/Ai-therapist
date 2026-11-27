@@ -2,7 +2,7 @@
 <style>body{font-family:Georgia,serif;max-width:52em;margin:2em auto;padding:0 1em;color:#222;}pre{background:#f6f6f4;border:1px solid #ddd;padding:0.8em;white-space:pre-wrap;font-size:0.82em;line-height:1.45;}.note{font-style:italic;font-size:0.9em;color:#444;}table{border-collapse:collapse;}td,th{border:1px solid #999;padding:0.35em 0.7em;text-align:left;}</style></head><body>
 <h1>AI Support Agent — Model System Prompts (Verbatim)</h1>
 <p><b>Study:</b> Human + AI Therapy: Better For Everyone (Phase 2: Longitudinal Use)<br>
-<b>Prepared:</b> November 19, 2026 (supersedes the September 4, 2026 version)<br>
+<b>Prepared:</b> November 26, 2026 (supersedes the November 19, 2026 version)<br>
 <b>Sources:</b> Generated from the application codebase by src/server/irb/promptsAttachment.ts — src/server/utils/sessionHelpers.ts, src/server/utils/promptContext.ts, src/server/utils/phaseGuidance.ts, src/server/utils/liveSessionConfig.ts, src/server/utils/grokVoiceConfig.ts, src/server/utils/grokRefusalGuard.ts, src/server/utils/openingLine.ts, src/server/utils/sessionAutoTerminate.ts, src/server/services/crisisIntervention.service.ts, src/server/services/crisisDetection.service.ts, src/server/services/minorSafeguard.service.ts, src/server/services/redaction.service.ts, src/server/services/sessionName.service.ts, src/shared/openingPrompt.ts.</p>
 <p>This document reproduces, verbatim, the instruction text the platform sends to its AI models during a participant session, and the auxiliary safety and data-processing prompts that run on participant conversations. Part A covers the per-session instruction set assembled when a participant session starts. Part B covers system-side guidance the platform can inject into a live session (never visible to the participant). Part C covers auxiliary prompts used by backend safety and data-processing pipelines. Part D lists the models in use. Part E lists what this document does not reproduce. For dynamic blocks that are filled with per-participant data at runtime, the fixed template text is reproduced verbatim and runtime values are marked with &lt;angle-bracket placeholders&gt;.</p>
 <p>Provenance: every prompt block below is generated directly from the application source code, so it is the default built into the code. Administrators can override the base prompts (separately for voice and typed-chat sessions), the therapeutic-approach appendices, and the language additions through an audited admin interface that stores them in the system configuration database; stored overrides are not visible to the generator. The research team keeps the deployed configuration in sync with the IRB-approved text below.</p>
@@ -668,7 +668,7 @@ Developer: &#x27;&#x27;&#x27;Act as a redaction pipeline that automatically dete
 The 18 HIPAA Safe Harbor identifiers are:
 1. Name
 2. Address (all geographic subdivisions smaller than state, including street address, city county, and zip code)
-3. All elements (except years) of dates related to an individual (including birthdate, admission date, discharge date, date of death, and exact age if over 89)
+3. All elements (except years) of dates related to an individual (including birthdate, admission date, discharge date, date of death, and exact age if over 89). Relative or general time expressions (&quot;tonight&quot;, &quot;last night&quot;, &quot;today&quot;, &quot;this week&quot;, &quot;twenty minutes ago&quot;, a weekday, a time of day) are not dates and must be left as written
 4. Telephone numbers
 5. Fax number
 6. Email address
@@ -683,7 +683,7 @@ The 18 HIPAA Safe Harbor identifiers are:
 15. Internet Protocol (IP) Address
 16. Finger or voice print
 17. Photographic image - Photographic images are not limited to images of the face.
-18. Any other characteristic that could uniquely identify the individual
+18. Any other characteristic that could uniquely identify the individual. This includes the proper name of a specific organization or facility connected to the individual: a school, college or university (and its named buildings, dorms and teams), an employer or business, a hospital or clinic, a church, ward or congregation, an apartment complex, a sports team or club. Replace each with &quot;[REDACTED: ORGANIZATION]&quot;. A generic reference without a proper name (&quot;my school&quot;, &quot;the hospital&quot;, &quot;work&quot;, &quot;my ward&quot;) is not an identifier and must be left as written
 
 &#x27;&#x27;&#x27;For each input, review the entire text and identify the presence and format of each specific Safe Harbor identifier listed above. Replace each instance strictly corresponding to one of the 18 identifiers with a matching placeholder (e.g., &quot;[REDACTED: NAME]&quot;, &quot;[REDACTED: DATE OF BIRTH]&quot;, etc.). Do not redact any information unless it exactly matches a Safe Harbor identifier. Redaction must cover partial or full identifiers, using the safest reasonable interpretation while avoiding unnecessary over-redaction.
 

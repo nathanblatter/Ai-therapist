@@ -29,7 +29,7 @@
 //   OPENAI_API_KEY=... node node_modules/.bin/tsx scripts/redaction-shape-eval.mjs \
 //     --out /tmp/redaction-shape.jsonl [--conditions single,batch1,batch3] [--runs 2] \
 //     [--only rc-explicit-id-01,...] [--concurrency 8] \
-//     [--wording evals/candidates/redaction-wording-orgs-time.json]
+//     [--wording path/to/candidate.json]
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

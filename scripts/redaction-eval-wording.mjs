@@ -6,9 +6,9 @@
 // `find` text is not in the instructions stops the run, so a candidate can
 // never silently measure the unedited wording.
 //
-// Nothing here ships: the wording in src/server/services/redaction.service.ts
-// is what production sends, and changing it needs the PI's sign-off and a
-// regenerated IRB prompts attachment.
+// Nothing here ships: production sends the wording in
+// src/server/services/redaction.service.ts. Adopting a candidate means editing
+// that file and regenerating the IRB prompts attachment (npm run irb:prompts).
 import { readFileSync } from 'node:fs';
 
 /** Returns a label for the run ("production wording" or the file name). */
