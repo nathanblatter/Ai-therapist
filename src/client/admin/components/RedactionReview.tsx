@@ -30,6 +30,9 @@ interface RedactMessage {
   content_redacted: string | null;
   /** Decision-model leak-check verdict (ai-therapist-262); null when never checked. */
   redaction_check?: RedactionCheck | null;
+  /** Stored as written: the redaction model refused it and the identifier
+   *  check found nothing to redact (ai-therapist-409). */
+  redaction_passthrough?: boolean;
 }
 
 /** Reviewer wording for the leak check's kinds (identifierCheck.ts). */
@@ -223,6 +226,14 @@ export default function RedactionReview() {
                           {summariseWords(leftoverCapitalisedWords(message.content_redacted ?? ''))}
                         </span>
                       )}
+                    {message.redaction_passthrough && (
+                      <span
+                        className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-gray-200 text-gray-700"
+                        title="The redaction model refused this message. A separate check found no identifier in it, so it was stored exactly as written."
+                      >
+                        Stored as written
+                      </span>
+                    )}
                     {leakCheckErrored(message.redaction_check) && !message.redaction_check?.reviewed && (
                       <span
                         className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-800"

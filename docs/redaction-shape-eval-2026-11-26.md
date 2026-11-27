@@ -511,37 +511,49 @@ The redaction model answers a lone crisis message instead of redacting it.
 Validation catches that every time, but the message then waits for a person,
 and most such messages hold no identifier. Now, for a message whose only
 failure is a refusal (or a prose reply where JSON was asked for), the same
-five questions are asked of the message itself. If every probability is
-under 0.1 and no word is capitalised like a name, the text is stored
-unrewritten and marked `redaction_passthrough`. Otherwise it is left for a
-person exactly as before. `REDACTION_REFUSAL_PASSTHROUGH=off` turns it off.
+five questions are asked of the message itself. The text is stored
+unrewritten and marked `redaction_passthrough` only when all of these hold:
+
+- no hard rule objects: the message has no digit, no "@" or web address, no
+  word capitalised like a name, and is not typed wholly in capitals;
+- every one of the five probabilities is under 0.1;
+- the caller asked for it. Only the end-of-session job does (it marks the row
+  and leak-checks it afterwards). Therapist edits and adverse-event drafts
+  never do: a refused message there waits for a person as before;
+- it is the original message. A message whose first pass succeeded and whose
+  re-check was refused is rejected as before.
+
+Otherwise the message is left for a person. The review screen shows "Stored
+as written" on these rows. `REDACTION_REFUSAL_PASSTHROUGH=off` turns it off.
 
 Why 0.1: asked of the raw fixture messages, all 62 that hold an identifier
 scored 0.9 or more, and the 14 that hold none scored 0.07 or less except one
 ordinary sentence at 0.41 (which would simply go to a person).
 
-On the real code path, crisis fixture, 3 runs (60 crisis message-runs per
-request shape):
+On the real code path as shipped (hard rules in, session-job shapes opted
+in), crisis fixture, 3 runs, 60 crisis message-runs per request shape:
 
 | Request shape | Stored before (first part of this document) | Stored now |
 | --- | --- | --- |
-| Single message (therapist edit, re-send) | 5 of 60 | 37 of 60 |
-| Batch of one | 40% | 49 of 60 |
-| Batch of 12 | 73% | 55 of 60 |
-| Whole fixture as one batch | 40 of 40 | 52 of 60 |
+| Batch of one | 24 of 60 (40%) | 37 of 60 |
+| Batch of 12 | 44 of 60 (73%) | 48 of 60 |
+| Single message, as a therapist edit sends it | 5 of 60 | 8 of 60 (unchanged on purpose: edits do not opt in) |
 
-- Explicit suicidal intent with no identifiers, single message: 9 of 9
-  stored (it was 0 of 24).
-- Of the stored single messages, 29 were stored unrewritten. None of them is
-  a message the fixture lists an identifier for. Across all 312 message-runs
-  no identifier was left in and no "keep" phrase was lost.
-- What still waits for a person is mostly crisis messages that DO hold an
-  identifier (14 of the 23 refused single messages): the model refuses them
-  and the check correctly declines to store them unrewritten. That part is
+- Crisis messages with no identifier, in a batch: 23 of 30 stored in each
+  shape, all 23 unrewritten. The other 7 were stopped by a hard rule or the
+  classifier and wait for a person.
+- No message the fixture lists an identifier for was stored unrewritten (0
+  of 46 unrewritten rows). Across the 234 message-runs no identifier was left
+  in and no "keep" phrase was lost.
+- The gain is real but partial: what still waits for a person is every
+  refused crisis message that DOES hold an identifier (the model refuses it,
+  and the check correctly declines to store it unrewritten). That part is
   not solved.
-- The whole-fixture batch was refused outright in 1 of these 3 runs (it was
-  never refused in the earlier runs); the re-sends then stored all but 7.
-  Three runs cannot say whether that is chance or the prompt edits below.
+- An earlier run of the first version of this change (before the hard rules,
+  and with single messages opted in) stored 37 of 60 single messages and 49
+  of 60 batches of one, and saw the whole-fixture batch refused outright in 1
+  of 3 runs, which had not happened in earlier runs. Three runs cannot say
+  whether that is chance or the prompt edits below.
 
 ## 3. Two prompt clean-ups
 
@@ -556,16 +568,40 @@ in, 33 of 33 listed identifiers removed, 0 rejections, 0 of 12
 nothing-to-redact messages changed, 3 of 150 clean outputs flagged by the
 new leak check.
 
+## The hard cases (added after an independent review of the change)
+
+The first version leaned on the classifier alone for anything not
+capitalised. `evals/goldens/redaction-passthrough-hard.jsonl` (40 invented
+crisis messages) and `scripts/redaction-identifier-check-eval.mjs` test
+exactly that, 3 runs:
+
+| Class | Message-runs | Stopped by a hard rule | Stopped by the classifier (asked regardless) | Would be stored unrewritten |
+| --- | --- | --- | --- | --- |
+| Name typed in lower case | 12 | 0 | 12 | 0 |
+| Organisation typed in lower case | 12 | 3 | 12 | 0 |
+| Place typed in lower case | 9 | 3 | 9 | 0 |
+| Name that opens a sentence | 12 | 0 | 12 | 0 |
+| Phone, id, email, handle, date, plate | 18 | 18 | 18 | 0 |
+| Name that is also an ordinary word (April, June, Amazon) | 15 | 0 | 15 | 0 |
+| Typed in capitals | 6 | 6 | 6 | 0 |
+| No identifier | 36 | 6 | 9 | 21 |
+
+No message with an identifier would have been stored unrewritten (0 of 84);
+the lowest classifier probability on one was 0.99. Lower-case names,
+sentence-opening names and names that are ordinary words are held by the
+classifier alone: the rules do not see them.
+
 ## Limits
 
 - Small invented fixtures, one evening, one snapshot each of gpt-5 and
-  gpt-6-luna. 62 of 62 and 0 of 29 are not guarantees. The capitalised-word
-  check is the second net under the classifier, and the leak check still runs
-  on every stored message afterwards, including the unrewritten ones.
+  gpt-6-luna. 62 of 62, 84 of 84 and 0 of 29 are not guarantees.
+- The leak check that runs afterwards asks the same model the same questions
+  about the same unrewritten text, so for these rows it is not an independent
+  second opinion. The independent nets are the hard rules.
 - The refused-message check sends the message text to the Decisions API,
   which has no per-request "do not store" setting; retention follows the
   OpenAI organisation's data controls. The redaction call itself sets
   `store: false`.
-- Cost of this addendum: 617 gpt-5 flex calls (about 0.8M input and 0.32M
-  output tokens, roughly $2.10) and about 1,060 Decisions calls (about 0.9M
-  input tokens, no output tokens; the price was not checked).
+- Cost of this addendum: about 1,050 gpt-5 flex calls (about 1.5M input and
+  0.57M output tokens, roughly $3.80) and about 1,300 Decisions calls (about
+  1M input tokens, no output tokens; the price was not checked).

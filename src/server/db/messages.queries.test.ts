@@ -170,11 +170,11 @@ describe('updateMessage', () => {
     const meta = { edited_by: 'dr_t', edited_at: '2026-01-01' };
     await expect(updateMessage(5, 'Alice said hi', 'content', meta)).resolves.toBe(ROW);
 
-    expect(redactMock).toHaveBeenCalledWith('Alice said hi', { passedThrough: expect.any(Set) });
+    expect(redactMock).toHaveBeenCalledWith('Alice said hi');
     expect(clientSql()).toEqual(['BEGIN', 'UPDATE', 'COMMIT']);
     const [sql, params] = clientQueryMock.mock.calls[1] as [string, unknown[]];
     expect(sql).toMatch(
-      /SET content = \$1,\s+content_redacted = \$2,\s+embedding = NULL,\s+metadata = \(COALESCE\(metadata, '\{\}'::jsonb\) - 'redaction_error' - 'redaction_rejected'\) \|\| \$3::jsonb\s+WHERE message_id = \$4\s+RETURNING \*/,
+      /SET content = \$1,\s+content_redacted = \$2,\s+embedding = NULL,\s+metadata = \(COALESCE\(metadata, '\{\}'::jsonb\) - 'redaction_error' - 'redaction_rejected'\s+- 'redaction_passthrough'\) \|\| \$3::jsonb\s+WHERE message_id = \$4\s+RETURNING \*/,
     );
     expect(params).toEqual(['Alice said hi', '[NAME] said hi', JSON.stringify(meta), 5]);
     expect(releaseMock).toHaveBeenCalledTimes(1);

@@ -36,7 +36,8 @@ function sessionOrgScopeSql(orgParam: string): string {
 export async function getRandomRedactedMessages(orgId: number): Promise<Record<string, unknown>[]> {
   const result = await pool.query(
     `SELECT message_id, content_redacted, role, message_type, created_at,
-           metadata->'redaction_check' AS redaction_check
+           metadata->'redaction_check' AS redaction_check,
+           COALESCE((metadata->>'redaction_passthrough')::boolean, false) AS redaction_passthrough
     FROM messages
     WHERE content_redacted IS NOT NULL AND ${REDACTABLE_ROWS_SQL}
       AND ${sessionOrgScopeSql('$1')}

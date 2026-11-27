@@ -103,9 +103,9 @@ describe('Decisions API adapter', () => {
     expect(r.pLeak).toBeCloseTo(0.7);
   });
 
-  it('clamps an out-of-range probability', () => {
-    expect(parseDecisionsResponse(decision(1.2)).pLeak).toBe(1);
-    expect(parseDecisionsResponse(decision(-0.1)).kinds.person_name).toBe(0);
+  it('throws on an out-of-range probability instead of clamping it to clean or leaky', () => {
+    expect(() => parseDecisionsResponse(decision(1.2))).toThrow(/out-of-range/);
+    expect(() => parseDecisionsResponse(decision(-0.1))).toThrow(/out-of-range/);
   });
 
   it('throws when any one question is refused instead of treating it as clean', () => {

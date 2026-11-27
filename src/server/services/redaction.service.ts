@@ -132,9 +132,11 @@ export interface RedactionOptions {
    *  rejections: the caller should leave them retryable. When this sink is
    *  omitted they are reported through `rejected` instead. */
   deferred?: Map<number, string>;
-  /** Collects the ids of messages stored WITHOUT a rewrite because the
-   *  redaction model refused them and the identifier check found nothing to
-   *  redact (see `nothingToRedact`). They are in the returned map. */
+  /** Opt-in for storing a refused message unrewritten (see `nothingToRedact`),
+   *  and the sink for the ids it happened to; they are in the returned map.
+   *  Without this sink a refused message is always rejected: only a caller
+   *  that marks the row and leak-checks it afterwards (the session job) may
+   *  ask for it. */
   passedThrough?: Set<number>;
 }
 
@@ -428,8 +430,9 @@ async function redactPass(
 // messages hold no identifier at all. For a message whose only failure is a
 // refusal, a classifier that generates no text is asked whether any kind of
 // identifier is in it (identifierCheck.ts). When it says no with high
-// confidence AND no word is capitalised like a name, the text is stored as it
-// stands: there was nothing to redact. Any doubt, any error, or the switch
+// confidence AND no hard rule objects (a digit, an "@", a word capitalised
+// like a name: blockedFromPassthrough), the text is stored as it stands:
+// there was nothing to redact. Only for a caller that opts in. Any doubt, any error, or the switch
 // set to off leaves the message rejected for a person, exactly as before.
 //
 // Measured 2026-11-26 on the invented fixtures: all 62 messages holding an
@@ -460,11 +463,32 @@ export function refusalPassthroughEnabled(): boolean {
   return (process.env.REDACTION_REFUSAL_PASSTHROUGH ?? '').trim().toLowerCase() !== 'off';
 }
 
-/** True only when both nets agree the text holds nothing to redact. Never throws. */
+/**
+ * Hard rules that keep a refused message for a person whatever the classifier
+ * would say; the reason, or null. Exported for the eval runner.
+ *   - any digit: phone, date, address, age, id and plate numbers all carry one;
+ *   - "@" or a web address: emails, handles, links;
+ *   - a word capitalised like a name (shared/leftoverNames.ts);
+ *   - a message typed wholly in capitals, where capitals say nothing.
+ * What is left for the classifier alone: names typed in lower case, a name
+ * that opens a sentence, and names that are also ordinary words ("April").
+ */
+export function blockedFromPassthrough(text: string): string | null {
+  if (/\d/.test(text)) return 'digit';
+  if (/@|https?:|www\.|\b[\p{L}\p{N}-]+\.(?:com|org|net|edu|gov|io|me)\b/iu.test(text)) return 'contact';
+  const letters = text.replace(/[^\p{L}]/gu, '');
+  if (letters.length > 0 && letters === letters.toUpperCase() && letters !== letters.toLowerCase())
+    return 'all_capitals';
+  if (leftoverCapitalisedWords(text).length > 0) return 'capitalised_word';
+  return null;
+}
+
+/** True only when the rules and the classifier agree the text holds nothing
+ *  to redact. Never throws. */
 async function nothingToRedact(text: string, opts: RedactionOptions): Promise<boolean> {
-  if (leftoverCapitalisedWords(text).length > 0) return false;
+  if (blockedFromPassthrough(text) !== null) return false;
   try {
-    const client = new OpenAI({ apiKey: OPENAI_API_KEY, timeout: 60_000 }) as unknown as DecisionsClient;
+    const client = new OpenAI({ apiKey: OPENAI_API_KEY, timeout: 20_000, maxRetries: 1 }) as unknown as DecisionsClient;
     const answer = await askIdentifierKinds(client, text);
     opts.usage?.push({ model: IDENTIFIER_MODEL, tokensIn: answer.tokensIn, tokensOut: answer.tokensOut });
     return answer.pMax < PASSTHROUGH_MAX_P;
@@ -541,11 +565,17 @@ async function redactMessages(
       else verdict = validateRedaction(originals[idx], p2.text);
       if (verdict.ok && p2?.ok) {
         result.set(item.id, p2.text);
-      } else if (REFUSAL_REASONS.has(verdict.reason) && refusalPassthroughEnabled()) {
-        // Decided after the loop: it needs a model call. The text in question
-        // is the pass-1 redaction when pass 1 succeeded and only the re-check
-        // was refused, otherwise the original.
-        refused.push({ id: item.id, text: p1?.ok ? p1.text : originals[idx], verdict });
+      } else if (
+        opts.passedThrough &&
+        (!p1 || !p1.ok) &&
+        REFUSAL_REASONS.has(verdict.reason) &&
+        refusalPassthroughEnabled()
+      ) {
+        // Decided after the loop: it needs a model call. Only the ORIGINAL
+        // text is ever stored this way. A message whose first pass succeeded
+        // and whose re-check was refused is rejected as before: its pass-1
+        // text holds placeholders, and "unrewritten" would be untrue of it.
+        refused.push({ id: item.id, text: originals[idx], verdict });
       } else if (verdict.reason === 'call_cap' && opts.deferred) {
         // Never judged: the budget ran out before this message got its own
         // call. Not a rejection, so the gap sweep may try it again later.
@@ -557,16 +587,22 @@ async function redactMessages(
       }
     });
   }
-  for (const { id, text, verdict } of refused) {
-    if (await nothingToRedact(text, opts)) {
-      result.set(id, text);
-      opts.passedThrough?.add(id);
-      passed++;
-    } else {
-      opts.rejected?.set(id, rejectionError(verdict));
-      rejectedReasons.push(verdict.reason ?? 'unknown');
+  // Bounded concurrency; each check is one short classifier call.
+  let nextRefused = 0;
+  async function checkRefused() {
+    while (nextRefused < refused.length) {
+      const { id, text, verdict } = refused[nextRefused++];
+      if (await nothingToRedact(text, opts)) {
+        result.set(id, text);
+        opts.passedThrough?.add(id);
+        passed++;
+      } else {
+        opts.rejected?.set(id, rejectionError(verdict));
+        rejectedReasons.push(verdict.reason ?? 'unknown');
+      }
     }
   }
+  await Promise.all(Array.from({ length: Math.min(4, refused.length) }, checkRefused));
   if (passed > 0) {
     console.warn(
       `[Redaction] ${passed}/${items.length} refused message(s) stored unrewritten: the identifier check found nothing to redact`,
@@ -591,11 +627,9 @@ async function redactMessages(
  */
 export default async function redactPHI(input: string, opts: RedactionOptions = {}): Promise<string> {
   const rejected = new Map<number, string>();
-  const out = await redactMessages(
-    [{ id: 0, content: input }],
-    { usage: opts.usage, rejected, passedThrough: opts.passedThrough },
-    'single',
-  );
+  // No pass-through here: an edited message is not leak-checked afterwards,
+  // so a refused edit always waits for a person.
+  const out = await redactMessages([{ id: 0, content: input }], { usage: opts.usage, rejected }, 'single');
   const text = out.get(0);
   if (text === undefined) throw new RedactionRejectedError(rejected.get(0) ?? 'Redaction output rejected');
   return text;

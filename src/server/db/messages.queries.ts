@@ -147,11 +147,7 @@ export async function updateMessage(
   let redactionMeta: Record<string, unknown> = {};
   if (fieldToUpdate === 'content') {
     try {
-      const passedThrough = new Set<number>();
-      redactedContent = await redactPHI(newContent, { passedThrough });
-      // Stored unrewritten: the model refused and the identifier check found
-      // nothing to redact (redaction.service.ts, ai-therapist-409).
-      if (passedThrough.size > 0) redactionMeta = { redaction_passthrough: true };
+      redactedContent = await redactPHI(newContent);
     } catch (err) {
       // By name, not instanceof: RedactionRejectedError (redaction.service.ts).
       if (!(err instanceof Error && err.name === 'RedactionRejectedError')) throw err;
@@ -172,7 +168,8 @@ export async function updateMessage(
          SET content = $1,
              content_redacted = $2,
              embedding = NULL,
-             metadata = (COALESCE(metadata, '{}'::jsonb) - 'redaction_error' - 'redaction_rejected') || $3::jsonb
+             metadata = (COALESCE(metadata, '{}'::jsonb) - 'redaction_error' - 'redaction_rejected'
+                         - 'redaction_passthrough') || $3::jsonb
          WHERE message_id = $4
          RETURNING *`,
         [newContent, redactedContent, JSON.stringify({ ...editMetadata, ...redactionMeta }), messageId],

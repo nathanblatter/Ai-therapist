@@ -95,10 +95,6 @@ export function buildIdentifierBody(text: string): OpenAI.DecisionCreateParams {
   };
 }
 
-function clamp01(n: number): number {
-  return Math.min(1, Math.max(0, n));
-}
-
 /**
  * Read one probability per question. Throws when any question is refused,
  * missing or not a predicate probability: an answer set with a hole in it is
@@ -116,10 +112,14 @@ export function parseIdentifierResponse(raw: unknown): IdentifierAnswer {
       answers.find((a) => a?.name === kind) ?? (answers[position]?.name == null ? answers[position] : null);
     if (!answer) throw new Error(`Decisions API response had no answer for ${kind}`);
     if (answer.type === 'refusal') throw new Error(`Decisions API refused the ${kind} question`);
-    if (answer.type !== 'predicate' || typeof answer.probability !== 'number' || !Number.isFinite(answer.probability)) {
+    const p = answer.probability;
+    if (answer.type !== 'predicate' || typeof p !== 'number' || !Number.isFinite(p)) {
       throw new Error(`Decisions API answer for ${kind} had no predicate probability (type: ${String(answer.type)})`);
     }
-    kinds[kind] = clamp01(answer.probability);
+    // A probability outside 0..1 is a broken answer, not a very clean or a
+    // very leaky one: clamping -0.2 to 0 would read as "certainly clean".
+    if (p < 0 || p > 1) throw new Error(`Decisions API answer for ${kind} had an out-of-range probability`);
+    kinds[kind] = p;
   });
   const u = root.usage as { input_tokens?: number; output_tokens?: number } | undefined;
   return {

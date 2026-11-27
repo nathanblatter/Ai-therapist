@@ -537,7 +537,8 @@ describe('legacy wording (the default; review of PR #102)', () => {
 
 // ai-therapist-409: the model refuses a lone crisis message. When a classifier
 // that writes no text finds nothing in it to redact, the message is stored as
-// it stands instead of waiting for a person.
+// it stands instead of waiting for a person. Only for a caller that opts in
+// by passing the `passedThrough` sink (the session job).
 describe('a refused message with nothing to redact', () => {
   const KINDS = ['person_name', 'organization', 'place', 'date', 'contact_or_number'];
   const kinds = (p: number, usage = { input_tokens: 300, output_tokens: 0 }) => ({
@@ -546,6 +547,12 @@ describe('a refused message with nothing to redact', () => {
     usage,
   });
   const CRISIS = 'i am going to kill myself tonight';
+  const run = async (content: string, withSink = true) => {
+    const rejected = new Map<number, string>();
+    const passedThrough = new Set<number>();
+    const out = await redactPHIBatch([{ id: 5, content }], { rejected, ...(withSink ? { passedThrough } : {}) });
+    return { out, rejected, passedThrough };
+  };
 
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -567,48 +574,106 @@ describe('a refused message with nothing to redact', () => {
     expect(usage.map((u) => u.model)).toContain('gpt-6-luna');
   });
 
+  // The default wording: a batch fails, the message is re-sent as bare text,
+  // and the refusal comes back as prose (reason `refusal`).
+  it('also under the default (legacy) wording, for the one refused message of a batch', async () => {
+    vi.stubEnv('REDACTION_PROMPT_VERSION', '');
+    createMock.mockImplementation((opts: { input: string }) => {
+      // A bare single message: the crisis one is refused, any other is returned as is.
+      if (!opts.input.startsWith('['))
+        return Promise.resolve(opts.input === CRISIS ? REFUSAL : { output_text: opts.input });
+      const sent = JSON.parse(opts.input) as Item[];
+      if (sent.some((x) => x.text === CRISIS)) return Promise.resolve(REFUSAL); // the batch holding it
+      return Promise.resolve({ output_text: JSON.stringify(sent) });
+    });
+    decisionsMock.mockResolvedValue(kinds(0.02));
+    const rejected = new Map<number, string>();
+    const passedThrough = new Set<number>();
+    const out = await redactPHIBatch(
+      [
+        { id: 1, content: 'work was fine' },
+        { id: 2, content: CRISIS },
+      ],
+      { rejected, passedThrough },
+    );
+    expect(out.get(1)).toBe('work was fine');
+    expect(out.get(2)).toBe(CRISIS);
+    expect([...passedThrough]).toEqual([2]);
+    expect(rejected.size).toBe(0);
+    // Only the refused message was sent to the classifier.
+    expect(decisionsMock).toHaveBeenCalledTimes(1);
+    expect(decisionsMock.mock.calls[0][0].input).toBe(CRISIS);
+  });
+
+  it('never happens for a caller that did not ask for it (adverse-event drafts, therapist edits)', async () => {
+    createMock.mockResolvedValue(REFUSAL);
+    decisionsMock.mockResolvedValue(kinds(0));
+    const { out, rejected } = await run(CRISIS, false);
+    expect(out.has(5)).toBe(false);
+    expect(rejected.has(5)).toBe(true);
+    expect(decisionsMock).not.toHaveBeenCalled();
+    await expect(redactPHI(CRISIS)).rejects.toBeInstanceOf(RedactionRejectedError);
+    expect(decisionsMock).not.toHaveBeenCalled();
+  });
+
   it('stays rejected at or above the cut-off, which is far below the leak check threshold', async () => {
     expect(PASSTHROUGH_MAX_P).toBeLessThanOrEqual(0.1);
     createMock.mockResolvedValue(REFUSAL);
     decisionsMock.mockResolvedValue(kinds(PASSTHROUGH_MAX_P));
-    const rejected = new Map<number, string>();
-    const passedThrough = new Set<number>();
-    const out = await redactPHIBatch([{ id: 5, content: CRISIS }], { rejected, passedThrough });
+    const { out, rejected, passedThrough } = await run(CRISIS);
     expect(out.has(5)).toBe(false);
     expect(rejected.get(5)).toMatch(/^Redaction output rejected: /);
     expect(passedThrough.size).toBe(0);
   });
 
-  it('a word capitalised like a name keeps it rejected without asking the classifier', async () => {
+  it.each([
+    ['a word capitalised like a name', 'i told Priya i am going to kill myself tonight'],
+    ['a digit', 'call my sister at 801-555-0142 because i might do something tonight'],
+    ['an email address', 'email my mom at karen.h@gmail.com when it is over'],
+    ['a handle', 'i posted a goodbye on my account @sadgirl last night'],
+    ['a message typed in capitals', 'TELL PRIYA I AM SORRY'],
+  ])('%s keeps it rejected without asking the classifier', async (_label, content) => {
     createMock.mockResolvedValue(REFUSAL);
     decisionsMock.mockResolvedValue(kinds(0));
-    const rejected = new Map<number, string>();
-    const out = await redactPHIBatch([{ id: 5, content: 'i told Priya i am going to kill myself tonight' }], {
-      rejected,
-    });
+    const { out, rejected } = await run(content);
     expect(out.has(5)).toBe(false);
     expect(rejected.has(5)).toBe(true);
     expect(decisionsMock).not.toHaveBeenCalled();
   });
 
-  it('a classifier error or refusal keeps it rejected', async () => {
+  it('a classifier error, a refused question or a broken probability keeps it rejected', async () => {
     createMock.mockResolvedValue(REFUSAL);
     decisionsMock.mockRejectedValueOnce(new Error('boom'));
-    const rejected = new Map<number, string>();
-    expect((await redactPHIBatch([{ id: 5, content: CRISIS }], { rejected })).has(5)).toBe(false);
+    expect((await run(CRISIS)).out.has(5)).toBe(false);
     const refusedAnswer = kinds(0);
     (refusedAnswer.answers as Array<Record<string, unknown>>)[0] = { type: 'refusal', name: 'person_name' };
     decisionsMock.mockResolvedValueOnce(refusedAnswer);
-    expect((await redactPHIBatch([{ id: 5, content: CRISIS }], { rejected })).has(5)).toBe(false);
-    expect(rejected.has(5)).toBe(true);
+    expect((await run(CRISIS)).out.has(5)).toBe(false);
+    decisionsMock.mockResolvedValueOnce(kinds(-0.2));
+    const last = await run(CRISIS);
+    expect(last.out.has(5)).toBe(false);
+    expect(last.rejected.has(5)).toBe(true);
   });
 
   it('only refusals qualify: an output that changed the words is never passed through', async () => {
     createMock.mockResolvedValue(batchReply([{ i: 0, text: 'something else entirely was written here instead' }]));
     decisionsMock.mockResolvedValue(kinds(0));
-    const rejected = new Map<number, string>();
-    const out = await redactPHIBatch([{ id: 5, content: CRISIS }], { rejected });
+    const { out } = await run(CRISIS);
     expect(out.has(5)).toBe(false);
+    expect(decisionsMock).not.toHaveBeenCalled();
+  });
+
+  // Pass 1 produced a real redaction and only the re-check was refused: the
+  // pass-1 text holds placeholders and is not "the message as written".
+  it('a message redacted in pass 1 and refused in pass 2 is rejected, not passed through', async () => {
+    const original = 'my friend sam says i should not be alone tonight';
+    const redacted = 'my friend [REDACTED: NAME] says i should not be alone tonight';
+    createMock.mockResolvedValueOnce(batchReply([{ i: 0, text: redacted }])).mockResolvedValue(REFUSAL);
+    decisionsMock.mockResolvedValue(kinds(0));
+    const { out, rejected, passedThrough } = await run(original);
+    expect(out.has(5)).toBe(false);
+    expect(rejected.has(5)).toBe(true);
+    expect(passedThrough.size).toBe(0);
     expect(decisionsMock).not.toHaveBeenCalled();
   });
 
@@ -616,18 +681,9 @@ describe('a refused message with nothing to redact', () => {
     vi.stubEnv('REDACTION_REFUSAL_PASSTHROUGH', 'off');
     createMock.mockResolvedValue(REFUSAL);
     decisionsMock.mockResolvedValue(kinds(0));
-    const rejected = new Map<number, string>();
-    const out = await redactPHIBatch([{ id: 5, content: CRISIS }], { rejected });
+    const { out, rejected } = await run(CRISIS);
     expect(out.has(5)).toBe(false);
     expect(rejected.has(5)).toBe(true);
     expect(decisionsMock).not.toHaveBeenCalled();
-  });
-
-  it('redactPHI (therapist edit) returns the text and reports the pass-through', async () => {
-    createMock.mockResolvedValue(REFUSAL);
-    decisionsMock.mockResolvedValue(kinds(0.02));
-    const passedThrough = new Set<number>();
-    await expect(redactPHI(CRISIS, { passedThrough })).resolves.toBe(CRISIS);
-    expect(passedThrough.size).toBe(1);
   });
 });
