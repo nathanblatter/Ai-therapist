@@ -58,10 +58,14 @@ export async function redactSession(sessionId: string): Promise<void> {
   // Messages never judged because the single-message call budget ran out:
   // marked with a redaction_error only, so the gap sweep retries them.
   const deferred = new Map<number, string>();
+  // Messages the redaction model refused and the identifier check found
+  // nothing to redact in (ai-therapist-409): stored as they stand, and marked
+  // so a reviewer can tell them from a rewritten message.
+  const passedThrough = new Set<number>();
   try {
     const redacted = await redactPHIBatch(
       rows.map((r) => ({ id: r.message_id, content: r.content })),
-      { usage, rejected, deferred },
+      { usage, rejected, deferred, passedThrough },
     );
     const redactedAt = new Date().toISOString();
 
@@ -74,10 +78,13 @@ export async function redactSession(sessionId: string): Promise<void> {
       await pool.query(
         `UPDATE messages
             SET content_redacted = $1,
-                metadata = (COALESCE(metadata, '{}'::jsonb) - 'redaction_error' - 'redaction_rejected')
+                metadata = (COALESCE(metadata, '{}'::jsonb) - 'redaction_error' - 'redaction_rejected'
+                            - 'redaction_passthrough')
                            || jsonb_build_object('redacted_at', $2::text)
+                           || CASE WHEN $4::boolean THEN jsonb_build_object('redaction_passthrough', true)
+                                   ELSE '{}'::jsonb END
           WHERE message_id = $3`,
-        [content, redactedAt, messageId],
+        [content, redactedAt, messageId, passedThrough.has(messageId)],
       );
     }
 

@@ -7,11 +7,11 @@
 // 20 random messages, so a leaked name is found only by luck, and the IRB
 // protocol has no recall number to cite.
 //
-// This service asks a decision model ONE question per redacted message:
-//
-//   "Does this text still contain a direct personal identifier?"  -> yes/no
-//
-// and stores the answer with its probability in messages.metadata.redaction_check.
+// This service asks a decision model, per redacted message, whether each kind
+// of identifier is still in it (a person's name, an organisation, a place, a
+// date, a contact detail or number: identifierCheck.ts), and stores the
+// largest probability, and the kinds at or above the threshold, in
+// messages.metadata.redaction_check.
 // A second, deterministic signal sits beside the model's answer since
 // ai-therapist-409: a word still capitalised like a name
 // (shared/leftoverNames.ts) flags the message too, because the model misses
@@ -49,6 +49,15 @@ import { pool } from '../config/db.js';
 import { withFlex } from '../utils/flexTier.js';
 import { createLogger } from '../utils/logger.js';
 import { leftoverCapitalisedWords } from '../../shared/leftoverNames.js';
+import {
+  IDENTIFIER_KINDS,
+  IDENTIFIER_MODEL,
+  askIdentifierKinds,
+  buildIdentifierBody,
+  parseIdentifierResponse,
+  type DecisionsClient,
+  type IdentifierKind,
+} from './identifierCheck.js';
 
 const log = createLogger('redactionVerifier');
 
@@ -68,21 +77,25 @@ export const DEFAULT_VERIFIER_CONFIG: VerifierConfig = {
 };
 
 /** Model the Decisions API runs on (OpenAI DevDay 2026-09-29). */
-export const DECISIONS_MODEL = 'gpt-6-luna';
+export const DECISIONS_MODEL = IDENTIFIER_MODEL;
 /** Fallback: same family as the redactor so the two opinions are not identical. */
 export const RESPONSES_MODEL = 'gpt-5-mini';
 
+/** The Responses fallback's single question. The Decisions backend asks one
+ *  question per kind instead (identifierCheck.ts). */
 const QUESTION =
-  'Does this text still contain a direct personal identifier as defined by the HIPAA Safe Harbor ' +
-  "list: a person's name (first, last, or nickname used as a name), a street address or city smaller " +
-  'than a state, a specific date other than a year, a phone number, email address, account or record ' +
-  'number, URL, or any other number or string that identifies a specific person? Placeholders such as ' +
-  '[REDACTED: NAME] are NOT identifiers. Generic references ("my mom", "my therapist", "the university") ' +
-  'are NOT identifiers.';
+  "Does this text still contain a direct personal identifier: a person's name (first, last, or nickname used as " +
+  'a name), the proper name of a specific school, employer, clinic, congregation, apartment complex or team, a ' +
+  'street address or city smaller than a state, a specific calendar date other than a year, a phone number, email ' +
+  'address, account or record number, URL, or any other number or string that identifies a specific person? ' +
+  'Placeholders such as [REDACTED: NAME] are NOT identifiers. Generic references ("my mom", "my therapist", ' +
+  '"the university") and relative time expressions ("tonight", "last week") are NOT identifiers.';
 
 export interface DecisionAnswer {
   /** Probability that the text still leaks an identifier, 0..1. */
   pLeak: number;
+  /** Per-kind probabilities. Decisions backend only. */
+  kinds?: Record<IdentifierKind, number>;
   backend: 'decisions' | 'responses';
   model: string;
   tokensIn: number | null;
@@ -107,6 +120,10 @@ export interface RedactionCheck {
   /** Did p_leak alone reach the threshold? Lets the review screen say why a
    *  row is flagged. Absent on rows checked before 2026-11-26. */
   model_flagged?: boolean;
+  /** Which kinds of identifier the model thinks remain (probability at or
+   *  above the threshold), e.g. ["organization"]. Decisions backend only;
+   *  absent on rows checked before 2026-11-26. */
+  kinds?: IdentifierKind[];
   backend: 'decisions' | 'responses';
   model: string;
   checked_at: string;
@@ -162,74 +179,22 @@ export async function getVerifierConfig(): Promise<VerifierConfig> {
 }
 
 // ---- Decisions API adapter -------------------------------------------------
-// The ONLY two places that know the wire shape. Contract (GA reference,
-// https://developers.openai.com/api/reference/resources/decisions/methods/create,
-// read 2026-11-16):
-//
-//   request   { model, input, questions: [{ type, name, instructions, ... }] }
-//   response  { model, answers: [{ type, name, probability | ... }], usage }
-//
-// The preview-era body sent a single `question` object; the GA API rejects it
-// with "400 Missing required parameter: questions" (ai-therapist-284).
+// The wire shape lives in identifierCheck.ts (one question per kind of
+// identifier). These two wrappers keep this service's names: p(leak) is the
+// largest of the per-kind probabilities.
 
-// The request is typed by the SDK (openai >= 7 ships `client.decisions`), so a
-// future change to the request contract fails typecheck on the SDK bump
-// instead of failing in production. The response is still parsed defensively
-// from `unknown`: types do not stop the API returning something else.
-
-type DecisionsClient = { decisions: { create: (body: OpenAI.DecisionCreateParams) => Promise<unknown> } };
-
-/** Name echoed back on the answer, so the parser never trusts position alone. */
-export const LEAK_QUESTION_NAME = 'phi_leak';
-
-/**
- * One `predicate` question: the API answers with the probability that the
- * statement is true, which is exactly p(leak).
- *
- * No `store` field: the Decisions API has no such parameter (retention is
- * governed by the org's data controls, not per request), and an unknown
- * parameter risks the same 400 this adapter was fixed for.
- */
 export function buildDecisionsBody(text: string): OpenAI.DecisionCreateParams {
-  return {
-    model: DECISIONS_MODEL,
-    input: text,
-    questions: [
-      {
-        type: 'predicate',
-        name: LEAK_QUESTION_NAME,
-        instructions: QUESTION,
-      },
-    ],
-  };
+  return buildIdentifierBody(text);
 }
 
-/**
- * Read p(leak) from the documented `answers` array. Throws on a refusal or on
- * anything else it cannot read, so a contract drift surfaces as an error on
- * the row, not as a silent 0.
- */
 export function parseDecisionsResponse(raw: unknown): {
   pLeak: number;
+  kinds: Record<IdentifierKind, number>;
   tokensIn: number | null;
   tokensOut: number | null;
 } {
-  const root = (raw ?? {}) as Record<string, unknown>;
-  const answers = Array.isArray(root.answers) ? (root.answers as Array<Record<string, unknown> | null>) : [];
-  // Answers come back in question order and echo the question name. Prefer the
-  // name; with a single question the first answer is the same thing.
-  const answer = answers.find((a) => a?.name === LEAK_QUESTION_NAME) ?? answers[0];
-  if (!answer) throw new Error('Decisions API response had no answers');
-  if (answer.type === 'refusal') throw new Error('Decisions API refused the leak-check question');
-  if (answer.type !== 'predicate' || typeof answer.probability !== 'number' || !Number.isFinite(answer.probability)) {
-    throw new Error(`Decisions API answer had no predicate probability (type: ${String(answer.type)})`);
-  }
-  return { pLeak: clamp01(answer.probability), ...usageOf(root) };
-}
-
-function usageOf(root: Record<string, unknown>): { tokensIn: number | null; tokensOut: number | null } {
-  const u = root?.usage as { input_tokens?: number; output_tokens?: number } | undefined;
-  return { tokensIn: u?.input_tokens ?? null, tokensOut: u?.output_tokens ?? null };
+  const { pMax, kinds, tokensIn, tokensOut } = parseIdentifierResponse(raw);
+  return { pLeak: pMax, kinds, tokensIn, tokensOut };
 }
 
 function clamp01(n: number): number {
@@ -245,9 +210,8 @@ export function isDecisionsUnavailableError(err: unknown): boolean {
 }
 
 async function askDecisions(client: DecisionsClient, text: string): Promise<DecisionAnswer> {
-  const raw = await client.decisions.create(buildDecisionsBody(text));
-  const parsed = parseDecisionsResponse(raw);
-  return { ...parsed, backend: 'decisions', model: DECISIONS_MODEL };
+  const { pMax, kinds, tokensIn, tokensOut } = await askIdentifierKinds(client, text);
+  return { pLeak: pMax, kinds, tokensIn, tokensOut, backend: 'decisions', model: DECISIONS_MODEL };
 }
 
 // ---- Responses fallback ----------------------------------------------------
@@ -392,6 +356,7 @@ export async function verifyRedactedMessages(
           flagged: answer.pLeak >= cfg.threshold || capitalised > 0,
           capitalised_words: capitalised,
           model_flagged: answer.pLeak >= cfg.threshold,
+          ...(answer.kinds ? { kinds: IDENTIFIER_KINDS.filter((k) => (answer.kinds?.[k] ?? 0) >= cfg.threshold) } : {}),
           backend: answer.backend,
           model: answer.model,
           checked_at: checkedAt,

@@ -149,14 +149,19 @@ async function runTrial(c, condition, run) {
       } else if (condition === 'batchAll') {
         const out = await redactPHIBatch(
           cases.map((k, i) => ({ id: i, content: k.text })),
-          { rejected, deferred },
+          // The batch conditions opt in to pass-through, as the session job does.
+          { rejected, deferred, passedThrough: new Set() },
         );
         cases.forEach((k, i) => {
           if (out.has(i)) finals.set(k.id, out.get(i));
           else errors.set(k.id, rejected.get(i) ?? deferred.get(i) ?? 'Redaction output rejected: unknown');
         });
       } else {
-        const out = await redactPHIBatch(batchItems(c, condition), { rejected, deferred });
+        const out = await redactPHIBatch(batchItems(c, condition), {
+          rejected,
+          deferred,
+          passedThrough: new Set(),
+        });
         if (out.has(1000)) finals.set(c.id, out.get(1000));
         else errors.set(c.id, rejected.get(1000) ?? deferred.get(1000) ?? 'Redaction output rejected: unknown');
       }

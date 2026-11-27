@@ -34,6 +34,8 @@ services:
       COGNITO_CLIENT_SECRET: ${COGNITO_CLIENT_SECRET:-}
       COGNITO_DOMAIN: ${COGNITO_DOMAIN:-}
       # Key pair for the Cognito pool only (scripts/cognito/iam-app-policy.json).
+      REDACTION_REFUSAL_PASSTHROUGH: ${REDACTION_REFUSAL_PASSTHROUGH:-}
+      LIVE_FILTERED_REPLY_HANDOFF: ${LIVE_FILTERED_REPLY_HANDOFF:-}
       COGNITO_AWS_ACCESS_KEY_ID: ${COGNITO_AWS_ACCESS_KEY_ID:-}
       COGNITO_AWS_SECRET_ACCESS_KEY: ${COGNITO_AWS_SECRET_ACCESS_KEY:-}
       # Magic-link demo access. Unset => /demo/:token 404s (feature disabled).

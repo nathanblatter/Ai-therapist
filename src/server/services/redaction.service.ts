@@ -1,7 +1,14 @@
 import { getOpenAIKey } from '../config/secrets.js';
 import OpenAI from 'openai';
 import { withFlex } from '../utils/flexTier.js';
-import { rejectionError, validateRedaction, type RedactionVerdict } from './redactionValidation.js';
+import {
+  rejectionError,
+  validateRedaction,
+  type RedactionRejectReason,
+  type RedactionVerdict,
+} from './redactionValidation.js';
+import { IDENTIFIER_MODEL, askIdentifierKinds, type DecisionsClient } from './identifierCheck.js';
+import { leftoverCapitalisedWords } from '../../shared/leftoverNames.js';
 
 const OPENAI_API_KEY = await getOpenAIKey();
 
@@ -26,7 +33,7 @@ The 18 HIPAA Safe Harbor identifiers are:
 15. Internet Protocol (IP) Address
 16. Finger or voice print
 17. Photographic image - Photographic images are not limited to images of the face.
-18. Any other characteristic that could uniquely identify the individual. This includes the proper name of a specific organization or facility connected to the individual: a school, college or university (and its named buildings, dorms and teams), an employer or business, a hospital or clinic, a church, ward or congregation, an apartment complex, a sports team or club. Replace each with "[REDACTED: ORGANIZATION]". A generic reference without a proper name ("my school", "the hospital", "work", "my ward") is not an identifier and must be left as written
+18. Any other characteristic that could uniquely identify the individual. This includes the proper name of a specific organization or facility connected to the individual: a school, college or university (and its named buildings, dorms and teams), an employer or business, a hospital or clinic, a church, ward or congregation, an apartment complex, a sports team or club. Replace each with "[REDACTED: ORGANIZATION]". A generic reference without a proper name ("my school", "the hospital", "work", "my ward") is not an identifier and must be left as written. The name of a kind of group or office found in many places ("Relief Society", "student council", "PTA", "the bishopric"), without the name of the specific organization, is not an identifier either
 
 '''For each input, review the entire text and identify the presence and format of each specific Safe Harbor identifier listed above. Replace each instance strictly corresponding to one of the 18 identifiers with a matching placeholder (e.g., "[REDACTED: NAME]", "[REDACTED: DATE OF BIRTH]", etc.). Do not redact any information unless it exactly matches a Safe Harbor identifier. Redaction must cover partial or full identifiers, using the safest reasonable interpretation while avoiding unnecessary over-redaction.
 
@@ -61,11 +68,11 @@ Input Example 2:
 Reasoning:
 - "Jane Doe" matches the 'Names' identifier.
 - "MRN 00123" matches 'Medical record numbers'.
-- "10:45AM" within medical context may be associated with times.
+- "10:45AM" is a time of day, not a date: left as written.
 - "123-45-6789" matches 'Social Security numbers'.
 
 Output:
-"Admission records show [REDACTED: NAME], [REDACTED: MEDICAL RECORD NUMBER], arrived at [REDACTED: TIME] with a social security number [REDACTED: SSN]."
+"Admission records show [REDACTED: NAME], [REDACTED: MEDICAL RECORD NUMBER], arrived at 10:45AM with a social security number [REDACTED: SSN]."
 
 Edge Cases/Considerations:
 - Be strict: redact only when data matches a HIPAA Safe Harbor identifier.
@@ -125,6 +132,12 @@ export interface RedactionOptions {
    *  rejections: the caller should leave them retryable. When this sink is
    *  omitted they are reported through `rejected` instead. */
   deferred?: Map<number, string>;
+  /** Opt-in for storing a refused message unrewritten (see `nothingToRedact`),
+   *  and the sink for the ids it happened to; they are in the returned map.
+   *  Without this sink a refused message is always rejected: only a caller
+   *  that marks the row and leak-checks it afterwards (the session job) may
+   *  ask for it. */
+  passedThrough?: Set<number>;
 }
 
 /** Thrown by redactPHI (one message) when the output fails validation. */
@@ -410,6 +423,83 @@ async function redactPass(
   return out;
 }
 
+// ---- Refused messages with nothing to redact (ai-therapist-409) -------------
+// gpt-5 answers a lone crisis message ("I am going to kill myself tonight")
+// instead of redacting it. Validation catches that every time, so nothing
+// wrong is stored, but the message then waits for a person, and most of these
+// messages hold no identifier at all. For a message whose only failure is a
+// refusal, a classifier that generates no text is asked whether any kind of
+// identifier is in it (identifierCheck.ts). When it says no with high
+// confidence AND no hard rule objects (a digit, an "@", a word capitalised
+// like a name: blockedFromPassthrough), the text is stored as it stands:
+// there was nothing to redact. Only for a caller that opts in. Any doubt, any error, or the switch
+// set to off leaves the message rejected for a person, exactly as before.
+//
+// Measured 2026-11-26 on the invented fixtures: all 62 messages holding an
+// identifier scored 0.9 or more; the 10 crisis messages without one scored
+// 0.05 or less (docs/redaction-shape-eval-2026-11-26.md, addendum 4).
+//
+// Data flow: this sends the message text to the Decisions API, which has no
+// per-request `store: false`; retention follows the organisation's data
+// controls. Set REDACTION_REFUSAL_PASSTHROUGH=off to never make this call.
+
+// A prose reply to a batch request arrives as `unparseable_reply` (it is not
+// the JSON asked for); the same reply to a single bare-text request arrives
+// as `refusal` or `added_crisis_resource`. An output that changed the words
+// (`words_not_in_input`, `words_missing`) is not a refusal and never qualifies.
+const REFUSAL_REASONS = new Set<RedactionRejectReason | undefined>([
+  'refusal',
+  'added_crisis_resource',
+  'model_refusal',
+  'unparseable_reply',
+]);
+
+/** A message is stored unrewritten only below this probability of holding
+ *  any identifier. Deliberately far below the leak check's 0.5. */
+export const PASSTHROUGH_MAX_P = 0.1;
+
+/** On unless REDACTION_REFUSAL_PASSTHROUGH is exactly "off" (read per call). */
+export function refusalPassthroughEnabled(): boolean {
+  return (process.env.REDACTION_REFUSAL_PASSTHROUGH ?? '').trim().toLowerCase() !== 'off';
+}
+
+/**
+ * Hard rules that keep a refused message for a person whatever the classifier
+ * would say; the reason, or null. Exported for the eval runner.
+ *   - any digit: phone, date, address, age, id and plate numbers all carry one;
+ *   - "@" or a web address: emails, handles, links;
+ *   - a word capitalised like a name (shared/leftoverNames.ts);
+ *   - a message typed wholly in capitals, where capitals say nothing.
+ * What is left for the classifier alone: names typed in lower case, a name
+ * that opens a sentence, and names that are also ordinary words ("April").
+ */
+export function blockedFromPassthrough(text: string): string | null {
+  if (/\d/.test(text)) return 'digit';
+  if (/@|https?:|www\.|\b[\p{L}\p{N}-]+\.(?:com|org|net|edu|gov|io|me)\b/iu.test(text)) return 'contact';
+  const letters = text.replace(/[^\p{L}]/gu, '');
+  if (letters.length > 0 && letters === letters.toUpperCase() && letters !== letters.toLowerCase())
+    return 'all_capitals';
+  if (leftoverCapitalisedWords(text).length > 0) return 'capitalised_word';
+  return null;
+}
+
+/** True only when the rules and the classifier agree the text holds nothing
+ *  to redact. Never throws. */
+async function nothingToRedact(text: string, opts: RedactionOptions): Promise<boolean> {
+  if (blockedFromPassthrough(text) !== null) return false;
+  try {
+    const client = new OpenAI({ apiKey: OPENAI_API_KEY, timeout: 20_000, maxRetries: 1 }) as unknown as DecisionsClient;
+    const answer = await askIdentifierKinds(client, text);
+    opts.usage?.push({ model: IDENTIFIER_MODEL, tokensIn: answer.tokensIn, tokensOut: answer.tokensOut });
+    return answer.pMax < PASSTHROUGH_MAX_P;
+  } catch (err) {
+    console.warn(
+      `[Redaction] identifier check for a refused message failed (${err instanceof Error ? err.message : 'error'}); left for review`,
+    );
+    return false;
+  }
+}
+
 /** Max items per model call. A whole-session batch must reproduce the entire
  *  transcript in its output; very long sessions risk output truncation, which
  *  reads as a parse failure. Chunking keeps each call comfortably inside
@@ -451,6 +541,8 @@ async function redactMessages(
   const result = new Map<number, string>();
   const budget: CallBudget = { remaining: Math.min(items.length, MAX_SINGLE_MESSAGE_CALLS) };
   const rejectedReasons: string[] = [];
+  const refused: Array<{ id: number; text: string; verdict: RedactionVerdict }> = [];
+  let passed = 0;
   for (let start = 0; start < items.length; start += BATCH_CHUNK_SIZE) {
     const chunk = items.slice(start, start + BATCH_CHUNK_SIZE);
     const originals = chunk.map((i) => i.content ?? '');
@@ -473,6 +565,17 @@ async function redactMessages(
       else verdict = validateRedaction(originals[idx], p2.text);
       if (verdict.ok && p2?.ok) {
         result.set(item.id, p2.text);
+      } else if (
+        opts.passedThrough &&
+        (!p1 || !p1.ok) &&
+        REFUSAL_REASONS.has(verdict.reason) &&
+        refusalPassthroughEnabled()
+      ) {
+        // Decided after the loop: it needs a model call. Only the ORIGINAL
+        // text is ever stored this way. A message whose first pass succeeded
+        // and whose re-check was refused is rejected as before: its pass-1
+        // text holds placeholders, and "unrewritten" would be untrue of it.
+        refused.push({ id: item.id, text: originals[idx], verdict });
       } else if (verdict.reason === 'call_cap' && opts.deferred) {
         // Never judged: the budget ran out before this message got its own
         // call. Not a rejection, so the gap sweep may try it again later.
@@ -483,6 +586,27 @@ async function redactMessages(
         rejectedReasons.push(verdict.reason ?? 'unknown');
       }
     });
+  }
+  // Bounded concurrency; each check is one short classifier call.
+  let nextRefused = 0;
+  async function checkRefused() {
+    while (nextRefused < refused.length) {
+      const { id, text, verdict } = refused[nextRefused++];
+      if (await nothingToRedact(text, opts)) {
+        result.set(id, text);
+        opts.passedThrough?.add(id);
+        passed++;
+      } else {
+        opts.rejected?.set(id, rejectionError(verdict));
+        rejectedReasons.push(verdict.reason ?? 'unknown');
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, refused.length) }, checkRefused));
+  if (passed > 0) {
+    console.warn(
+      `[Redaction] ${passed}/${items.length} refused message(s) stored unrewritten: the identifier check found nothing to redact`,
+    );
   }
   if (rejectedReasons.length > 0) {
     const tally = [...new Set(rejectedReasons)].map((r) => `${r} x${rejectedReasons.filter((x) => x === r).length}`);
@@ -503,6 +627,8 @@ async function redactMessages(
  */
 export default async function redactPHI(input: string, opts: RedactionOptions = {}): Promise<string> {
   const rejected = new Map<number, string>();
+  // No pass-through here: an edited message is not leak-checked afterwards,
+  // so a refused edit always waits for a person.
   const out = await redactMessages([{ id: 0, content: input }], { usage: opts.usage, rejected }, 'single');
   const text = out.get(0);
   if (text === undefined) throw new RedactionRejectedError(rejected.get(0) ?? 'Redaction output rejected');

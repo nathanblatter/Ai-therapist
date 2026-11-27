@@ -52,11 +52,14 @@ beforeEach(() => {
   _resetVerifierStateForTests();
 });
 
-/** A Decisions API response in the documented GA shape. */
+const KINDS = ['person_name', 'organization', 'place', 'date', 'contact_or_number'] as const;
+
+/** A Decisions API response in the documented GA shape: one answer per kind.
+ *  `probability` is the answer to the first question; the rest are 0. */
 function decision(probability: number, usage?: { input_tokens: number; output_tokens: number }) {
   return {
     model: 'gpt-6-luna',
-    answers: [{ type: 'predicate', name: 'phi_leak', probability }],
+    answers: KINDS.map((name, i) => ({ type: 'predicate', name, probability: i === 0 ? probability : 0 })),
     ...(usage ? { usage } : {}),
   };
 }
@@ -64,55 +67,71 @@ function decision(probability: number, usage?: { input_tokens: number; output_to
 describe('Decisions API adapter', () => {
   // ai-therapist-284: the GA API requires `questions` (array). The preview-era
   // `question` object 400s every request. This pins the exact wire body.
-  it('sends the documented request shape: questions[] with one named predicate', () => {
+  it('sends the documented request shape: questions[] with one named predicate per kind', () => {
     const body = buildDecisionsBody('I talked to [REDACTED: NAME] yesterday');
     expect(body).toEqual({
       model: 'gpt-6-luna',
       input: 'I talked to [REDACTED: NAME] yesterday',
-      questions: [{ type: 'predicate', name: 'phi_leak', instructions: expect.stringMatching(/HIPAA Safe Harbor/) }],
+      questions: KINDS.map((name) => ({
+        type: 'predicate',
+        name,
+        instructions: expect.stringMatching(/NOT an identifier/),
+      })),
     });
     expect(body).not.toHaveProperty('question');
     // Not a Decisions parameter; an unknown field risks another 400.
     expect(body).not.toHaveProperty('store');
   });
 
-  it('reads the predicate probability from answers[] and carries usage', () => {
-    expect(parseDecisionsResponse(decision(0.83, { input_tokens: 40, output_tokens: 0 }))).toEqual({
+  it('p(leak) is the largest per-kind probability, and usage is carried', () => {
+    const raw = decision(0.2, { input_tokens: 40, output_tokens: 0 });
+    raw.answers[1].probability = 0.83;
+    expect(parseDecisionsResponse(raw)).toEqual({
       pLeak: 0.83,
+      kinds: { person_name: 0.2, organization: 0.83, place: 0, date: 0, contact_or_number: 0 },
       tokensIn: 40,
       tokensOut: 0,
     });
   });
 
-  it('picks the answer by question name, not by position', () => {
-    const r = parseDecisionsResponse({
-      answers: [
-        { type: 'predicate', name: 'something_else', probability: 0.01 },
-        { type: 'predicate', name: 'phi_leak', probability: 0.7 },
-      ],
-    });
+  it('picks each answer by question name, not by position', () => {
+    const raw = decision(0);
+    raw.answers[3].probability = 0.7;
+    raw.answers.reverse();
+    const r = parseDecisionsResponse(raw);
+    expect(r.kinds.date).toBeCloseTo(0.7);
     expect(r.pLeak).toBeCloseTo(0.7);
   });
 
-  it('clamps an out-of-range probability', () => {
-    expect(parseDecisionsResponse(decision(1.2)).pLeak).toBe(1);
-    expect(parseDecisionsResponse(decision(-0.1)).pLeak).toBe(0);
+  it('throws on an out-of-range probability instead of clamping it to clean or leaky', () => {
+    expect(() => parseDecisionsResponse(decision(1.2))).toThrow(/out-of-range/);
+    expect(() => parseDecisionsResponse(decision(-0.1))).toThrow(/out-of-range/);
   });
 
-  it('throws on a refusal instead of treating it as clean', () => {
-    expect(() => parseDecisionsResponse({ answers: [{ type: 'refusal', name: 'phi_leak' }] })).toThrow(/refused/);
+  it('throws when any one question is refused instead of treating it as clean', () => {
+    const raw = decision(0);
+    (raw.answers as Array<Record<string, unknown>>)[2] = { type: 'refusal', name: 'place' };
+    expect(() => parseDecisionsResponse(raw)).toThrow(/refused the place question/);
   });
 
   it('throws on an unrecognizable shape instead of inventing a probability', () => {
     expect(() => parseDecisionsResponse({ something: 'else' })).toThrow(/no answers/);
     expect(() => parseDecisionsResponse({ answers: [] })).toThrow(/no answers/);
     expect(() => parseDecisionsResponse(null)).toThrow(/no answers/);
+    // An answer set with a hole in it is not an answer.
     expect(() =>
-      parseDecisionsResponse({ answers: [{ type: 'choice', name: 'phi_leak', choice: 'yes', confidence: 0.9 }] }),
-    ).toThrow(/no predicate probability/);
-    expect(() =>
-      parseDecisionsResponse({ answers: [{ type: 'predicate', name: 'phi_leak', probability: 'high' }] }),
-    ).toThrow(/no predicate probability/);
+      parseDecisionsResponse({ answers: [{ type: 'predicate', name: 'person_name', probability: 0 }] }),
+    ).toThrow(/no answer for organization/);
+    const choice = decision(0);
+    (choice.answers as Array<Record<string, unknown>>)[0] = { type: 'choice', name: 'person_name', choice: 'yes' };
+    expect(() => parseDecisionsResponse(choice)).toThrow(/no predicate probability/);
+    const text = decision(0);
+    (text.answers as Array<Record<string, unknown>>)[0] = {
+      type: 'predicate',
+      name: 'person_name',
+      probability: 'high',
+    };
+    expect(() => parseDecisionsResponse(text)).toThrow(/no predicate probability/);
   });
 
   it('recognizes the preview-gating error', () => {
@@ -211,6 +230,7 @@ describe('verifyRedactedMessages', () => {
       p_leak: 0.9,
       flagged: true,
       model_flagged: true,
+      kinds: ['person_name'],
       backend: 'decisions',
       model: 'gpt-6-luna',
     });

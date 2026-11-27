@@ -13,6 +13,8 @@ interface RedactionCheck {
   /** Did the model's answer alone reach the threshold? Absent on rows checked
    *  before ai-therapist-409, where the model was the only reason to flag. */
   model_flagged?: boolean;
+  /** Kinds of identifier the model thinks remain, e.g. ["organization"]. */
+  kinds?: string[];
   backend: string;
   model: string;
   checked_at: string;
@@ -28,7 +30,19 @@ interface RedactMessage {
   content_redacted: string | null;
   /** Decision-model leak-check verdict (ai-therapist-262); null when never checked. */
   redaction_check?: RedactionCheck | null;
+  /** Stored as written: the redaction model refused it and the identifier
+   *  check found nothing to redact (ai-therapist-409). */
+  redaction_passthrough?: boolean;
 }
+
+/** Reviewer wording for the leak check's kinds (identifierCheck.ts). */
+const KIND_LABELS: Record<string, string> = {
+  person_name: 'a name',
+  organization: 'an organisation',
+  place: 'a place',
+  date: 'a date',
+  contact_or_number: 'a contact detail or number',
+};
 
 /** At most six words, then a count of the rest. */
 function summariseWords(words: string[]): string {
@@ -193,7 +207,11 @@ export default function RedactionReview() {
                           title={`Leak-check (${message.redaction_check.backend}, ${message.redaction_check.model}) says an identifier may remain`}
                         >
                           <AlertCircle size={12} />
-                          Possible leak, p={message.redaction_check.p_leak.toFixed(2)}
+                          Possible leak
+                          {message.redaction_check.kinds?.length
+                            ? ` (${message.redaction_check.kinds.map((k) => KIND_LABELS[k] ?? k).join(', ')})`
+                            : ''}
+                          , p={message.redaction_check.p_leak.toFixed(2)}
                         </span>
                       )}
                     {message.redaction_check?.flagged &&
@@ -208,6 +226,14 @@ export default function RedactionReview() {
                           {summariseWords(leftoverCapitalisedWords(message.content_redacted ?? ''))}
                         </span>
                       )}
+                    {message.redaction_passthrough && (
+                      <span
+                        className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-gray-200 text-gray-700"
+                        title="The redaction model refused this message. A separate check found no identifier in it, so it was stored exactly as written."
+                      >
+                        Stored as written
+                      </span>
+                    )}
                     {leakCheckErrored(message.redaction_check) && !message.redaction_check?.reviewed && (
                       <span
                         className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-800"

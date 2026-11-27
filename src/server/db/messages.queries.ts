@@ -168,7 +168,8 @@ export async function updateMessage(
          SET content = $1,
              content_redacted = $2,
              embedding = NULL,
-             metadata = (COALESCE(metadata, '{}'::jsonb) - 'redaction_error' - 'redaction_rejected') || $3::jsonb
+             metadata = (COALESCE(metadata, '{}'::jsonb) - 'redaction_error' - 'redaction_rejected'
+                         - 'redaction_passthrough') || $3::jsonb
          WHERE message_id = $4
          RETURNING *`,
         [newContent, redactedContent, JSON.stringify({ ...editMetadata, ...redactionMeta }), messageId],
