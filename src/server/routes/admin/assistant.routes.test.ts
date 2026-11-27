@@ -6,6 +6,7 @@ import request from 'supertest';
 
 const serviceMocks = vi.hoisted(() => ({
   runAssistantTurn: vi.fn(),
+  agentsApiBackendEnabled: vi.fn(),
 }));
 vi.mock('../../services/assistant.service.js', () => ({
   ...serviceMocks,
@@ -14,7 +15,7 @@ vi.mock('../../services/assistant.service.js', () => ({
 const orgMocks = vi.hoisted(() => ({ orgIdFor: vi.fn() }));
 vi.mock('../../middleware/org.js', () => orgMocks);
 
-import assistantRoutes from './assistant.routes.js';
+import assistantRoutes, { AGENTS_API_USER_LIMIT } from './assistant.routes.js';
 
 function appAs(role: string | null, userId = 7) {
   const app = express();
@@ -35,6 +36,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   process.env.ASSISTANT_ENABLED = 'true';
   orgMocks.orgIdFor.mockResolvedValue(1);
+  serviceMocks.agentsApiBackendEnabled.mockResolvedValue(false);
   serviceMocks.runAssistantTurn.mockResolvedValue({
     answer: '42 sessions.',
     toolCalls: [{ name: 'session_stats', rowCount: 42 }],
@@ -95,5 +97,44 @@ describe('POST /admin/api/assistant/chat', () => {
     serviceMocks.runAssistantTurn.mockRejectedValue(new Error('model down'));
     const res = await request(appAs('therapist')).post('/admin/api/assistant/chat').send(MSGS);
     expect(res.status).toBe(502);
+  });
+});
+
+describe('per-user limit on the Agents API backend', () => {
+  const post = (app: express.Express) => request(app).post('/admin/api/assistant/chat').send(MSGS);
+
+  it('caps each signed-in staff member separately while the flag is on', async () => {
+    serviceMocks.agentsApiBackendEnabled.mockResolvedValue(true);
+    // One router, so one limiter store, shared by two people on the same address.
+    const router = assistantRoutes();
+    const appFor = (userId: number) => {
+      const app = express();
+      app.use(express.json());
+      app.use((req, _res, next) => {
+        (req as unknown as { session: Record<string, unknown> }).session = {
+          userId,
+          userRole: 'researcher',
+          username: `user${userId}`,
+        };
+        next();
+      });
+      app.use(router);
+      return app;
+    };
+    for (let i = 0; i < AGENTS_API_USER_LIMIT; i++) expect((await post(appFor(7))).status).toBe(200);
+    const blocked = await post(appFor(7));
+    expect(blocked.status).toBe(429);
+    expect(blocked.body.error).toMatch(/Try again shortly/);
+    expect(serviceMocks.runAssistantTurn).toHaveBeenCalledTimes(AGENTS_API_USER_LIMIT);
+    // Someone else, same address: their own allowance.
+    expect((await post(appFor(8))).status).toBe(200);
+  });
+
+  it('does not apply, or count, while the flag is off', async () => {
+    const app = appAs('researcher', 21);
+    for (let i = 0; i < AGENTS_API_USER_LIMIT + 3; i++) expect((await post(app)).status).toBe(200);
+    // Turning the flag on afterwards starts from a full allowance.
+    serviceMocks.agentsApiBackendEnabled.mockResolvedValue(true);
+    expect((await post(app)).status).toBe(200);
   });
 });

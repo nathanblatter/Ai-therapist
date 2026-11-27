@@ -495,9 +495,53 @@ export interface AssistantBackend {
  *  API backend. Absent or anything but `true` keeps the stateless backend. */
 export const AGENTS_API_FEATURE_KEY = 'assistant_agents_api_enabled';
 
-async function agentsApiBackendEnabled(): Promise<boolean> {
+export async function agentsApiBackendEnabled(): Promise<boolean> {
   const config = await getSystemConfig();
   return config.features?.[AGENTS_API_FEATURE_KEY] === true;
+}
+
+const AGENTS_API_SWEEP_EVERY_MS = 5 * 60_000;
+/** Sweeps still owed after the flag is seen off: a session orphaned just
+ *  before the switch is younger than the sweep's age guard on the first one. */
+const AGENTS_API_SWEEPS_AFTER_OFF = 3;
+let agentsApiSweepsOwed = 0;
+let agentsApiSweepTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * One tick of the orphaned-session sweep for the Agents API backend. Does
+ * nothing (and loads nothing) unless the flag is on, or was on within the last
+ * few ticks of this process. Never throws. Returns the number deleted.
+ */
+export async function agentsApiSweepTick(): Promise<number> {
+  try {
+    if (await agentsApiBackendEnabled()) agentsApiSweepsOwed = AGENTS_API_SWEEPS_AFTER_OFF;
+    else if (agentsApiSweepsOwed > 0) agentsApiSweepsOwed--;
+    else return 0;
+    const { sweepOrphanedAgentSessions } = await import('./assistantAgentsApi.service.js');
+    return await sweepOrphanedAgentSessions();
+  } catch (err) {
+    log.error({ err }, 'agents api session sweep failed');
+    return 0;
+  }
+}
+
+/**
+ * Sweep once at startup and then on a timer, so a session left at OpenAI by a
+ * crash, a restart or a timed-out turn is deleted even when nobody asks the
+ * assistant another question. The timer never keeps the process alive.
+ */
+export function startAgentsApiSweeper(): void {
+  if (agentsApiSweepTimer) return;
+  agentsApiSweepTimer = setInterval(() => void agentsApiSweepTick(), AGENTS_API_SWEEP_EVERY_MS);
+  agentsApiSweepTimer.unref?.();
+  void agentsApiSweepTick();
+}
+
+/** Test seam. */
+export function stopAgentsApiSweeper(): void {
+  if (agentsApiSweepTimer) clearInterval(agentsApiSweepTimer);
+  agentsApiSweepTimer = null;
+  agentsApiSweepsOwed = 0;
 }
 
 /** One assistant turn: history + new question in, final text + tool trail out. */

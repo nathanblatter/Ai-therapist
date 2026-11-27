@@ -37,6 +37,7 @@ const ACTIONS = [
   'audit_log_view',
   'worksheet_review',
   'semantic_search',
+  'config_flag_change',
 ];
 
 interface Column<Row> {

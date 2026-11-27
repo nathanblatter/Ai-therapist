@@ -6,6 +6,7 @@ import rateLimit from 'express-rate-limit';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { orgIdFor } from '../../middleware/org.js';
 import {
+  agentsApiBackendEnabled,
   runAssistantTurn,
   type AssistantContext,
   type AssistantMessage,
@@ -16,6 +17,8 @@ import { createLogger } from '../../utils/logger.js';
 const log = createLogger('assistantRoutes');
 
 const MAX_HISTORY = 20;
+/** Questions per staff member per 10 minutes on the Agents API backend. */
+export const AGENTS_API_USER_LIMIT = 10;
 const MAX_CONTENT = 4000;
 
 function parseHistory(raw: unknown): AssistantMessage[] | null {
@@ -37,11 +40,27 @@ export default function assistantRoutes(): Router {
 
   const chatLimiter = rateLimit({ windowMs: 10 * 60_000, limit: 30, standardHeaders: true, legacyHeaders: false });
 
+  // Agents API backend only (features.assistant_agents_api_enabled): a second,
+  // tighter cap per signed-in staff member, because every question on that
+  // backend creates a session at OpenAI and the per-IP cap above is shared by
+  // everyone behind one address (and dodged by changing address). Skipped
+  // entirely, and not counted, while the flag is off.
+  const agentsApiUserLimiter = rateLimit({
+    windowMs: 10 * 60_000,
+    limit: AGENTS_API_USER_LIMIT,
+    standardHeaders: false,
+    legacyHeaders: false,
+    keyGenerator: (req) => `user:${req.session.userId}`,
+    skip: async () => !(await agentsApiBackendEnabled().catch(() => false)),
+    message: { error: 'You have asked the assistant a lot in the last few minutes. Try again shortly.' },
+  });
+
   router.post(
     '/admin/api/assistant/chat',
     requireAuth,
     requireRole('therapist', 'researcher', 'caseworker'),
     chatLimiter,
+    agentsApiUserLimiter,
     async (req, res) => {
       if (process.env.ASSISTANT_ENABLED !== 'true') {
         return res.status(503).json({ error: 'The assistant is not enabled in this environment.' });

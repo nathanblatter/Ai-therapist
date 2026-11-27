@@ -1,7 +1,7 @@
 // Assistant service: role matrix enforcement, caller-identity injection into
 // tool scoping, output projection (no free-text columns), audit rows, and the
 // tool loop against a mocked Responses client.
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const dbMocks = vi.hoisted(() => ({
   listSessions: vi.fn(),
@@ -26,17 +26,21 @@ vi.mock('../config/secrets.js', () => ({ getOpenAIKey: vi.fn().mockResolvedValue
 const configMocks = vi.hoisted(() => ({ getSystemConfig: vi.fn() }));
 vi.mock('../utils/sessionHelpers.js', () => configMocks);
 
-const agentsMocks = vi.hoisted(() => ({ runTurn: vi.fn() }));
+const agentsMocks = vi.hoisted(() => ({ runTurn: vi.fn(), sweep: vi.fn() }));
 vi.mock('./assistantAgentsApi.service.js', () => ({
   agentsApiBackend: { id: 'agents_api', runTurn: agentsMocks.runTurn },
+  sweepOrphanedAgentSessions: agentsMocks.sweep,
 }));
 
 import { createHash } from 'node:crypto';
 import {
+  agentsApiSweepTick,
   assistantSystemPrompt,
   CLINICAL_CALL_RULE,
   runAssistantTurn,
   setAssistantClientForTest,
+  startAgentsApiSweeper,
+  stopAgentsApiSweeper,
   type AssistantContext,
 } from './assistant.service.js';
 
@@ -128,6 +132,71 @@ describe('backend selection (features.assistant_agents_api_enabled)', () => {
       expect(auditArgs[4]).toBe('gpt-5.2');
     });
   }
+
+  describe('orphaned-session sweeper', () => {
+    const flag = (on: boolean) =>
+      configMocks.getSystemConfig.mockResolvedValue({ features: { assistant_agents_api_enabled: on } });
+
+    beforeEach(() => {
+      stopAgentsApiSweeper();
+      agentsMocks.sweep.mockResolvedValue(0);
+    });
+    afterEach(() => {
+      stopAgentsApiSweeper();
+      vi.useRealTimers();
+    });
+
+    it('does nothing while the flag is off', async () => {
+      flag(false);
+      expect(await agentsApiSweepTick()).toBe(0);
+      expect(agentsMocks.sweep).not.toHaveBeenCalled();
+    });
+
+    it('sweeps on every tick while the flag is on, and for three more after it goes off', async () => {
+      flag(true);
+      agentsMocks.sweep.mockResolvedValue(2);
+      expect(await agentsApiSweepTick()).toBe(2);
+      await agentsApiSweepTick();
+      expect(agentsMocks.sweep).toHaveBeenCalledTimes(2);
+      flag(false);
+      for (let i = 0; i < 6; i++) await agentsApiSweepTick();
+      expect(agentsMocks.sweep).toHaveBeenCalledTimes(5);
+    });
+
+    it('never throws: a failed sweep is logged and the next tick tries again', async () => {
+      flag(true);
+      agentsMocks.sweep.mockRejectedValueOnce(new Error('openai down'));
+      await expect(agentsApiSweepTick()).resolves.toBe(0);
+      configMocks.getSystemConfig.mockRejectedValueOnce(new Error('db down'));
+      await expect(agentsApiSweepTick()).resolves.toBe(0);
+      flag(true);
+      await agentsApiSweepTick();
+      expect(agentsMocks.sweep).toHaveBeenCalledTimes(2);
+    });
+
+    it('runs once at startup and then on a timer that does not keep the process alive', async () => {
+      vi.useFakeTimers();
+      flag(true);
+      const unref = vi.fn();
+      const realSetInterval = globalThis.setInterval;
+      const spy = vi.spyOn(globalThis, 'setInterval').mockImplementation(((fn: () => void, ms?: number) => {
+        const handle = realSetInterval(fn, ms);
+        handle.unref = unref as never;
+        return handle;
+      }) as never);
+      startAgentsApiSweeper();
+      startAgentsApiSweeper(); // idempotent
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(unref).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(agentsMocks.sweep).toHaveBeenCalledTimes(1); // at startup
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(agentsMocks.sweep).toHaveBeenCalledTimes(2); // a quiet assistant still sweeps
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(agentsMocks.sweep).toHaveBeenCalledTimes(3);
+      spy.mockRestore();
+    });
+  });
 
   it('routes to the Agents API backend only when the flag is exactly true', async () => {
     configMocks.getSystemConfig.mockResolvedValue({ features: { assistant_agents_api_enabled: true } });

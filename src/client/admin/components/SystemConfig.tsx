@@ -57,7 +57,9 @@ interface Features {
    *  (ai-therapist-372). Default off: that list feeds the IRB packet and its
    *  auto rows cannot be deleted. The server logs the problem either way. */
   participant_audio_auto_deviation?: boolean;
-  /** Admin assistant on the OpenAI Agents API backend (docs/agents-api-evaluation.md). Default off. */
+  /** Admin assistant on the OpenAI Agents API backend (docs/agents-api-evaluation.md). Default off.
+   *  Shown here, but never changed by saving this object: the server ignores it
+   *  in a `features` save and only its own endpoint switches it. */
   assistant_agents_api_enabled?: boolean;
 }
 
@@ -412,6 +414,35 @@ export default function SystemConfig() {
   const updateFeatures = (field: keyof Features, value: boolean | string[]) => {
     setFeatures((prev) => ({ ...prev, [field]: value }));
     setHasChanges(true);
+  };
+
+  // The assistant backend switch is not part of the form: it is sent on its own,
+  // at once, to its own endpoint (which records who switched it), and Save
+  // cannot change it. So a tab left open cannot switch it back later.
+  const setAssistantAgentsApi = async (enabled: boolean) => {
+    if (
+      enabled &&
+      !window.confirm(
+        'Switch the staff assistant to the OpenAI Agents API backend?\n\n' +
+          'OpenAI stores each question and the figures used to answer it until the app deletes them, ' +
+          'with no zero-data-retention option. This applies to every organisation on this server, takes ' +
+          'effect at once, and is recorded in the Data access audit log. Leave it off for the study ' +
+          'unless the IRB has approved it.',
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    try {
+      const data = await postJson<{ enabled?: boolean } | null>(
+        '/admin/api/config/features/assistant-agents-api',
+        { enabled },
+        { method: 'PUT', fallback: 'Failed to switch the assistant backend' },
+      );
+      setFeatures((prev) => ({ ...prev, assistant_agents_api_enabled: data?.enabled === true }));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   const toggleTool = (name: string, enabled: boolean) => {
@@ -1399,21 +1430,26 @@ export default function SystemConfig() {
               <p className="font-medium text-gray-900">Admin assistant: OpenAI Agents API backend (beta trial)</p>
               <p className="text-xs text-gray-600">
                 Runs staff assistant questions through OpenAI&apos;s Agents API instead of the default stateless
-                request. Unlike the default, OpenAI stores each conversation (the question, earlier turns in the chat
-                and tool results) as a session until it is deleted, and the Agents API has no zero-data-retention
-                option. The app deletes each session right after the answer, but OpenAI&apos;s physical cleanup is
-                asynchronous with no published deadline, on top of the usual 30-day abuse-monitoring copy. To limit what
-                is stored, this backend only offers the study-wide aggregates tool with small groups suppressed:
-                per-participant lookups (sessions, crisis events, escalations, caseloads, user lookup) are unavailable
-                while it is on, and therapists and caseworkers get no data tools. Staff questions are sent as typed, so
-                a question that names a participant is stored with the session. Leave off for the study unless the IRB
-                has approved it.
+                request. Unlike the default, OpenAI stores each question and the figures used to answer it as a session
+                until it is deleted, and the Agents API has no zero-data-retention option. The app deletes each session
+                right after the answer, but OpenAI&apos;s physical cleanup is asynchronous with no published deadline,
+                on top of the usual 30-day abuse-monitoring copy. To limit what is stored, only the question being asked
+                is sent (never earlier turns of the chat, so each question has to stand on its own), and this backend
+                only offers the study-wide aggregates tool, with counts rounded to the nearest 5 and anything under 5
+                withheld: per-participant lookups (sessions, crisis events, escalations, caseloads, user lookup) are
+                unavailable while it is on, and therapists and caseworkers get no data tools. Staff questions are sent
+                as typed, so a question that names a participant is stored with the session. Leave off for the study
+                unless the IRB has approved it.
+              </p>
+              <p className="text-xs text-gray-600 mt-1">
+                This switch applies to every organisation on this server and takes effect as soon as you change it (it
+                is not part of Save). Each change is recorded, with who made it, in the Data access audit log.
               </p>
             </div>
             <input
               type="checkbox"
               checked={features.assistant_agents_api_enabled === true}
-              onChange={(e) => updateFeatures('assistant_agents_api_enabled', e.target.checked)}
+              onChange={(e) => void setAssistantAgentsApi(e.target.checked)}
               className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
             />
           </div>

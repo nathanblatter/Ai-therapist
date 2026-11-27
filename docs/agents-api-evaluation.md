@@ -21,9 +21,10 @@ not describe.
 
 What this PR builds instead is a **restricted trial backend**, off by default
 (`features.assistant_agents_api_enabled`). It exposes only the tool whose
-output is aggregate-only (`study_overview`), with small groups suppressed. It
-uses a new session for each turn, deletes that session as soon as the turn
-ends, and sweeps for any session left behind. With the flag off, the assistant
+output is aggregate-only (`study_overview`), with small counts withheld and
+the rest rounded. It sends only the question being asked, never earlier turns
+of the chat. It uses a new session for each turn, deletes that session as soon
+as the turn ends, and sweeps for any session left behind. With the flag off, the assistant
 behaves exactly as before: a unit test pins the SHA-256 of the whole request
 sent to OpenAI, and the same test passes against main's unmodified
 `assistant.service.ts`.
@@ -186,43 +187,95 @@ caller-identity scoping and the audit row are shared code.
 - Tools exposed: the role's allowlist intersected with
   `AGENTS_API_ELIGIBLE_TOOLS` = `study_overview`. Its result is rebuilt from
   named numeric fields (an allow-list: a field added to the tool later, or a
-  string where a number belongs, cannot ride along), and weekly and
-  instrument aggregates over fewer than 5 participants are nulled before the
-  result leaves the server. A call to any other tool is refused without
+  string where a number belongs, cannot ride along). Before the result leaves
+  the server the small-count rule is applied to every count in it (funnel
+  counts, participant count, each cell's `n`, PHQ-2 and GAD-2 positives):
+  1. a count under 5, zero included, is withheld (null);
+  2. every other count is rounded to the nearest 5, so a withheld count
+     cannot be recovered by subtracting two published ones (33 finished the
+     baseline, 31 made an account: published as 35 and 30);
+  3. a count of positives is also withheld when the members who are NOT
+     positive number under 5 (5 of 5, or 28 of 30, says as much about each
+     person as a small count does);
+  4. a cell of fewer than 5 participants loses its `n` and every average.
+  The result carries the rule as a sentence and the instructions tell the
+  model to say "about" and never back-calculate. A call to any other tool is refused without
   executing and is audited with row count 0, just as on the stateless path.
   `study_overview` is gated exactly like its screen
   (`GET /admin/api/qualtrics/data`): researcher only, study-wide, not
   organisation-scoped on either.
-- Limits: 90 s per turn, 12 tool calls per question, 15 s on every other call
-  to OpenAI, and a vendor-side spend ceiling of 25 cents per session
-  (`spend_control`, best-effort at OpenAI). The API has no setting for
+- Limits: one 40 s deadline covers everything before the answer (creating
+  the session, the stream, running tools, posting their results); when it
+  passes the turn fails. Nothing after it is waited for: the audit row is one
+  local insert, and the usage lookup and the session delete run after the
+  response has gone back. So a request ends in about 40 s at worst, under
+  the 60 s target and the proxy's 100 s. Also: 12 tool calls per question,
+  5 s and no SDK retries on every other call to OpenAI (the SDK default is
+  two retries, which would triple a timeout and could create a second
+  session), 10 questions per staff member per 10 minutes on this backend
+  (on top of the route's 30 per address), and a vendor-side spend ceiling of
+  25 cents per session (`spend_control`, best-effort at OpenAI). The ceiling
+  reaches the stream as `agent.session.turn.failed` with
+  `turn.error.code = session_budget_exceeded` (the shape in `openai` 7.57.0;
+  the stream `error` event carries the same code). The session-budget guide
+  also names an `agent.session.budget_reached` event, which the SDK does not
+  type; the code treats all three as the ceiling. The API has no setting for
   maximum steps or output tokens.
-- Lifecycle: one session per staff question. Earlier turns are folded into
-  one user message, because the API takes user input only and the client
-  already sends the whole history. The session is deleted in `finally`; if
-  deletion fails, the code cancels and retries once. A throttled sweep
-  deletes any session tagged `metadata.app = ai-therapist-admin-assistant`
-  that is older than 5 minutes. The sweep runs only while the flag is on (a
-  turn triggers it): if the flag is switched off after a crash, run
-  `sweepOrphanedAgentSessions()` once by hand.
-- Audit: same `assistant_audit` row, with `model = agents-api:gpt-5.2`. A turn
-  that ran a tool is audited even if the model step failed afterwards, and so
-  is any turn whose session was created, because by then the question is
-  stored at OpenAI.
+- Lifecycle: one session per staff question, holding that question only. The
+  chat history the browser sends is ignored on this backend, in both
+  directions: an earlier assistant turn may have been written by the
+  stateless backend (whose tools return usernames and crisis records), and
+  the server cannot tell which backend wrote a turn it is handed back. So a
+  follow-up has to stand on its own, and the instructions tell the model so.
+  The session is deleted right after the answer is returned (after the usage
+  lookup, which deletion would otherwise lose); if deletion fails, the code
+  cancels and retries once.
+- Sessions a turn never saw: every session carries
+  `metadata.app = ai-therapist-admin-assistant` and a per-turn tag. A turn
+  that ends without a session id (a timeout or a dropped connection before
+  the first stream event) looks its session up by the turn tag at once and
+  again 30 s later, and deletes it. Beyond that, a sweep deletes any session
+  with the app tag that is older than 5 minutes: once at startup, every 5
+  minutes on a timer that does not keep the process alive, and after turns.
+  The timer runs while the flag is on and for three more ticks after it
+  goes off. Left to a person: the process dies mid-turn and the flag is
+  already off when it restarts; then run `sweepOrphanedAgentSessions()` once.
+- Audit: an `assistant_audit` row with `model = agents-api:gpt-5.2` for every
+  turn that sent anything to OpenAI, written before the answer or the error
+  is returned: answered, failed, timed out, or cut off before a session id
+  came back. Token counts usually arrive after the answer and are added to
+  the same row then.
+- The switch: `features.assistant_agents_api_enabled` changes only through
+  `PUT /admin/api/config/features/assistant-agents-api` (`{enabled}`,
+  researcher). A save of the whole `features` object keeps the stored value
+  of this flag whatever it sends, so a browser tab left open cannot switch
+  it back on. Each change writes a `data_access_log` row (action
+  `config_flag_change`: who, when, old and new value) in the same
+  transaction as the change, shown on the Data access audit screen to every
+  organisation. `system_config` has no organisation column, so the flag is
+  global: one researcher switches the backend for every organisation on the
+  server.
 - Instructions: the assistant's own prompt, unchanged, with the list of
   available tools, plus a short backend note naming what this path cannot see
   and stating that there is no shell, files or network. No other prompt
   changed.
 
-What can reach OpenAI on this path: the staff question as typed, the
-earlier turns of that chat, the assistant prompt (which names the asking
-staff member's own username and role), and study-wide aggregates with small
-cells suppressed. No participant-written text and no participant identifier
-is in any of those unless a staff member types one. If a staff member types a participant's username
-into a question, that text is stored with the session until it is deleted,
-which is the residual exposure of the trial. What cannot reach OpenAI on this
-path: any per-participant tool row (usernames, ids, risk scores, crisis
-records, escalations, work items, caseloads).
+What is sent to OpenAI on this path, and nothing else:
+
+1. the assistant prompt, which names the asking staff member's own username
+   and role;
+2. the one question being asked, as typed (the last staff message of the
+   request; no earlier question and no earlier answer);
+3. when the model calls `study_overview`: rounded study-wide counts and
+   averages under the small-count rule above.
+
+So the only way a participant identifier or participant-written text reaches
+the session store is a staff member typing it into the question being asked.
+That text is stored with the session until it is deleted, which is the
+residual exposure of the trial. What cannot reach OpenAI on this path: any
+per-participant tool row (usernames, ids, risk scores, crisis records,
+escalations, work items, caseloads), and anything from earlier in the chat,
+including answers the stateless backend gave before the flag was switched.
 
 Turn it on with Admin, then System Config, then Additional Features, then
 "Admin assistant: OpenAI Agents API backend (beta trial)", or set
@@ -345,7 +398,8 @@ SDK upgrade was needed):
   accepting it, this backend fails with the assistant's ordinary "unavailable"
   message and the stateless backend is unaffected.
 - New since the first pass and now used: `spend_control` (a per-session spend
-  ceiling, best-effort) and the `agent.session.budget_reached` event. New and
+  ceiling, best-effort). A turn stopped by it fails with
+  `session_budget_exceeded`; see Limits above for the event shapes. New and
   left alone: `prompt_cache_options`, `stream_options.include_obfuscation`,
   `agent.compaction`.
 - The docs do not say in one sentence that no hosted tool is on by default.
@@ -365,6 +419,28 @@ Found on review and fixed in the rebuild:
 - A turn that failed before any tool ran left no audit row although the
   question had been stored at OpenAI. It is now audited.
 
+Found on the second review (what happens once the flag is on) and fixed:
+
+- Earlier turns of the chat were sent, so an answer the stateless backend
+  had given (with usernames) could be stored at OpenAI by the next question
+  after the flag flipped. Only the question being asked is sent now.
+- A turn cut off before its first stream event deleted nothing and wrote no
+  audit row, and the sweep only ran from a later turn. Every turn that sends
+  anything is audited; sessions are found by a per-turn tag; the sweep runs
+  at startup and on a timer.
+- The flag could be switched by saving the whole `features` object, so a
+  stale tab could switch it back on, and no record was kept of who switched
+  it. It has its own audited endpoint now and whole-object saves leave it alone.
+- The worst case for one request was over 100 s (90 s turn, then usage
+  polling and delete retries). It is about 40 s now.
+- The spend-ceiling branch only handled an event the installed SDK does not
+  type; the failed-turn shape the API sends is handled and tested now.
+- The only rate limit was per address. There is a per-user one on this backend.
+- Counts under 5 passed through, and 5 positives of 5 was published. See the
+  small-count rule above.
+- The usage lookup held every answer back by about 2 s. It runs after the
+  answer now.
+
 Live, 2026-11-26, scratch database with seeded fixtures only:
 
 - One probe session (synthetic question, synthetic tool result): accepted
@@ -382,5 +458,29 @@ Live, 2026-11-26, scratch database with seeded fixtures only:
   minutes, the API reports by UTC day and lags, and these calls cannot be
   isolated in it.
 
+Live after the second-review fixes, 2026-11-27 06:06 UTC, scratch database
+with seeded fixtures only, one paid turn:
+
+- The request carried three history entries, two of them made up (an earlier
+  question and an earlier "assistant" answer holding a marker string), then a
+  question that also asked "what was my previous question?". The answer came
+  back in 6.7 s, said it could not see a previous question, and reported the
+  participant count as withheld (the scratch database has fewer than five).
+  The marker appeared in neither the answer nor the audit row.
+- Right after the answer the session was still listed (7 s old, tagged with
+  the app and the turn); the usage lookup and the delete finished 1.8 s after
+  the answer; the audit row then held 10,474 input and 69 output tokens.
+  A listing 8 s later was empty and a sweep found nothing to delete.
+- The flag was switched on and off through the audited write; both changes
+  are in `data_access_log` of the scratch database. The same queries were
+  exercised directly: a whole-object `features` save could not switch the
+  flag on, off, or drop it, and a failed audit insert rolled the switch back.
+- Spend, from the costs API (organisation-wide, month to date): 178.4641 USD
+  at 06:06:07 UTC before the paid call and 178.4641 USD at 06:06:25 UTC after
+  it. The API lags, so the turn is not in the second reading yet, and other
+  work spends on the same organisation; this turn's cost cannot be read from it.
+
 Not covered by anything here: a turn on the Agents API from the deployed app
-(stage or prod), and the production API key's Agents scopes.
+(stage or prod), the production API key's Agents scopes, the timeout and
+dropped-connection paths against the live API (unit-tested with a mocked
+SDK only), and the System Config switch in a browser.
