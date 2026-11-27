@@ -339,3 +339,45 @@ OPENAI_API_KEY=... node node_modules/.bin/tsx scripts/redaction-place-org-eval.m
 
 The output file quotes the synthetic messages and the model's outputs; keep
 it out of the repo.
+
+# Addendum 2 (2026-11-26, evening): a capitalised-word signal beside the leak check
+
+No wording, model or threshold changed. The leak check gained a second,
+deterministic reason to flag a redacted message for review: a word that is
+still capitalised like a name in the middle of a sentence
+(`src/shared/leftoverNames.ts`; weekdays, months, clinical abbreviations,
+crisis-line names, medicines, states and everyday emphasis words are not
+counted). It changes no stored text. A flagged message goes to the top of
+the researcher review queue and stays out of researcher semantic search
+until someone has looked at it, exactly as a model-flagged one does.
+
+Measured offline on outputs already on hand (no new model calls):
+
+| Material | Model check alone | Capitalised-word signal | Either |
+| --- | --- | --- | --- |
+| Place/organisation eval above: 95 stored outputs with the name left in | 62 flagged | 95 flagged | 95 |
+| Same eval: 55 clean outputs | 12 falsely flagged | 1 falsely flagged ("Relief Society") | 13 |
+| Crisis shape eval: 4 stored outputs with a leak | not run | 4 flagged | |
+| Crisis shape eval: 120 clean outputs | not run | 0 flagged | |
+| Stage's fake transcripts: 1,182 redacted participant messages | 0 flagged | 15 flagged (1.3%) | |
+| Stage's fake transcripts: 1,324 redacted assistant messages | 4 flagged | 40 flagged (3.0%) | |
+
+Read these with care:
+
+- The rule was written after looking at the place/organisation outputs, so 95
+  of 95 is an in-sample number. The rule itself is general (any mid-sentence
+  capital that is not on a short ordinary-word list), but an independent
+  fixture has not been run.
+- On stage the flagged participant messages include real leftovers the model
+  check had passed: first names (four different ones), a shop, a city and an
+  airport code. The rest are harmless proper nouns (a country, a programming
+  language, a landmark). Nobody has labelled the 2,506 stage messages, so
+  there is no recall number for them.
+- Known blind spots: a name that opens a sentence, a name typed in lower
+  case, and anything not in English.
+- It raises reviewer workload: about 1 to 3 in 100 messages on this sample,
+  most of them harmless.
+
+This is a net for the reviewer, not a fix: the names are still in the stored
+text until someone edits them out. Whether the redaction wording should ask
+for organisation names is still the PI's question (item 1 above).

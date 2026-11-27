@@ -173,6 +173,25 @@ describe('askLeakCheck backend selection', () => {
 });
 
 describe('verifyRedactedMessages', () => {
+  // ai-therapist-409: the model answered "clean" for about a third of the
+  // organisation names redaction leaves in. A word still capitalised like a
+  // name flags the row whatever the model said, and the row records which of
+  // the two reasons applied.
+  it('flags a row the model calls clean when a capitalised name is still in it', async () => {
+    decisionsCreateMock.mockResolvedValueOnce(decision(0.1)).mockResolvedValueOnce(decision(0.1));
+
+    const summary = await verifyRedactedMessages('sess_1', [
+      { id: 21, text: 'I transferred to Utah Valley University this semester.' },
+      { id: 22, text: 'I transferred to [REDACTED: LOCATION] this semester.' },
+    ]);
+
+    expect(summary).toEqual({ checked: 2, flagged: 1, errored: 0 });
+    const updates = queryMock.mock.calls.filter(([sql]) => /redaction_check/.test(sql as string));
+    const byId = Object.fromEntries(updates.map(([, params]) => [params![1], JSON.parse(params![0] as string)]));
+    expect(byId[21]).toMatchObject({ p_leak: 0.1, flagged: true, model_flagged: false, capitalised_words: 2 });
+    expect(byId[22]).toMatchObject({ p_leak: 0.1, flagged: false, model_flagged: false, capitalised_words: 0 });
+  });
+
   it('persists a redaction_check verdict per row and records usage', async () => {
     decisionsCreateMock
       .mockResolvedValueOnce(decision(0.9, { input_tokens: 30, output_tokens: 1 }))
@@ -191,6 +210,7 @@ describe('verifyRedactedMessages', () => {
       status: 'checked',
       p_leak: 0.9,
       flagged: true,
+      model_flagged: true,
       backend: 'decisions',
       model: 'gpt-6-luna',
     });

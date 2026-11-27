@@ -12,6 +12,10 @@
 //   "Does this text still contain a direct personal identifier?"  -> yes/no
 //
 // and stores the answer with its probability in messages.metadata.redaction_check.
+// A second, deterministic signal sits beside the model's answer since
+// ai-therapist-409: a word still capitalised like a name
+// (shared/leftoverNames.ts) flags the message too, because the model misses
+// about a third of the organisation names redaction leaves in.
 // Flagged messages float to the top of the researcher review queue. Only the
 // already-redacted text is sent, never the raw transcript, so this adds no
 // PHI flow beyond what redaction itself already does.
@@ -44,6 +48,7 @@ import { getOpenAIKey } from '../config/secrets.js';
 import { pool } from '../config/db.js';
 import { withFlex } from '../utils/flexTier.js';
 import { createLogger } from '../utils/logger.js';
+import { leftoverCapitalisedWords } from '../../shared/leftoverNames.js';
 
 const log = createLogger('redactionVerifier');
 
@@ -91,8 +96,17 @@ export interface RedactionCheck {
   status: RedactionCheckStatus;
   /** Probability of a leak, 0..1; -1 when the check errored. */
   p_leak: number;
-  /** null when the check errored: unknown, which is not the same as clean. */
+  /** null when the check errored: unknown, which is not the same as clean.
+   *  True when the model's p_leak reached the threshold OR the redacted text
+   *  still has a word capitalised like a name (`capitalised_words` > 0). */
   flagged: boolean | null;
+  /** How many distinct words in the redacted text are capitalised like a name
+   *  (shared/leftoverNames.ts, ai-therapist-409). A count only: the words are
+   *  in the text itself. Absent on rows checked before 2026-11-26. */
+  capitalised_words?: number;
+  /** Did p_leak alone reach the threshold? Lets the review screen say why a
+   *  row is flagged. Absent on rows checked before 2026-11-26. */
+  model_flagged?: boolean;
   backend: 'decisions' | 'responses';
   model: string;
   checked_at: string;
@@ -368,10 +382,16 @@ export async function verifyRedactedMessages(
       const checkedAt = new Date().toISOString();
       try {
         const answer = await askLeakCheck(item.text, cfg, client);
+        // The model misses about a third of the organisation names redaction
+        // leaves in; a word still capitalised like a name sends the message
+        // to review whatever the model said.
+        const capitalised = leftoverCapitalisedWords(item.text).length;
         const check: RedactionCheck = {
           status: 'checked',
           p_leak: Number(answer.pLeak.toFixed(4)),
-          flagged: answer.pLeak >= cfg.threshold,
+          flagged: answer.pLeak >= cfg.threshold || capitalised > 0,
+          capitalised_words: capitalised,
+          model_flagged: answer.pLeak >= cfg.threshold,
           backend: answer.backend,
           model: answer.model,
           checked_at: checkedAt,
