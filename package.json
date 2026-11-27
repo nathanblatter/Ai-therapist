@@ -31,6 +31,7 @@
     "redteam:voice-opening-report": "tsx src/redteam/voice/openingReport.ts",
     "redteam:replay": "tsx src/redteam/replay.ts",
     "redteam:goldens": "tsx src/redteam/goldens/cli.ts",
+    "redteam:shadow-eval": "tsx src/redteam/goldens/shadowEval.ts",
     "redteam:ci-summary": "tsx src/redteam/ciSummary.ts",
     "redteam:flightdeck": "node src/redteam/flightdeckReport.ts",
     "counterfactual": "tsx src/database/scripts/runCounterfactual.ts",

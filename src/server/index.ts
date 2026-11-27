@@ -47,6 +47,8 @@ import studyOpsRoutes from './routes/admin/studyOps.routes.js';
 import irbPacketRoutes from './routes/admin/irbPacket.routes.js';
 import weeklyDigestRoutes from './routes/admin/weeklyDigest.routes.js';
 import riskCalibrationRoutes from './routes/admin/riskCalibration.routes.js';
+import shadowRiskRoutes from './routes/admin/shadowRisk.routes.js';
+import { startShadowRiskScorer } from './services/shadowRiskScorer.service.js';
 import exportRoutes from './routes/admin/export.routes.js';
 import semanticSearchRoutes from './routes/admin/semanticSearch.routes.js';
 import adminRateLimitsRoutes from './routes/admin/rateLimits.routes.js';
@@ -811,6 +813,9 @@ app.use(weeklyDigestRoutes());
 // Risk-score calibration runs (eval spec WP3) -> routes/admin/riskCalibration.routes.ts.
 app.use(riskCalibrationRoutes());
 
+// Shadow risk scorer: production vs shadow severity (ai-therapist-83) -> routes/admin/shadowRisk.routes.ts.
+app.use(shadowRiskRoutes());
+
 // Research-data export (JSON/CSV) -> routes/admin/export.routes.ts.
 app.use(exportRoutes());
 
@@ -1118,6 +1123,11 @@ if (isEntrypoint) {
 
     // Daily sweep of expired magic-link demo accounts and their data
     startDemoCleanupScheduler();
+
+    // Shadow risk scorer (ai-therapist-83): only a booted server shadow-scores,
+    // and only while system_config.shadow_risk_scorer.enabled is true (default
+    // off). It records a second opinion per participant turn and never acts.
+    startShadowRiskScorer();
 
     // Background Qualtrics response sync (env-gated via
     // QUALTRICS_SYNC_INTERVAL_MINUTES; no-op when the integration or the
