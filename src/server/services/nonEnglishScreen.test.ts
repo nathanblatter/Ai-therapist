@@ -9,12 +9,36 @@ import { DETECTOR_LANGUAGE_FILE, GOLDENS_DIR, loadDetectorGoldens } from '../../
 
 describe('detectNonEnglish', () => {
   it('a letter outside ASCII is a match (accents, and any other script)', () => {
-    expect(detectNonEnglish('Zoë called')).toEqual({ nonEnglish: true, signals: ['non_ascii_letter'] });
+    expect(detectNonEnglish('Añoranza, that is the word')).toEqual({ nonEnglish: true, signals: ['non_ascii_letter'] });
     expect(detectNonEnglish('死にたい').nonEnglish).toBe(true);
     expect(detectNonEnglish('я не хочу жить').nonEnglish).toBe(true);
     // The same letter typed as a base letter plus a combining accent.
     expect(detectNonEnglish('Ojalá').signals).toContain('non_ascii_letter');
   });
+
+  // Review of PR #157: an accent in an English loanword or a common name said
+  // nothing about language and cost an assessor read of an ordinary turn.
+  it.each([
+    'Zoë called',
+    'I met José at the café to fix my résumé',
+    'my fiancée made jalapeño poppers',
+    'that is so cliché, I was naïve',
+    'take 5 µg twice a day, 1º thing in the morning',
+  ])('an accent only in an English loanword, a common name or a symbol is not a match: %s', (text) => {
+    expect(detectNonEnglish(text).nonEnglish).toBe(false);
+  });
+
+  it('an accented word that is not on that short list still is, even beside one that is', () => {
+    expect(detectNonEnglish('José me dijo adiós').nonEnglish).toBe(true);
+    expect(detectNonEnglish('at the café I felt vacío').signals).toContain('non_ascii_letter');
+  });
+
+  it.each(['no le veo salida', 'me tome todo el frasco', 'pense en colgarme', 'I just want to acabar con todo'])(
+    'Spanish typed without accents that the review found unrecognised is a match: %s',
+    (text) => {
+      expect(detectNonEnglish(text).nonEnglish).toBe(true);
+    },
+  );
 
   it('typographic quotes, dashes, digits and symbols are not letters', () => {
     expect(detectNonEnglish('I’m fine — really… 100% × 2 → ok').nonEnglish).toBe(false);

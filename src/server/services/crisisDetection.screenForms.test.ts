@@ -252,6 +252,15 @@ describe('the assistant asking about safety', () => {
     'Are things so bad that you have thought about giving up on life?',
     'Have you thought about ending things?',
     'Do you ever think about ending things for good?',
+    // The assistant answers in the participant's language (review of PR #157):
+    // "si" or "no" in reply to these must be read by the assessor.
+    '¿Has pensado en quitarte la vida?',
+    'Has pensado en suicidarte?',
+    '¿Has pensado en hacerte daño?',
+    '¿Tienes ganas de morir?',
+    '¿Quieres lastimarte?',
+    '¿Estás a salvo ahora mismo?',
+    'Te sientes segura en este momento?',
   ])('is a safety question: %s', (text) => {
     expect(asksSafetyQuestion(text), text).toBe(true);
   });
@@ -265,6 +274,8 @@ describe('the assistant asking about safety', () => {
     // Closing the session is not a safety question (review of PR 65).
     'Would you like to end things here for today?',
     'Shall we end things there?',
+    '¿Cómo te fue en el examen?',
+    '¿Quieres hablar de tu trabajo?',
     '',
   ])('is not: %s', (text) => {
     expect(asksSafetyQuestion(text), text).toBe(false);

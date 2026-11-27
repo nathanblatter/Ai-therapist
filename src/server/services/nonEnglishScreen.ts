@@ -15,7 +15,9 @@
 // fiancée", "José"): one assessor call for a turn that then scores 0.
 //
 // Three signals, any one of which is a match:
-//   1. a letter outside ASCII (á, ñ, ç, ü, and every non-Latin script);
+//   1. a letter outside ASCII (á, ñ, ç, ü, and every non-Latin script),
+//      unless it is only in an English loanword or common name ("café",
+//      "José") or is a symbol such as µ;
 //   2. one crisis word in Spanish, Portuguese, French, German or Italian
 //      ("matarme", "morir", and any inflection of a few stems: "cortar...",
 //      "suicid..." other than the English forms);
@@ -27,17 +29,45 @@
 //      in an English sentence costs one assessor call.
 //
 // Not covered, and said so in the doc: a language written in ASCII letters
-// whose words are in none of the lists (Dutch, Tagalog, romanised Hindi...).
+// whose words are in none of the lists (Tagalog, Samoan, Tongan, Dutch,
+// romanised Chinese, Arabic or Hindi...), and Spanish typed without accents
+// in words that are in none of them. This is a wider net, not a guarantee.
 // The moderation wake and the periodic sweep still apply to those, as before.
 //
 // No imports: no database, no config, no pipeline.
+
+const words = (list: string): Set<string> => new Set(list.split(/\s+/).filter(Boolean));
 
 /** A letter (any script) outside ASCII: a letter that is not one of the
  *  printable ASCII characters. Punctuation, digits, typographic quotes and
  *  symbols are not letters. */
 const NON_ASCII_LETTER = /(?![ -~])\p{L}/u;
 
-const words = (list: string): Set<string> => new Set(list.split(/\s+/).filter(Boolean));
+/** Symbols Unicode classes as letters ("5 µg", "1º"): not a sign of a language. */
+const SYMBOL_LETTERS = /[\u00b5\u00ba\u00aa]/g;
+
+/** English words and common names written with an accent (folded). A message
+ *  whose ONLY non-ASCII letters are in these words is not woken by signal 1:
+ *  "my fiancé", "José", "a café" said nothing about language and cost an
+ *  assessor read of an ordinary turn (review of PR #157). */
+const ENGLISH_ACCENTED = words(`
+  cafe cafes resume resumes jalapeno jalapenos fiance fiancee naive naivete cliche cliches pinata creme
+  deja entree entrees saute sauteed decor protege facade expose touche pate souffle matinee
+  jose zoe chloe renee beyonce andre rene noel helene zoey ines
+  pokemon uber
+`);
+
+/** Signal 1, with the two exceptions above. */
+function hasForeignLetter(content: string): boolean {
+  const text = content.normalize('NFC').replace(SYMBOL_LETTERS, '');
+  if (!NON_ASCII_LETTER.test(text)) return false;
+  for (const word of text.toLowerCase().split(/[^\p{L}\p{M}]+/u)) {
+    if (!word || !NON_ASCII_LETTER.test(word)) continue;
+    const folded = word.normalize('NFD').replace(/\p{M}/gu, '');
+    if (!ENGLISH_ACCENTED.has(folded)) return true;
+  }
+  return false;
+}
 
 /** Any ONE of these wakes the assessor. Written without accents (the text is
  *  folded before matching). None is an English word. */
@@ -45,6 +75,7 @@ const CRISIS_WORDS = words(`
   matarme matarte matarse mataria mato suicidio suicidarme suicidarse suicido suicidar
   morir morirme morirse muero muerte muerta muerto quitarme ahorcarme cortarme lastimarme
   pastillas desaparecer despedirme despedi
+  colgarme colgarse frasco salida acabar acabarlo acabarme tirarme envenenarme
   matar morrer morte matarei
   mourir tuer suicider
   sterben umbringen selbstmord suizid
@@ -136,7 +167,7 @@ function foldedWords(content: string): string[] {
 export function detectNonEnglish(content: string | null | undefined): NonEnglishScreen {
   const signals: NonEnglishSignal[] = [];
   if (!content) return { nonEnglish: false, signals };
-  if (NON_ASCII_LETTER.test(content.normalize('NFC'))) signals.push('non_ascii_letter');
+  if (hasForeignLetter(content)) signals.push('non_ascii_letter');
   const seen = new Set(foldedWords(content));
   let strong = 0;
   let weak = 0;

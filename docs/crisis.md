@@ -409,7 +409,7 @@ this wake such a turn reached the assessor only when the moderation screen happe
 it 40 or more: of 32 invented Spanish, Portuguese, French, German and code-switched rows that
 should score moderate or high, 6 were scored 0 without being read (among them "I have the pills on the table and
 I am going to take them all" and "my brother told me last night he wants to kill himself", in
-Spanish). Now a keyword-free turn that is not (all) English is always sent to the assessor,
+Spanish). Now a keyword-free turn that the screen recognises as not (all) English is sent to the assessor (the screen is word lists and a character test, not a language detector: see its limits below),
 with the same "it matched no crisis keyword" framing a context wake uses (no new wording
 reaches the model). `method` is `llm_language_wake`.
 
@@ -421,8 +421,18 @@ reaches the model). `method` is `llm_language_wake`.
 - It is the last wake in line: a sweep, a moderation wake or a context wake keeps its own
   label and there is never a second assessor call.
 - *Chat*: like a context wake, the turn is assessed before the reply (`needsContextAssessment`).
-- False wakes ("my fiancée", "José", "I got nada done") cost one assessor call for a turn that
-  then scores 0.
+- False wakes ("my abuela died", "I got nada done", an accented word that is not a common
+  English loanword or name) are not free. The turn is read by the assessor, so in chat the
+  reply waits for that call; a successful wake resets the periodic-sweep counter; the
+  trajectory bonus applies to what the assessor returns (capped at 64 as usual); and nothing
+  stops the assessor scoring an innocent woken turn high. In the one run made, 12 benign woken
+  rows all scored none. Common English loanwords and names with accents ("café", "résumé",
+  "José", "fiancé") and symbols such as µ do not wake. The false-wake rate on real participant
+  text is not known: stage's messages are plain ASCII test typing (0 of 439 woke).
+- Not recognised: Spanish typed without accents in words outside the lists, and languages
+  written in ASCII letters that the lists do not hold at all: Tagalog, Samoan, Tongan, Dutch,
+  Haitian Creole, romanised Chinese, Arabic or Hindi. Text in a non-Latin script does wake.
+- In an assessor outage a language wake uses the short call budget, like a context wake.
 - With the assessor down the turn scores what the moderation screen reads, like any other
   keyword-free turn, and is recorded as `assessment_degraded`: never as a clean 0.
 - `score_factors.non_english` lists which signals matched (`non_ascii_letter`, `crisis_word`,

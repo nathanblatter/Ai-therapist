@@ -624,6 +624,16 @@ export function detectContextSignals(content: string): ContextSignal[] {
 // already risk-bearing, where every turn is assessed anyway.
 const SAFETY_QUESTION_TOPICS: RegExp[] = [
   /\bsuicid/,
+  // The assistant answers in the participant's language, so its safety
+  // question may be in Spanish; "si" or "no" in reply matches no screen and
+  // was skipped as a fragment (review of PR #157). Accents are optional:
+  // models and transcripts drop them.
+  /\bquitar(?:te|se|le)? la vida\b/,
+  /\b(?:matar|lastimar|herir|cortar|da[nñ]ar)(?:te|se)\b/,
+  /\bhacer(?:te|se) da[nñ]o\b/,
+  /\b(?:acabar|terminar) con (?:tu|su) vida\b/,
+  /\b(?:quieres|quiere|deseas|desea|has pensado en|ha pensado en|piensas en|ganas de) (?:morir|morirte|morirse|desaparecer|no (?:estar|seguir|vivir|despertar))\b/,
+  /\b(?:est[aá]s|est[aá]|te sientes|se siente) (?:a salvo|segur[oa]|en peligro)\b/,
   /\b(?:kill|killing|hurt|hurting|harm|harming|cut|cutting) yourself\b/,
   /\bself[- ]harm/,
   // "end things", but not the session: "would you like to end things here for
@@ -2342,7 +2352,10 @@ export async function analyzeMessageRisk(
         // call. Once back-to-back failures have established an outage that
         // patience has already been spent: use the short budget so each turn
         // of a flagged session does not queue another 30s of retries.
-        const callBudget = isContextWake && assessorIncidentOpen() ? 'fast' : budget;
+        // A language wake is the same kind of call (its fallback is 0), so it
+        // gets the same short budget in an outage: without it every reply to a
+        // Spanish-speaking chat participant waited out the patient budget.
+        const callBudget = (isContextWake || isLanguageWake) && assessorIncidentOpen() ? 'fast' : budget;
         llm = await assessRiskWithLLM(
           message.content,
           conversationHistory,

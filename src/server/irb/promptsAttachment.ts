@@ -1122,8 +1122,9 @@ function buildItems(): Item[] {
       'for it: every participant message in a session that is already flagged or had a recent risk-bearing message, ' +
       'any message that states intent, a goodbye or a question about dangerous amounts with its subject left ' +
       'unsaid (for example "I\'m going to do it tonight"), any message that uses shorthand for suicide, reports ' +
-      "someone else's suicidal statement or speaks of hurting another person, and the participant's reply to a question from the assistant about " +
-      'suicide, self-harm or safety. The free text of the pre-session check-in is assessed the same way as a first ' +
+      "someone else's suicidal statement or speaks of hurting another person, the participant's reply to a question from the assistant about " +
+      'suicide, self-harm or safety, and any message that a word-list screen recognises as partly or wholly not in English ' +
+      '(the keyword screen is English, so such a message would otherwise go unread). The free text of the pre-session check-in is assessed the same way as a first ' +
       'message. System prompt, verbatim:',
   );
   add('pre', RISK_ASSESSMENT_PROMPT);

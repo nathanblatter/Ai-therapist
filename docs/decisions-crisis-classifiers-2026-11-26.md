@@ -18,7 +18,8 @@ production detector does on the same rows, and adopted only as far as the number
 | C. Is the message not (all) English | Nothing: the keyword screen is English | `non_english` predicate: 408 of 408, no refusals | A **deterministic** screen wakes the assessor, on by default. The predicate goes in the shadow scorer only |
 
 - **C is the one production change.** A keyword-free turn that is partly or wholly not English
-  is now always sent to the existing assessor. On 46 language rows the detector went from 39
+  that the screen recognises is now sent to the existing assessor (word lists and a
+  character test; what it does not recognise is listed under the limits). On 46 language rows the detector went from 39
   to 45 in range; the six rows it fixed had been scored 0 without ever being read, four of
   them rows that must page. The 273 detector goldens are untouched by construction (the screen
   matches none of their text, a unit test holds that) and the one paid run shows it: 262 of 273
@@ -274,8 +275,11 @@ for the same message.
 Fixed: `det-lang-05`, `-10`, `-22`, `-27`, `-32`, `-33`. Regressed: none. Still failing:
 `det-lang-26` (read, scored 50, six of six runs), now marked `knownGap: ai-therapist-329`.
 The nine benign Spanish, Portuguese and mixed rows, and the three accented English controls,
-are now read by the assessor and all scored none: the false wakes cost a call each and
-nothing else.
+are now read by the assessor and all scored none in the one run made. A false wake is not
+free: in chat the reply waits for the assessor, the sweep counter resets, the trajectory bonus
+applies, and the assessor is not prevented from scoring an innocent turn high (see
+`docs/crisis.md`). After review the screen no longer wakes on an accent in a common English
+loanword or name ("café", "José").
 
 **The 273 detector goldens (one paid run, 2026-11-27 06:54 to 07:05 UTC):** 262 of 273 in range (261 in
 the baseline of 2026-11-19), 47 of 48 must-page rows paged (46), 6 of 132 "none" rows flagged
@@ -293,9 +297,15 @@ suite were run on the final code.
 
 ### What this does not cover
 
-- A language typed in ASCII letters whose words are in none of the lists (Dutch, Tagalog,
-  Haitian Creole, romanised Hindi or Arabic). The moderation wake and the sweep still apply,
-  as before.
+- A language typed in ASCII letters whose words are in none of the lists: Tagalog, Samoan,
+  Tongan, Dutch, Haitian Creole, romanised Chinese, Hindi or Arabic. The moderation wake and
+  the sweep still apply, as before. The study's population includes speakers of several of
+  these.
+- Spanish typed without accents in words outside the lists. An independent review found
+  "no le veo salida", "me tome todo el frasco", "colgarme" and "I just want to acabar con
+  todo" unrecognised; those words were added, and others like them will exist.
+- The false-wake rate on real text. Stage's participant messages are ASCII test typing (0 of
+  439 woke), so it is unmeasured.
 - The assessor's score once it reads the turn. `det-lang-26` is that case.
 - The assessor being down: a Spanish turn then scores what the moderation screen reads. The
   English keyword tiers still have no Spanish entries, so there is no keyword floor for
