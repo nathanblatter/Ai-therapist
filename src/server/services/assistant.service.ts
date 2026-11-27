@@ -10,6 +10,13 @@
 //   - no writes: there is no tool that mutates anything.
 // Every turn appends an assistant_audit row (who asked what, which tools ran,
 // row counts — never payloads).
+//
+// Two backends sit behind one seam (AssistantBackend): the stateless
+// Responses loop below (store:false, the default and the only path when
+// features.assistant_agents_api_enabled is off) and an opt-in OpenAI Agents
+// API backend (assistantAgentsApi.service.ts, docs/agents-api-evaluation.md).
+// Both run every tool through executeAssistantTool here, so role allowlists,
+// caller-identity scoping and the audit row cannot drift between them.
 import OpenAI from 'openai';
 import { getOpenAIKey } from '../config/secrets.js';
 import { pool } from '../config/db.js';
@@ -26,6 +33,7 @@ import {
 import { getSurveyDataOverview } from './surveyData.service.js';
 import { isCareTeamRole } from '../../shared/roles.js';
 import { createLogger } from '../utils/logger.js';
+import { getSystemConfig } from '../utils/sessionHelpers.js';
 
 const log = createLogger('assistant');
 
@@ -67,7 +75,7 @@ function rowCountOf(result: unknown): number {
   return 0;
 }
 
-interface AssistantTool {
+export interface AssistantTool {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
@@ -340,7 +348,7 @@ const TOOLS: AssistantTool[] = [
   },
 ];
 
-function toolsFor(role: AssistantRole) {
+export function toolsFor(role: AssistantRole): AssistantTool[] {
   return TOOLS.filter((t) => t.roles.includes(role));
 }
 
@@ -365,10 +373,8 @@ export const CLINICAL_CALL_RULE =
 
 /** Exported so the red-team harness can draw leak canaries from the REAL
  *  prompt (src/redteam/assistantAssertions.ts) rather than a stale copy. */
-export function assistantSystemPrompt(ctx: AssistantContext): string {
-  const toolNames = toolsFor(ctx.role)
-    .map((t) => t.name)
-    .join(', ');
+export function assistantSystemPrompt(ctx: AssistantContext, tools: AssistantTool[] = toolsFor(ctx.role)): string {
+  const toolNames = tools.map((t) => t.name).join(', ');
   return [
     'You are the admin data assistant for a mental-health research platform. You answer staff questions strictly from the results of your tools, which run under the asker’s own access scope.',
     `The asker is ${ctx.username ?? 'a staff member'} with role "${ctx.role}". Available tools: ${toolNames}.`,
@@ -408,11 +414,20 @@ export function setAssistantClientForTest(client: ResponsesClient | null): void 
   cachedClient = client;
 }
 
-async function insertAudit(
+export interface AuditedToolCall {
+  name: string;
+  args: Record<string, unknown>;
+  row_count: number;
+}
+
+/** Append the turn's assistant_audit row. `model` records which backend ran
+ *  the turn; the stateless path keeps the bare model name it always wrote. */
+export async function insertAudit(
   ctx: AssistantContext,
   question: string,
-  tools: Array<{ name: string; args: Record<string, unknown>; row_count: number }>,
+  tools: AuditedToolCall[],
   usage: { input_tokens: number; output_tokens: number },
+  model: string = ASSISTANT_MODEL,
 ): Promise<void> {
   try {
     await pool.query(
@@ -423,7 +438,7 @@ async function insertAudit(
         ctx.role,
         question.slice(0, 4000),
         JSON.stringify(tools),
-        ASSISTANT_MODEL,
+        model,
         usage.input_tokens,
         usage.output_tokens,
       ],
@@ -433,9 +448,100 @@ async function insertAudit(
   }
 }
 
+/**
+ * Run one model-requested tool call as the CALLER. The single authorization
+ * point for every backend: `available` is the set the backend exposed to the
+ * model (always a subset of the role's allowlist); anything else is refused
+ * without executing and still lands in the audit trail with row_count 0.
+ */
+export async function executeAssistantTool(
+  ctx: AssistantContext,
+  available: AssistantTool[],
+  name: string,
+  args: Record<string, unknown>,
+): Promise<{ output: unknown; audit: AuditedToolCall }> {
+  const tool = available.find((t) => t.name === name);
+  if (!tool) {
+    const roleMayUse = toolsFor(ctx.role).some((t) => t.name === name);
+    const error = roleMayUse
+      ? `Tool ${name} is not available on this assistant backend.`
+      : `Tool ${name} is not available to the ${ctx.role} role.`;
+    return { output: { error }, audit: { name, args, row_count: 0 } };
+  }
+  try {
+    const output = await tool.run(ctx, args);
+    return { output, audit: { name: tool.name, args, row_count: rowCountOf(output) } };
+  } catch (err) {
+    log.error({ err, tool: tool.name }, 'assistant tool failed');
+    return {
+      output: { error: 'This lookup failed; try the corresponding admin panel.' },
+      audit: { name: tool.name, args, row_count: 0 },
+    };
+  }
+}
+
 export interface AssistantMessage {
   role: 'user' | 'assistant';
   content: string;
+}
+
+/** The seam between the two backends: same input, same result contract. */
+export interface AssistantBackend {
+  readonly id: 'responses' | 'agents_api';
+  runTurn(ctx: AssistantContext, history: AssistantMessage[]): Promise<AssistantTurnResult>;
+}
+
+/** system_config.features key that opts the admin assistant into the Agents
+ *  API backend. Absent or anything but `true` keeps the stateless backend. */
+export const AGENTS_API_FEATURE_KEY = 'assistant_agents_api_enabled';
+
+export async function agentsApiBackendEnabled(): Promise<boolean> {
+  const config = await getSystemConfig();
+  return config.features?.[AGENTS_API_FEATURE_KEY] === true;
+}
+
+const AGENTS_API_SWEEP_EVERY_MS = 5 * 60_000;
+/** Sweeps still owed after the flag is seen off: a session orphaned just
+ *  before the switch is younger than the sweep's age guard on the first one. */
+const AGENTS_API_SWEEPS_AFTER_OFF = 3;
+let agentsApiSweepsOwed = 0;
+let agentsApiSweepTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * One tick of the orphaned-session sweep for the Agents API backend. Does
+ * nothing (and loads nothing) unless the flag is on, or was on within the last
+ * few ticks of this process. Never throws. Returns the number deleted.
+ */
+export async function agentsApiSweepTick(): Promise<number> {
+  try {
+    if (await agentsApiBackendEnabled()) agentsApiSweepsOwed = AGENTS_API_SWEEPS_AFTER_OFF;
+    else if (agentsApiSweepsOwed > 0) agentsApiSweepsOwed--;
+    else return 0;
+    const { sweepOrphanedAgentSessions } = await import('./assistantAgentsApi.service.js');
+    return await sweepOrphanedAgentSessions();
+  } catch (err) {
+    log.error({ err }, 'agents api session sweep failed');
+    return 0;
+  }
+}
+
+/**
+ * Sweep once at startup and then on a timer, so a session left at OpenAI by a
+ * crash, a restart or a timed-out turn is deleted even when nobody asks the
+ * assistant another question. The timer never keeps the process alive.
+ */
+export function startAgentsApiSweeper(): void {
+  if (agentsApiSweepTimer) return;
+  agentsApiSweepTimer = setInterval(() => void agentsApiSweepTick(), AGENTS_API_SWEEP_EVERY_MS);
+  agentsApiSweepTimer.unref?.();
+  void agentsApiSweepTick();
+}
+
+/** Test seam. */
+export function stopAgentsApiSweeper(): void {
+  if (agentsApiSweepTimer) clearInterval(agentsApiSweepTimer);
+  agentsApiSweepTimer = null;
+  agentsApiSweepsOwed = 0;
 }
 
 /** One assistant turn: history + new question in, final text + tool trail out. */
@@ -443,6 +549,16 @@ export async function runAssistantTurn(
   ctx: AssistantContext,
   history: AssistantMessage[],
 ): Promise<AssistantTurnResult> {
+  if (await agentsApiBackendEnabled()) {
+    // Loaded only when the flag is on, so the default path never touches it.
+    const { agentsApiBackend } = await import('./assistantAgentsApi.service.js');
+    return agentsApiBackend.runTurn(ctx, history);
+  }
+  return responsesBackend.runTurn(ctx, history);
+}
+
+/** The stateless Responses loop (store:false): the default backend. */
+async function runResponsesTurn(ctx: AssistantContext, history: AssistantMessage[]): Promise<AssistantTurnResult> {
   const client = await getClient();
   const roleTools = toolsFor(ctx.role);
   const tools = toResponsesTools(ctx.role);
@@ -462,7 +578,7 @@ export async function runAssistantTurn(
       tool_choice: toolChoice,
     });
 
-  const auditTools: Array<{ name: string; args: Record<string, unknown>; row_count: number }> = [];
+  const auditTools: AuditedToolCall[] = [];
   const usage = { input_tokens: 0, output_tokens: 0 };
   const track = (r: ResponsesResult) => {
     usage.input_tokens += r.usage?.input_tokens ?? 0;
@@ -488,21 +604,8 @@ export async function runAssistantTurn(
       } catch {
         log.warn(`unparseable arguments for ${call.name}; running with {}`);
       }
-      const tool = roleTools.find((t) => t.name === call.name);
-      let output: unknown;
-      if (!tool) {
-        output = { error: `Tool ${call.name} is not available to the ${ctx.role} role.` };
-        auditTools.push({ name: call.name!, args, row_count: 0 });
-      } else {
-        try {
-          output = await tool.run(ctx, args);
-          auditTools.push({ name: tool.name, args, row_count: rowCountOf(output) });
-        } catch (err) {
-          log.error({ err, tool: tool.name }, 'assistant tool failed');
-          output = { error: 'This lookup failed; try the corresponding admin panel.' };
-          auditTools.push({ name: tool.name, args, row_count: 0 });
-        }
-      }
+      const { output, audit } = await executeAssistantTool(ctx, roleTools, call.name!, args);
+      auditTools.push(audit);
       input.push({ type: 'function_call_output', call_id: call.call_id, output: JSON.stringify(output) });
     }
 
@@ -518,3 +621,5 @@ export async function runAssistantTurn(
     toolCalls: auditTools.map((t) => ({ name: t.name, rowCount: t.row_count })),
   };
 }
+
+export const responsesBackend: AssistantBackend = { id: 'responses', runTurn: runResponsesTurn };

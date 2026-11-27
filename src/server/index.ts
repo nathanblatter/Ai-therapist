@@ -85,6 +85,7 @@ import surveysRoutes from './routes/public/surveys.routes.js';
 import qualtricsWebhookRoutes from './routes/public/qualtricsWebhook.routes.js';
 import caseworkerDashboardRoutes from './routes/admin/caseworkerDashboard.routes.js';
 import assistantRoutes from './routes/admin/assistant.routes.js';
+import { startAgentsApiSweeper } from './services/assistant.service.js';
 import workQueueRoutes from './routes/admin/workQueue.routes.js';
 import notificationsRoutes from './routes/admin/notifications.routes.js';
 import mailRoutes from './routes/admin/mail.routes.js';
@@ -1128,6 +1129,10 @@ if (isEntrypoint) {
     // and only while system_config.shadow_risk_scorer.enabled is true (default
     // off). It records a second opinion per participant turn and never acts.
     startShadowRiskScorer();
+    // Admin assistant, Agents API backend only (features.assistant_agents_api_enabled,
+    // default off): delete sessions a crash or timeout left at OpenAI, once now
+    // and every five minutes. A tick is one cached config read while the flag is off.
+    startAgentsApiSweeper();
 
     // Background Qualtrics response sync (env-gated via
     // QUALTRICS_SYNC_INTERVAL_MINUTES; no-op when the integration or the

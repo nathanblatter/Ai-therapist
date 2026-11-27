@@ -75,6 +75,8 @@ describe('listDataAccessLog', () => {
     expect(pageSql).toMatch(/FROM data_access_log dal/);
     expect(pageSql).toMatch(/LEFT JOIN therapy_sessions ts/);
     expect(pageSql).toMatch(/ORDER BY dal.id DESC/);
+    // A server-wide config flag change is shown to every organization.
+    expect(pageSql).toMatch(/participant\.organization_id = \$7\s+OR dal\.action = 'config_flag_change'/);
     expect(pageParams).toEqual([42, 's', 'r', 'export', 'a', 'b', 3, 25, 50]);
     const [countSql, countParams] = queryMock.mock.calls[1];
     expect(countSql).toMatch(/SELECT COUNT\(\*\)/);

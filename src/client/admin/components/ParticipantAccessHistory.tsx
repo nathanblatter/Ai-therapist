@@ -18,6 +18,7 @@ export const DATA_ACCESS_ACTION_LABELS: Record<string, string> = {
   audit_log_view: 'Access history viewed',
   worksheet_review: 'Worksheet reviewed',
   semantic_search: 'Semantic search hit',
+  config_flag_change: 'Config flag switched',
 };
 
 /** Label for one row; the chart bundle (ai-therapist-199) shares the

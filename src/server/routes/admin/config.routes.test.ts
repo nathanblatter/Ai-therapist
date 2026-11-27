@@ -12,8 +12,12 @@ const {
   getSystemConfigByKeyMock,
   updateSystemConfigMock,
   upsertSystemConfigMock,
+  upsertFeaturesMock,
+  setGuardedFlagMock,
   invalidateConfigCacheMock,
 } = vi.hoisted(() => ({
+  upsertFeaturesMock: vi.fn(),
+  setGuardedFlagMock: vi.fn(),
   getAllSystemConfigMock: vi.fn(),
   getSystemConfigByKeyMock: vi.fn(),
   updateSystemConfigMock: vi.fn(),
@@ -26,6 +30,9 @@ vi.mock('../../db/index.js', () => ({
   getSystemConfigByKey: getSystemConfigByKeyMock,
   updateSystemConfig: updateSystemConfigMock,
   upsertSystemConfig: upsertSystemConfigMock,
+  upsertFeaturesKeepingGuardedFlags: upsertFeaturesMock,
+  setGuardedFeatureFlagAudited: setGuardedFlagMock,
+  ASSISTANT_AGENTS_API_FLAG: 'assistant_agents_api_enabled',
 }));
 
 vi.mock('../../utils/sessionHelpers.js', () => ({
@@ -69,6 +76,17 @@ beforeEach(() => {
   upsertSystemConfigMock.mockImplementation(async (key: string, value: unknown, updatedBy: string) =>
     row(key, value, updatedBy),
   );
+  // The real query keeps guarded flags as stored; here the stored row has the
+  // assistant backend flag OFF (absent), so it is dropped from what comes back.
+  upsertFeaturesMock.mockImplementation(async (value: Record<string, unknown>, updatedBy: string) => {
+    const { assistant_agents_api_enabled: _ignored, ...rest } = value;
+    return row('features', rest, updatedBy);
+  });
+  setGuardedFlagMock.mockImplementation(async (_flag: string, enabled: boolean, actor: { username: string }) => ({
+    row: row('features', { chat_enabled: true, assistant_agents_api_enabled: enabled }, actor.username),
+    previous: !enabled,
+    changed: true,
+  }));
 });
 
 describe('PUT /admin/api/config/:key (upsert path)', () => {
@@ -168,11 +186,89 @@ describe('PUT /admin/api/config/:key (upsert path)', () => {
   });
 
   it('returns 500 and no cache invalidation when the store throws', async () => {
-    upsertSystemConfigMock.mockRejectedValueOnce(new Error('db down'));
+    upsertFeaturesMock.mockRejectedValueOnce(new Error('db down'));
     const res = await request(appAs('researcher'))
       .put('/admin/api/config/features')
       .send({ value: { chat_enabled: true } });
     expect(res.status).toBe(500);
+    expect(invalidateConfigCacheMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('features.assistant_agents_api_enabled (guarded flag)', () => {
+  it('a save of the whole features object never goes through the plain upsert', async () => {
+    // A tab loaded while the flag was on saves an unrelated change later.
+    const stale = { chat_enabled: false, assistant_agents_api_enabled: true };
+    const res = await request(appAs('researcher')).put('/admin/api/config/features').send({ value: stale });
+    expect(res.status).toBe(200);
+    expect(upsertSystemConfigMock).not.toHaveBeenCalled();
+    expect(updateSystemConfigMock).not.toHaveBeenCalled();
+    expect(upsertFeaturesMock).toHaveBeenCalledWith(stale, 'researcher1', UPSERTABLE_CONFIG_KEYS.features);
+    expect(setGuardedFlagMock).not.toHaveBeenCalled();
+    // The response is the stored row, so the screen shows the flag as it is.
+    expect(res.body.value).toEqual({ chat_enabled: false });
+  });
+
+  it('rejects a features value that is not an object', async () => {
+    for (const value of [['assistant_agents_api_enabled'], 'on', 7]) {
+      const res = await request(appAs('researcher')).put('/admin/api/config/features').send({ value });
+      expect(res.status).toBe(400);
+    }
+    expect(upsertFeaturesMock).not.toHaveBeenCalled();
+  });
+
+  it('switches only through its own endpoint, passing who asked to the audited write', async () => {
+    const res = await request(appAs('researcher', 'dr_lee'))
+      .put('/admin/api/config/features/assistant-agents-api')
+      .send({ enabled: true });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      enabled: true,
+      previous: false,
+      changed: true,
+      updated_by: 'dr_lee',
+    });
+    expect(setGuardedFlagMock).toHaveBeenCalledWith(
+      'assistant_agents_api_enabled',
+      true,
+      { userId: 7, username: 'dr_lee', role: 'researcher' },
+      UPSERTABLE_CONFIG_KEYS.features,
+    );
+    expect(invalidateConfigCacheMock).toHaveBeenCalledTimes(1);
+    expect(upsertFeaturesMock).not.toHaveBeenCalled();
+    expect(upsertSystemConfigMock).not.toHaveBeenCalled();
+
+    await request(appAs('researcher')).put('/admin/api/config/features/assistant-agents-api').send({ enabled: false });
+    expect(setGuardedFlagMock.mock.calls[1].slice(0, 2)).toEqual(['assistant_agents_api_enabled', false]);
+  });
+
+  it('needs an explicit boolean: anything else changes nothing', async () => {
+    for (const body of [{}, { enabled: 'true' }, { enabled: 1 }, { enabled: null }, { value: { enabled: true } }]) {
+      const res = await request(appAs('researcher')).put('/admin/api/config/features/assistant-agents-api').send(body);
+      expect(res.status).toBe(400);
+    }
+    expect(setGuardedFlagMock).not.toHaveBeenCalled();
+    expect(invalidateConfigCacheMock).not.toHaveBeenCalled();
+  });
+
+  it('is researcher-only', async () => {
+    for (const role of ['therapist', 'caseworker', 'participant']) {
+      const res = await request(appAs(role)).put('/admin/api/config/features/assistant-agents-api').send({
+        enabled: true,
+      });
+      expect(res.status).toBe(403);
+    }
+    expect(setGuardedFlagMock).not.toHaveBeenCalled();
+  });
+
+  it('reports failure, and invalidates nothing, when the audited write fails', async () => {
+    setGuardedFlagMock.mockRejectedValueOnce(new Error('audit insert failed'));
+    const res = await request(appAs('researcher'))
+      .put('/admin/api/config/features/assistant-agents-api')
+      .send({ enabled: true });
+    expect(res.status).toBe(500);
+    expect(res.body.error).toMatch(/nothing was changed/);
     expect(invalidateConfigCacheMock).not.toHaveBeenCalled();
   });
 });

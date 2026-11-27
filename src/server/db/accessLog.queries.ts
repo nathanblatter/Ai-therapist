@@ -21,7 +21,14 @@ export type DataAccessAction =
   /** Researcher semantic search over redacted transcripts (ai-therapist-177):
    *  one row per session that had messages returned, carrying the query text
    *  and the returned message ids; one session-less row when nothing matched. */
-  | 'semantic_search';
+  | 'semantic_search'
+  /** A guarded system_config.features flag was switched (config.queries
+   *  setGuardedFeatureFlagAudited): detail carries the key and the old and
+   *  new value. Not an access to one participant's data, but a change to
+   *  where staff questions and study data are sent, kept in the same log so
+   *  one screen and the IRB packet show it. Written inside the transaction
+   *  that changes the flag, not through logDataAccess. */
+  | 'config_flag_change';
 
 export interface DataAccessLogInput {
   /** userid of the account performing the access (null if unknown). */
@@ -80,6 +87,7 @@ export const DATA_ACCESS_ACTIONS: readonly DataAccessAction[] = [
   'audit_log_view',
   'worksheet_review',
   'semantic_search',
+  'config_flag_change',
 ] as const;
 
 export function isDataAccessAction(value: unknown): value is DataAccessAction {
@@ -138,6 +146,8 @@ const DATA_ACCESS_SELECT = `
  * Filtered, paginated page of the data-access log with a total count.
  * `orgId` (C13 researcher scoping): when set, only rows whose actor or
  * participant belongs to that organization are returned; null = unscoped.
+ * 'config_flag_change' rows are shown to every organization: system_config
+ * is server-wide, so the change applies to all of them whoever made it.
  */
 export async function listDataAccessLog(
   filters: DataAccessLogFilters,
@@ -150,7 +160,8 @@ export async function listDataAccessLog(
       AND ($4::text IS NULL OR dal.action = $4)
       AND ($5::timestamptz IS NULL OR dal.created_at >= $5)
       AND ($6::timestamptz IS NULL OR dal.created_at < $6)
-      AND ($7::int IS NULL OR actor.organization_id = $7 OR participant.organization_id = $7)`;
+      AND ($7::int IS NULL OR actor.organization_id = $7 OR participant.organization_id = $7
+           OR dal.action = 'config_flag_change')`;
   const params = [
     filters.participantUserId ?? null,
     filters.sessionId ?? null,

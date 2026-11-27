@@ -9,6 +9,9 @@ import {
   getSystemConfigByKey,
   updateSystemConfig,
   upsertSystemConfig,
+  upsertFeaturesKeepingGuardedFlags,
+  setGuardedFeatureFlagAudited,
+  ASSISTANT_AGENTS_API_FLAG,
   type VoiceOption,
   type LanguageOption,
 } from '../../db/index.js';
@@ -186,6 +189,50 @@ export default function adminConfigRoutes(): Router {
     }
   });
 
+  // PUT /admin/api/config/features/assistant-agents-api - the ONLY way to turn
+  // features.assistant_agents_api_enabled on or off. Body: { enabled: boolean }.
+  // The flag moves the staff assistant onto a backend that stores sessions at
+  // OpenAI (docs/agents-api-evaluation.md), so the change is explicit (a save
+  // of the whole `features` object below never touches it) and audited in the
+  // same transaction (data_access_log, action 'config_flag_change': who, when,
+  // old and new value). system_config has no organisation column, so the
+  // switch applies to every organisation on this server.
+  router.put('/admin/api/config/features/assistant-agents-api', requireRole('researcher'), async (req, res) => {
+    const enabled: unknown = req.body?.enabled;
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ error: 'enabled must be true or false' });
+    }
+    try {
+      const change = await setGuardedFeatureFlagAudited(
+        ASSISTANT_AGENTS_API_FLAG,
+        enabled,
+        {
+          userId: req.session.userId ?? null,
+          username: req.session.username ?? null,
+          role: req.session.userRole ?? null,
+        },
+        UPSERTABLE_CONFIG_KEYS.features,
+      );
+      invalidateConfigCache();
+      if (change.changed) {
+        log.info(
+          `Config flag features.${ASSISTANT_AGENTS_API_FLAG} set to ${enabled} by ${req.session.username} (all organisations)`,
+        );
+      }
+      res.json({
+        success: true,
+        enabled,
+        previous: change.previous,
+        changed: change.changed,
+        updated_at: change.row.updated_at,
+        updated_by: change.row.updated_by,
+      });
+    } catch (err) {
+      log.error({ err }, 'Failed to change the assistant backend flag');
+      res.status(500).json({ error: 'Failed to change the assistant backend flag; nothing was changed' });
+    }
+  });
+
   // PUT /admin/api/config/:key - update a configuration entry
   router.put('/admin/api/config/:key', requireRole('researcher'), async (req, res) => {
     const { key } = req.params;
@@ -193,6 +240,9 @@ export default function adminConfigRoutes(): Router {
 
     if (!value) {
       return res.status(400).json({ error: 'Configuration value is required' });
+    }
+    if (key === 'features' && (typeof value !== 'object' || Array.isArray(value))) {
+      return res.status(400).json({ error: 'features must be an object' });
     }
 
     try {
@@ -263,10 +313,15 @@ export default function adminConfigRoutes(): Router {
       const description = Object.prototype.hasOwnProperty.call(UPSERTABLE_CONFIG_KEYS, key)
         ? UPSERTABLE_CONFIG_KEYS[key]
         : undefined;
+      // `features` goes through a save that keeps guarded flags as stored: the
+      // screen sends the whole object as it was when the tab loaded, and a
+      // stale tab must not switch the assistant backend flag back on (or off).
       const updated =
-        description !== undefined
-          ? await upsertSystemConfig(key, value, req.session.username, description)
-          : await updateSystemConfig(key, value, req.session.username);
+        key === 'features'
+          ? await upsertFeaturesKeepingGuardedFlags(value, req.session.username, UPSERTABLE_CONFIG_KEYS.features)
+          : description !== undefined
+            ? await upsertSystemConfig(key, value, req.session.username, description)
+            : await updateSystemConfig(key, value, req.session.username);
       if (!updated) {
         return res.status(404).json({ error: 'Configuration key not found' });
       }
