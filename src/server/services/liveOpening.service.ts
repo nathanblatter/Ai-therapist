@@ -278,8 +278,17 @@ export function scheduleLiveOpeningFallback(sessionId: string, delayMs = LIVE_OP
 //
 //   - the first assistant audio or transcript latches it as spoken; nothing is
 //     ever sent again;
-//   - participant speech before any assistant speech stands it down (a
-//     barge-in before the opening is legitimate, and the model is answering);
+//   - a participant transcript before any assistant speech cancels the
+//     re-send (a barge-in before the opening is legitimate, and a second send
+//     would talk over the answer) but NOT the last bound: until 2026-11-26 it
+//     ended the watch, on the assumption that the model was answering. The
+//     vendor also transcribes silence (measured that day: 2 of 80 starts on
+//     a microphone that sent only digital silence got a participant
+//     transcript in the first 0.6 s, "a purple" and "the text in"), and a
+//     participant's microphone is off at the start, so a silent start with
+//     such a transcript was watched by nothing. If the assistant then speaks, the
+//     outcome is `participant_first`; if it has said nothing by
+//     LIVE_OPENING_UNSPOKEN_MS, the opening is unspoken like any other;
 //   - a crisis signal (a risk steer, crisis resources for our own high flag,
 //     or a vendor stop or cut) stands it down: the crisis path owns the next
 //     words;
@@ -404,15 +413,14 @@ function settle(sessionId: string, entry: PendingOpening, outcome: LiveOpeningOu
   if (!w || w.outcome) return;
   w.outcome = outcome;
   stopWatchTimers(entry);
-  if (outcome === 'spoken' || outcome === 'unspoken') {
+  // An assistant that spoke after an early participant transcript settles like a spoken start.
+  const spoke = outcome === 'spoken' || (outcome === 'participant_first' && assistantHasSpoken(entry));
+  if (spoke || outcome === 'unspoken') {
     // Spoken: wait for the other of audio / transcript to arrive. Unspoken:
     // wait in case the model speaks after all (the latch still notes it), so
     // the record tells a late start from one that never spoke. A close before
     // then records at once (clearLiveOpening).
-    w.recordTimer = setTimeout(
-      () => writeRecord(sessionId, entry),
-      outcome === 'spoken' ? RECORD_SETTLE_MS : RECORD_LATE_SPEECH_MS,
-    );
+    w.recordTimer = setTimeout(() => writeRecord(sessionId, entry), spoke ? RECORD_SETTLE_MS : RECORD_LATE_SPEECH_MS);
     w.recordTimer.unref?.();
   } else {
     writeRecord(sessionId, entry);
@@ -437,8 +445,13 @@ export function armLiveOpeningWatch(sessionId: string): void {
   // Anything that happened before the request decides it at once.
   if (assistantHasSpoken(entry)) return settle(sessionId, entry, 'spoken');
   if (entry.crisisAt !== null) return settle(sessionId, entry, 'crisis');
-  if (entry.participantFirstAt !== null) return settle(sessionId, entry, 'participant_first');
-  if (!entry.watch) return; // measure-only: settles on speech or close
+  if (!entry.watch) {
+    // Measure-only: settles on speech or close.
+    if (entry.participantFirstAt !== null) settle(sessionId, entry, 'participant_first');
+    return;
+  }
+  // A participant transcript before the request leaves the last bound armed
+  // (see the header); onRetriggerDue skips the re-send by itself.
 
   const retrigger = setTimeout(() => void onRetriggerDue(sessionId, entry), LIVE_OPENING_RETRIGGER_MS);
   const unspoken = setTimeout(() => void onUnspokenDue(sessionId, entry), LIVE_OPENING_UNSPOKEN_MS);
@@ -450,6 +463,9 @@ export function armLiveOpeningWatch(sessionId: string): void {
 async function onRetriggerDue(sessionId: string, entry: PendingOpening): Promise<void> {
   const w = entry.watchState;
   if (!w || w.outcome || w.retriggerAt !== null) return;
+  // A participant transcript came first: no second send over what may be an
+  // answer to them. The last bound still applies.
+  if (entry.participantFirstAt !== null) return;
   w.retriggerAt = Date.now();
   const afterMs = w.retriggerAt - w.armedAt;
   log.warn(
@@ -472,8 +488,11 @@ async function onUnspokenDue(sessionId: string, entry: PendingOpening): Promise<
   w.unspokenAt = Date.now();
   log.error(
     `LIVE OPENING UNSPOKEN for ${sessionId}: no assistant speech ${w.unspokenAt - w.armedAt} ms after the ` +
-      'opening was requested, after one re-send; showing its text on screen. The participant has not heard ' +
-      'the AI disclosure.',
+      `opening was requested, ${
+        entry.participantFirstAt !== null
+          ? 'with no re-send (a participant transcript came first)'
+          : 'after one re-send'
+      }; showing its text on screen. The participant has not heard the AI disclosure.`,
   );
   settle(sessionId, entry, 'unspoken');
   try {
@@ -496,14 +515,21 @@ export function noteLiveOpeningAssistantSpeech(sessionId: string, kind: 'audio' 
   const now = Date.now();
   if (kind === 'audio' && entry.assistantAudioAt === null) entry.assistantAudioAt = now;
   if (kind === 'transcript' && entry.assistantTranscriptAt === null) entry.assistantTranscriptAt = now;
-  settle(sessionId, entry, 'spoken');
+  // participantFirstAt is only ever set before any assistant speech.
+  settle(sessionId, entry, entry.participantFirstAt !== null ? 'participant_first' : 'spoken');
 }
 
-/** Participant speech. Only counts before any assistant speech. */
+/**
+ * A participant transcript. Only counts before any assistant speech. On a
+ * watched opening it does not end the watch: the re-send is skipped and the
+ * last bound stays armed, because the transcript may be the vendor's rendering
+ * of a silent microphone rather than a person (see "Opening watchdog" above).
+ */
 export function noteLiveOpeningParticipantSpeech(sessionId: string): void {
   const entry = openings.get(sessionId);
   if (!entry || assistantHasSpoken(entry) || entry.participantFirstAt !== null) return;
   entry.participantFirstAt = Date.now();
+  if (entry.watch) return;
   settle(sessionId, entry, 'participant_first');
 }
 

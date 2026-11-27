@@ -338,7 +338,7 @@ browser's request or the 10 s server fallback). Times are from that request.
 | When | What |
 |---|---|
 | first audible reflected `session.output_audio.delta` (peak above 500) or first `session.output_transcript.delta` | latched as spoken; nothing is sent again, ever |
-| participant transcript before any assistant speech | stands down: a barge-in before the opening is legitimate, the model is answering |
+| participant transcript before any assistant speech | cancels the 4 s re-send (a barge-in before the opening is legitimate, and a second send would talk over the answer) but not the 8 s bound: see "A participant transcript is not always a participant" below |
 | a risk steer, crisis resources (our own high flag), or a vendor stop or cut | stands down: the crisis path owns the next words |
 | 4 s, none of the above (`LIVE_OPENING_RETRIGGER_MS`) | the opening once more as commentary; `LIVE OPENING SILENT` log, `live:opening-silent` admin broadcast |
 | 8 s, none of the above (`LIVE_OPENING_UNSPOKEN_MS`) | no third send. `LIVE OPENING UNSPOKEN` log, `live:opening-unspoken` admin broadcast, a system row in the session's messages, and `session:opening-unspoken` to the participant's socket: the browser shows the opening's own text in the chat log as the assistant's message |
@@ -351,6 +351,28 @@ the same first bound as the recovery re-send. 8 s gives the re-send the same
 4 s. There is no loop because re-sends did not rescue silent recovery
 sessions (two stayed silent through re-sends at 4 s and 8 s), and a model that
 finally answered every send would say the disclosure several times.
+
+**A participant transcript is not always a participant (2026-11-26).** Until
+then a participant transcript before any assistant speech ended the watch
+outright, on the reasoning that the model was answering a barge-in. The
+opening-only measurement (above) sent digital silence on the microphone and
+the vendor still produced a participant transcript in 2 of 80 starts, both
+about 0.6 s after the opening request ("a purple", "the text in"). The first
+arrived before the assistant's first word and stood the watchdog down; the
+second arrived with it, and that opening began "Hello!Hello!". A
+participant's microphone is off when the call starts (`track.enabled = false`,
+which sends the same silence), so this can happen to anyone, and a start that
+then stayed silent was watched by nothing: no re-send, no on-screen text, no
+admin signal, and the browser's 12 s backstop stands down on a participant
+caption too. Now such a transcript only cancels the re-send. If the assistant
+speaks, the watch ends as `participant_first` (and the `live_opening` row
+carries both `participantFirstMs` and the assistant's first audio, which it
+did not before); if it has said nothing 8 s after the request, the opening is
+unspoken like any other: text on screen, system row, admin broadcast. The cost
+is on a real barge-in whose answer takes more than 8 s from the request: that
+participant is shown the disclosure text while they wait, which they had not
+heard either. The stray transcript itself is stored as a participant message
+and scored like one; that is the vendor's doing and is not handled here.
 
 What the participant sees on failure: `liveOpeningScreenText`
 (`shared/liveOpeningWatch.ts`), i.e. exactly the words inside the quotes of
@@ -408,7 +430,8 @@ two starts that were silent at 4 s the server latched nothing before the
 re-send, so reflected output audio was not mistaken for speech there.
 
 Still not proven: the 8 s branch on a real session (no start in 80 reached
-it; it is unit-tested only), and the same numbers in a real browser on a real network, where the
+it; it is unit-tested only, as is the 2026-11-26 participant-transcript
+change), and the same numbers in a real browser on a real network, where the
 opening request comes later than the harness's.
 
 ### Data-channel permissions

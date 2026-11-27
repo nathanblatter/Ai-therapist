@@ -349,23 +349,106 @@ describe('opening watchdog (ai-therapist-315)', () => {
     expect(deps.onUnspoken).not.toHaveBeenCalled();
   });
 
-  it('never fires when the participant speaks first', async () => {
+  it('a participant who speaks first and is answered gets no re-send and no signal', async () => {
     await start();
     await vi.advanceTimersByTimeAsync(1_000);
     noteLiveOpeningParticipantSpeech(ID);
+    await vi.advanceTimersByTimeAsync(2_500);
+    noteLiveOpeningAssistantSpeech(ID, 'audio');
     await vi.advanceTimersByTimeAsync(60_000);
     expect(deps.resend).not.toHaveBeenCalled();
     expect(deps.onUnspoken).not.toHaveBeenCalled();
     expect(_liveOpeningOutcomeForTests(ID)).toBe('participant_first');
+    // The record keeps both: who was first, and when the assistant spoke.
+    expect(deps.record).toHaveBeenCalledTimes(1);
+    expect(deps.record.mock.calls[0][1] as LiveOpeningTiming).toMatchObject({
+      participantFirstMs: 1_000,
+      firstAudioMs: 3_500,
+      retriggerMs: null,
+      unspokenMs: null,
+    });
   });
 
-  it('a participant who spoke before the request also stands it down', async () => {
+  it('an answer that comes after the first bound is still not re-sent over', async () => {
+    await start();
+    await vi.advanceTimersByTimeAsync(1_000);
+    noteLiveOpeningParticipantSpeech(ID);
+    await vi.advanceTimersByTimeAsync(LIVE_OPENING_RETRIGGER_MS + 1_000);
+    expect(deps.resend).not.toHaveBeenCalled();
+    expect(deps.onRetrigger).not.toHaveBeenCalled();
+    noteLiveOpeningAssistantSpeech(ID, 'transcript');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.onUnspoken).not.toHaveBeenCalled();
+    expect(_liveOpeningOutcomeForTests(ID)).toBe('participant_first');
+  });
+
+  // Measured 2026-11-26: the vendor transcribed "a purple" from a microphone
+  // that sent only silence, 0.6 s after the opening request. Until then a
+  // participant transcript ended the watch, so a silent start with one was
+  // watched by nothing.
+  it('a participant transcript does not excuse a start that never speaks: unspoken at the last bound', async () => {
+    await start();
+    await vi.advanceTimersByTimeAsync(600);
+    noteLiveOpeningParticipantSpeech(ID);
+    await vi.advanceTimersByTimeAsync(LIVE_OPENING_UNSPOKEN_MS - 700);
+    expect(deps.resend).not.toHaveBeenCalled();
+    expect(deps.onUnspoken).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(deps.onUnspoken).toHaveBeenCalledTimes(1);
+    expect(deps.onUnspoken).toHaveBeenCalledWith(ID);
+    expect(_liveOpeningOutcomeForTests(ID)).toBe('unspoken');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.resend).not.toHaveBeenCalled();
+    expect(deps.onUnspoken).toHaveBeenCalledTimes(1);
+    expect(deps.record.mock.calls[0][1] as LiveOpeningTiming).toMatchObject({
+      participantFirstMs: 600,
+      firstAudioMs: null,
+      firstTranscriptMs: null,
+      retriggerMs: null,
+      unspokenMs: LIVE_OPENING_UNSPOKEN_MS,
+    });
+  });
+
+  it('a participant transcript before the request: answered, nothing; never answered, unspoken', async () => {
     registerLiveOpening(ID, ORDINARY);
     noteLiveOpeningParticipantSpeech(ID);
     await deliverLiveOpeningViaSideband(ID);
+    await vi.advanceTimersByTimeAsync(2_000);
+    noteLiveOpeningAssistantSpeech(ID, 'audio');
     await vi.advanceTimersByTimeAsync(60_000);
     expect(deps.resend).not.toHaveBeenCalled();
     expect(deps.onUnspoken).not.toHaveBeenCalled();
+    expect(_liveOpeningOutcomeForTests(ID)).toBe('participant_first');
+
+    const OTHER = `${ID}-never-answered`;
+    registerLiveOpening(OTHER, ORDINARY);
+    noteLiveOpeningParticipantSpeech(OTHER);
+    await deliverLiveOpeningViaSideband(OTHER);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.resend).not.toHaveBeenCalled();
+    expect(deps.onUnspoken).toHaveBeenCalledTimes(1);
+    expect(deps.onUnspoken).toHaveBeenCalledWith(OTHER);
+  });
+
+  it('a crisis signal after a participant transcript still takes priority over the last bound', async () => {
+    await start();
+    await vi.advanceTimersByTimeAsync(600);
+    noteLiveOpeningParticipantSpeech(ID);
+    await vi.advanceTimersByTimeAsync(2_000);
+    noteLiveOpeningCrisis(ID);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.onUnspoken).not.toHaveBeenCalled();
+    expect(_liveOpeningOutcomeForTests(ID)).toBe('crisis');
+  });
+
+  it('a recovery opening (measure-only) still settles at once on a participant transcript', async () => {
+    await start({ ...OPENING, via: 'commentary' });
+    await vi.advanceTimersByTimeAsync(500);
+    noteLiveOpeningParticipantSpeech(ID);
+    expect(_liveOpeningOutcomeForTests(ID)).toBe('participant_first');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.onUnspoken).not.toHaveBeenCalled();
+    expect(deps.record).toHaveBeenCalledTimes(1);
   });
 
   it('participant speech after the assistant began is not a barge-in before the opening', async () => {
