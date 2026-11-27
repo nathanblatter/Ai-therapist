@@ -150,6 +150,12 @@ describe('parseShadowResponse', () => {
       response(severityAnswer({ none: 1, low: 0, medium: 0, high: 0 }), { passive_ideation: 1.2 }),
     ],
     ['a negative probability', response(severityAnswer({ none: 1, low: 0, medium: 0, high: -0.2 }))],
+    // Four zeros would otherwise read as "high" (ties go up).
+    ['severity probabilities that are all zero', response(severityAnswer({ none: 0, low: 0, medium: 0, high: 0 }))],
+    [
+      'severity probabilities that do not sum to 1',
+      response(severityAnswer({ none: 0.9, low: 0.9, medium: 0.9, high: 0.9 })),
+    ],
     ['a severity that is not a score', response({ type: 'predicate', name: 'severity', probability: 0.5 })],
     [
       'a severity with a band missing',

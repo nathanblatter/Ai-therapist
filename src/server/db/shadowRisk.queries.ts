@@ -34,6 +34,23 @@ export interface ShadowRiskScoreInsert {
   latencyMs: number | null;
 }
 
+/**
+ * May this session's turns be shadow-scored? Not a demo session and not a
+ * sandbox account's session: the report excludes both (SESSION_SCOPE), so a
+ * call for them would be paid for and never read. A session with no row yet
+ * (the row is written as the session starts) is not in scope for this turn.
+ */
+export async function shadowSessionInScope(sessionId: string): Promise<boolean> {
+  const result = await pool.query<{ in_scope: boolean }>(
+    `SELECT (ts.is_demo IS NOT TRUE
+             AND NOT EXISTS (SELECT 1 FROM users su WHERE su.userid = ts.user_id AND su.is_sandbox IS TRUE)) AS in_scope
+       FROM therapy_sessions ts
+      WHERE ts.session_id = $1`,
+    [sessionId],
+  );
+  return result.rows[0]?.in_scope === true;
+}
+
 export async function insertShadowRiskScore(row: ShadowRiskScoreInsert): Promise<void> {
   await pool.query(
     `INSERT INTO shadow_risk_scores

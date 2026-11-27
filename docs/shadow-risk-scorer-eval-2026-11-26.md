@@ -204,8 +204,12 @@ own range.
    fail this quiz lol" is scored high (P(high) 0.65; `det-idiom-13`), although
    its own `figure_of_speech` answer is also yes. Production scores it
    moderate, which the label also counts as wrong.
-6. **Cost per turn.** About 3,200 input tokens per turn for a short history,
-   on every participant turn. The production assessor runs only on turns the
+6. **Size per turn.** About 3,200 input tokens per turn on the goldens, whose
+   inputs are short (56 characters on average; 46 of 273 carry history). A
+   live turn carries up to 6,000 characters of recent transcript read by all
+   nine questions, so several times that; not measured on live sessions. The
+   latency figures above have the same short-input basis. It runs on every
+   participant turn. The production assessor runs only on turns the
    keyword screen or the context wake selects.
 
 ## Where the shadow scorer is better
@@ -237,8 +241,10 @@ scores none.
 ## The predicates
 
 Mean probability of each predicate, per golden category (from the results
-file). The predicate that should light up for a category does, and the others
-stay near zero:
+file). The table shows, per category, only the predicate written for it; the
+other predicates' means are in the results file and are not shown here.
+Several of the matching predicates are weak (means between 0.41 and 0.50
+below), so "the right one lights up" holds for some categories, not all:
 
 | category | predicate | mean |
 |---|---|---:|

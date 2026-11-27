@@ -285,6 +285,13 @@ export function parseShadowResponse(raw: unknown): ShadowAnswer {
       if (!entry) throw new ShadowAnswerError(`Decisions API severity answer had no probability for ${label}`);
       probabilities[label] = probability(entry.probability, `severity level ${label}`);
     }
+    // The levels are one distribution: all zero, or a total far from 1, is a
+    // broken answer and must not be read as a band (ties go to the higher
+    // band below, so four zeros would otherwise be stored as "high").
+    const total = SHADOW_SEVERITIES.reduce((sum, label) => sum + probabilities[label], 0);
+    if (!(total > 0.9 && total < 1.1)) {
+      throw new ShadowAnswerError('Decisions API severity probabilities did not sum to 1');
+    }
     severity = 'none';
     for (const label of SHADOW_SEVERITIES) {
       if (probabilities[label] >= probabilities[severity]) severity = label;

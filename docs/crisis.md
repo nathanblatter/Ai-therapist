@@ -1182,9 +1182,14 @@ Switches (both needed):
 Data flow when on: the participant's message and the recent transcript go to
 the Decisions API. That API has no per-request `store: false`; retention
 follows the OpenAI organisation's data controls. The production assessor
-already sends the same text to OpenAI. Cost is about 3,200 input tokens per
-participant turn (measured on the goldens), on every turn of every session
-that is not a demo account.
+already sends the same text to OpenAI, but with `store: false`, which this
+API does not offer: confirm the organisation's retention setting before
+switching it on. Size: about 3,200 input tokens per turn was measured on the
+goldens, whose inputs are short (56 characters on average, 46 of 273 with any
+history). A live turn carries up to 6,000 characters of recent transcript and
+all nine questions read it, so expect several times that per turn; it has not
+been measured on live sessions. It runs on every participant turn of every
+session that is not a demo or sandbox session.
 
 Data rules for `shadow_risk_scores` (migration 133), the same as
 `risk_score_history`: `session_id` cascades on session delete, `message_id` is

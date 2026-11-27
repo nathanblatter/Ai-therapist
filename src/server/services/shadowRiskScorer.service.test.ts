@@ -293,7 +293,37 @@ describe('back-pressure', () => {
     expect(_shadowInFlightForTests()).toBe(SHADOW_MAX_IN_FLIGHT);
     release(answer('none'));
     await _settleShadowScorerForTests();
+    await new Promise((resolve) => setTimeout(resolve, 10));
     expect(create.mock.calls.length).toBeLessThanOrEqual(SHADOW_MAX_IN_FLIGHT);
-    expect(insert.mock.calls.length).toBeLessThanOrEqual(SHADOW_MAX_IN_FLIGHT);
+    // Review of PR #152: a dropped turn used to leave only a log counter, so
+    // the report's totals shrank silently during an outage. Each of the six
+    // dropped turns now has an errored row with code "busy" and no vendor call.
+    const busy = insert.mock.calls.map(([row]) => row).filter((row) => row.errorCode === 'busy');
+    expect(busy).toHaveLength(6);
+    for (const row of busy) expect(row).toMatchObject({ status: 'errored', shadowSeverity: null, tokensIn: null });
+  });
+});
+
+// Review of PR #152: sandbox sessions ran the pipeline, so every turn made a
+// paid call whose row the report then hid.
+describe('sessions out of scope', () => {
+  it('a sandbox or demo session is never sent and never stored, and is asked about once', async () => {
+    const inScope = vi.fn(async () => false);
+    arm({ inScope });
+    await score();
+    await score({ ...TURN, messageId: 99 });
+    expect(create).not.toHaveBeenCalled();
+    expect(insert).not.toHaveBeenCalled();
+    expect(inScope).toHaveBeenCalledTimes(1);
+  });
+
+  it('an unreadable scope skips the turn and is asked again on the next one', async () => {
+    const inScope = vi.fn<(id: string) => Promise<boolean>>().mockRejectedValueOnce(new Error('db down'));
+    inScope.mockResolvedValue(true);
+    arm({ inScope });
+    await score();
+    expect(create).not.toHaveBeenCalled();
+    await score({ ...TURN, messageId: 99 });
+    expect(create).toHaveBeenCalledTimes(1);
   });
 });

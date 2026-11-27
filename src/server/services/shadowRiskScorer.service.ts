@@ -20,8 +20,10 @@
 //     void and awaits nothing; the work starts on a promise the pipeline
 //     never sees. The request has its own deadline (SHADOW_TIMEOUT_MS) and no
 //     retries. At most SHADOW_MAX_IN_FLIGHT turns are in flight; a turn that
-//     arrives beyond that is dropped (counted in a log line, no row), so a
-//     slow Decisions API or database cannot queue work behind the pipeline.
+//     arrives beyond that is dropped without a vendor call and recorded as
+//     an errored row with code 'busy' (a bounded number of such writes at a
+//     time; beyond that only a log counter), so a slow Decisions API or
+//     database cannot queue work behind the pipeline.
 //   - Fail loudly. Every error is caught here. A failed, timed-out or refused
 //     answer is stored as status 'errored' ("unknown", never "none"); if even
 //     that insert fails it is logged and dropped.
@@ -56,7 +58,8 @@ import type { ShadowRiskScoreInsert } from '../db/shadowRisk.queries.js';
 const log = createLogger('shadowRiskScorer');
 
 export const SHADOW_CONFIG_KEY = 'shadow_risk_scorer';
-/** The whole request, start to answer. Measured p95 on the goldens: 0.55 s. */
+/** The whole request, start to answer. Measured p95 on the goldens: 0.50 s
+ *  (short inputs; a live turn with history is longer). */
 export const SHADOW_TIMEOUT_MS = 8000;
 export const SHADOW_MAX_IN_FLIGHT = 4;
 export const SHADOW_CONFIG_TTL_MS = 30_000;
@@ -91,6 +94,9 @@ export interface ShadowDeps {
   readConfig: () => Promise<unknown>;
   getClient: () => Promise<DecisionsClient>;
   insert: (row: ShadowRiskScoreInsert) => Promise<void>;
+  /** Is this session one whose turns may be scored (not a sandbox or demo
+   *  session)? Asked once per session, before anything is sent or paid for. */
+  inScope: (sessionId: string) => Promise<boolean>;
   now: () => number;
   timeoutMs: number;
 }
@@ -111,6 +117,10 @@ const realDeps: ShadowDeps = {
     const { insertShadowRiskScore } = await import('../db/shadowRisk.queries.js');
     await insertShadowRiskScore(row);
   },
+  inScope: async (sessionId) => {
+    const { shadowSessionInScope } = await import('../db/shadowRisk.queries.js');
+    return shadowSessionInScope(sessionId);
+  },
   now: () => Date.now(),
   timeoutMs: SHADOW_TIMEOUT_MS,
 };
@@ -121,6 +131,34 @@ let cachedConfig: { value: ShadowScorerConfig; at: number } | null = null;
 let configRead: Promise<ShadowScorerConfig> | null = null;
 const inFlight = new Set<Promise<void>>();
 let dropped = 0;
+/** 'busy' rows being written for dropped turns; bounded like the calls are. */
+let busyWrites = 0;
+export const SHADOW_MAX_BUSY_WRITES = 20;
+
+// Sandbox and demo sessions are not scored: the report hides their rows, so a
+// call for them is paid for and never read (the embedding sweep excludes them
+// for the same reason). Remembered per session; an unreadable answer is "not
+// in scope" for this turn only and is asked again on the next.
+const SCOPE_CACHE_MAX = 2000;
+const scopeCache = new Map<string, boolean>();
+async function sessionInScope(sessionId: string): Promise<boolean> {
+  const known = scopeCache.get(sessionId);
+  if (known !== undefined) return known;
+  try {
+    const inScope = await deps.inScope(sessionId);
+    scopeCache.set(sessionId, inScope);
+    if (scopeCache.size > SCOPE_CACHE_MAX) {
+      for (const id of scopeCache.keys()) {
+        if (scopeCache.size <= SCOPE_CACHE_MAX / 2) break;
+        scopeCache.delete(id);
+      }
+    }
+    return inScope;
+  } catch (err) {
+    log.warn({ errorCode: errorCodeFor(err) }, 'shadow scorer could not read the session scope; turn not scored');
+    return false;
+  }
+}
 
 /** Called once at server boot. Until then shadowScoreTurn does nothing. */
 export function startShadowRiskScorer(): void {
@@ -183,13 +221,14 @@ async function ask(turn: ShadowTurn): Promise<unknown> {
   return Promise.race([call, deadline]).finally(() => clearTimeout(timer));
 }
 
-async function scoreTurn(turn: ShadowTurn): Promise<void> {
-  if (!(await currentConfig()).enabled) return;
+/** The part of a row known before the vendor answers, or null for a turn the
+ *  production pipeline did not give a usable score (nothing to compare with). */
+function baseRow(turn: ShadowTurn) {
   const productionSeverity = SEVERITIES.includes(turn.productionSeverity as RiskSeverity)
     ? (turn.productionSeverity as RiskSeverity)
     : null;
-  if (productionSeverity === null || !Number.isFinite(turn.productionScore)) return;
-  const base = {
+  if (productionSeverity === null || !Number.isFinite(turn.productionScore)) return null;
+  return {
     sessionId: turn.sessionId,
     messageId: storedMessageId(turn.messageId),
     turnSource: turn.source === 'checkin' ? ('checkin' as const) : ('message' as const),
@@ -198,6 +237,13 @@ async function scoreTurn(turn: ShadowTurn): Promise<void> {
     model: SHADOW_MODEL,
     questionSetVersion: SHADOW_QUESTION_SET_VERSION,
   };
+}
+
+async function scoreTurn(turn: ShadowTurn): Promise<void> {
+  if (!(await currentConfig()).enabled) return;
+  const base = baseRow(turn);
+  if (!base) return;
+  if (!(await sessionInScope(turn.sessionId))) return;
   const startedAt = deps.now();
   let row: ShadowRiskScoreInsert;
   try {
@@ -250,6 +296,7 @@ export function shadowScoreTurn(turn: ShadowTurn): void {
       if (dropped === 1 || dropped % 50 === 0) {
         log.warn(`shadow scorer busy (${inFlight.size} in flight); ${dropped} turn(s) dropped so far`);
       }
+      void recordBusy(turn);
       return;
     }
     const work: Promise<void> = scoreTurn(turn)
@@ -265,6 +312,38 @@ export function shadowScoreTurn(turn: ShadowTurn): void {
   }
 }
 
+/**
+ * A turn dropped because the scorer was full still leaves a row (status
+ * 'errored', code 'busy'), so the report's denominators show what was not
+ * scored. No vendor call. Bounded: beyond SHADOW_MAX_BUSY_WRITES pending
+ * writes the turn is only counted in the log line above. Never throws.
+ */
+async function recordBusy(turn: ShadowTurn): Promise<void> {
+  if (busyWrites >= SHADOW_MAX_BUSY_WRITES) return;
+  busyWrites++;
+  try {
+    if (!(await currentConfig()).enabled) return;
+    const base = baseRow(turn);
+    if (!base || !(await sessionInScope(turn.sessionId))) return;
+    await deps.insert({
+      ...base,
+      status: 'errored',
+      shadowSeverity: null,
+      severityProbabilities: null,
+      predicates: null,
+      refusedQuestions: [],
+      errorCode: 'busy',
+      tokensIn: null,
+      tokensOut: null,
+      latencyMs: null,
+    });
+  } catch (err) {
+    log.error({ errorCode: errorCodeFor(err) }, 'shadow scorer could not record a dropped turn');
+  } finally {
+    busyWrites--;
+  }
+}
+
 // ---- test hooks --------------------------------------------------------------
 
 /** Resolves when every shadow score in flight has settled. */
@@ -273,12 +352,15 @@ export async function _settleShadowScorerForTests(): Promise<void> {
 }
 
 export function _resetShadowScorerForTests(overrides: Partial<ShadowDeps> | null = null, start = false): void {
-  deps = overrides ? { ...realDeps, ...overrides } : realDeps;
+  // Tests that do not care about the scope read get "in scope", not a real query.
+  deps = overrides ? { ...realDeps, inScope: async () => true, ...overrides } : realDeps;
   started = start;
   cachedConfig = null;
   configRead = null;
   inFlight.clear();
   dropped = 0;
+  busyWrites = 0;
+  scopeCache.clear();
   client = null;
 }
 
