@@ -63,6 +63,7 @@ import {
   type QuietCheckInDeps,
   type QuietCheckInRecord,
 } from './liveQuietCheckIn.service.js';
+import { noteVoiceCrisisLineSpoken } from './voiceCrisisLine.service.js';
 import {
   clearLiveOpening,
   liveOpeningAwaitingSpeech,
@@ -2540,6 +2541,7 @@ export class SidebandManager {
     // short check-in (ai-therapist-414). Ordinary sessions only: a crisis
     // recovery session runs on its own narrow prompt and watchdog.
     if (this.sessions.get(sessionId)?.delegationMode === 'responses') {
+      noteVoiceCrisisLineSpoken(sessionId, text);
       void noteAssistantTurnForQuietCheckIn(sessionId, text, this.quietCheckInDeps);
     }
 
@@ -2566,7 +2568,17 @@ export class SidebandManager {
   private readonly quietCheckInDeps: QuietCheckInDeps = {
     isOpen: (sessionId) => {
       const state = this.sessions.get(sessionId);
-      return !!state && !state.finalized && state.ws.readyState === WebSocket.OPEN;
+      // Not once the call is ending (End pressed, the close is in flight) or
+      // has been handed to typed chat after a filtered reply: commentary sent
+      // then is rejected by the vendor and would tell staff a check-in was
+      // spoken when nobody heard one.
+      return (
+        !!state &&
+        !state.finalized &&
+        state.ws.readyState === WebSocket.OPEN &&
+        !this.endedSessions.has(sessionId) &&
+        !this.filteredReplyHandoffs.has(sessionId)
+      );
     },
     lastAssistantSpeechAt: (sessionId) => this.sessions.get(sessionId)?.lastAssistantDeltaAt ?? 0,
     lastParticipantSpeechAt: (sessionId) => this.sessions.get(sessionId)?.lastUserDeltaAt ?? 0,
@@ -3691,6 +3703,9 @@ export class SidebandManager {
     clearVoiceToolOutcomes(sessionId);
     const delegate = this.delegateFor(sessionId);
     if (delegate) return delegate.disconnect(sessionId, opts);
+    // Before the graceful-close wait below, not after it: a check-in timer
+    // due during that wait must not speak into a closing call.
+    stopQuietCheckIn(sessionId);
     this.endedSessions.add(sessionId);
     this.sidebandClosedAt.delete(sessionId);
     if (this.endedSessions.size > 1000) {

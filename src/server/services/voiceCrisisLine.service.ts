@@ -57,6 +57,10 @@ interface CrisisLineState {
   requests: number;
   firstRequestAt: number;
   lastRequestAt: number;
+  /** An assistant turn after the first request named the line. Latched: the
+   *  recent-turns window holds only the last few turns, and a long session
+   *  must not forget that the line was said. */
+  spoken: boolean;
   touchedAt: number;
 }
 
@@ -88,7 +92,7 @@ export function voiceCrisisLineDue(sessionId: string, now: number = Date.now()):
     const state = states.get(sessionId);
     if (!state) return true;
     state.touchedAt = now;
-    if (state.requests >= VOICE_CRISIS_LINE_MAX_REQUESTS) return false;
+    if (state.spoken || state.requests >= VOICE_CRISIS_LINE_MAX_REQUESTS) return false;
     const turns = recentTurns(sessionId)?.turns ?? [];
     return !turns.some((t) => t.role === 'assistant' && t.at >= state.firstRequestAt && namesCrisisLine(t.content));
   } catch {
@@ -105,8 +109,19 @@ export function markVoiceCrisisLineRequested(sessionId: string, now: number = Da
     state.touchedAt = now;
     return;
   }
-  states.set(sessionId, { requests: 1, firstRequestAt: now, lastRequestAt: now, touchedAt: now });
+  states.set(sessionId, { requests: 1, firstRequestAt: now, lastRequestAt: now, spoken: false, touchedAt: now });
   evict(now);
+}
+
+/**
+ * A finished assistant voice turn. Once the line has been asked for, the
+ * first turn that names it settles the matter for the rest of the session.
+ * (Before any request nothing is latched: the line said in passing earlier
+ * does not stand in for saying it when the participant discloses.)
+ */
+export function noteVoiceCrisisLineSpoken(sessionId: string, text: string | null | undefined): void {
+  const state = states.get(sessionId);
+  if (state && !state.spoken && namesCrisisLine(text)) state.spoken = true;
 }
 
 /** Did a steer on this same turn (moments ago) ask for the line? Not a request of its own. */
