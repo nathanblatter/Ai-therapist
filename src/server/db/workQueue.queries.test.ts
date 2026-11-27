@@ -14,6 +14,8 @@ import {
   resolveWorkItem,
   expireWorkItemsBySource,
   getSandboxWorkItemIds,
+  listScreenerTrendReadings,
+  expireScreenerTrendItems,
 } from './workQueue.queries.js';
 
 beforeEach(() => {
@@ -164,5 +166,62 @@ describe('getWorkItemById', () => {
   it('returns null on a miss', async () => {
     queryMock.mockResolvedValueOnce({ rows: [] });
     await expect(getWorkItemById(1)).resolves.toBeNull();
+  });
+});
+
+describe('listScreenerTrendReadings', () => {
+  it('reads only PHQ-2 / GAD-2, newest N per client+scale, for care-team clients and real participants', async () => {
+    queryMock.mockResolvedValueOnce({
+      rows: [{ client_id: '42', scale: 'phq2', response_id: '9', score: '4', created_at: '2026-11-15T10:00:00.000Z' }],
+    });
+    const rows = await listScreenerTrendReadings(114, 3);
+    const sql = String(queryMock.mock.calls[0][0]);
+    expect(sql).toContain(`sr.scale IN ('phq2', 'gad2')`);
+    // Care-team clients, or real participants with no care team (IRB study).
+    expect(sql).toContain('EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.client_id = ts.user_id)');
+    expect(sql).toContain(`OR (u.role = 'participant' AND u.is_sandbox = FALSE)`);
+    // Never demo/harness sessions or withdrawn participants.
+    expect(sql).toContain('ts.is_demo IS NOT TRUE');
+    expect(sql).toContain(`u.study_status <> 'withdrawn'`);
+    expect(sql).toContain('PARTITION BY ts.user_id, sr.scale');
+    expect(sql).toContain('rn <= $2');
+    expect(queryMock.mock.calls[0][1]).toEqual([114, 3]);
+    expect(rows).toEqual([
+      { client_id: 42, scale: 'phq2', response_id: 9, score: 4, created_at: '2026-11-15T10:00:00.000Z' },
+    ]);
+  });
+});
+
+describe('expireScreenerTrendItems', () => {
+  it('expires only open/acked screener_trend items for that client+scale, keeping the current one', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [ITEM] });
+    await expect(expireScreenerTrendItems(42, 'phq2', 'screener_trend:42:phq2:9')).resolves.toEqual([ITEM]);
+    const sql = String(queryMock.mock.calls[0][0]);
+    expect(sql).toContain(`item_type = 'screener_trend'`);
+    expect(sql).toContain(`detail->>'scale' = $2`);
+    expect(sql).toContain(`status IN ('open', 'acked')`);
+    expect(sql).toContain('source_id <> $3');
+    // Supersede only when the replacement item really exists.
+    expect(sql).toContain('kept.source_id = $3');
+    expect(queryMock.mock.calls[0][1]).toEqual([42, 'phq2', 'screener_trend:42:phq2:9']);
+  });
+
+  it('expires every live item for the client+scale when nothing is kept (recovery)', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    await expireScreenerTrendItems(42, 'gad2', null);
+    expect(queryMock.mock.calls[0][1]).toEqual([42, 'gad2', null]);
+  });
+});
+
+describe('screener_trend visibility (same caseload scoping as every pool item)', () => {
+  it('member reads, acks and resolves gate on the caseload edge with no item-type exemption', async () => {
+    queryMock.mockResolvedValue({ rows: [] });
+    await listWorkItemsForMember(7);
+    await ackWorkItem(1, 7);
+    await resolveWorkItem(1, 7, null);
+    for (const [sql] of queryMock.mock.calls) {
+      expect(String(sql)).toContain('tc.therapist_id = $1 AND tc.client_id = work_items.client_id');
+      expect(String(sql)).not.toContain('screener_trend');
+    }
   });
 });

@@ -15,6 +15,7 @@ export type WorkItemType =
   | 'note_awaiting_signature'
   | 'inactivity'
   | 'screener_worsening'
+  | 'screener_trend'
   | 'message_unread_stale'
   | 'survey_drift'
   | 'participant_enrolled'
@@ -259,4 +260,102 @@ export async function expireWorkItemsBySource(
     [itemType, sourceTable, sourceIds],
   );
   return result.rows.map((row) => row.item_id);
+}
+
+/** One PHQ-2 / GAD-2 administration for the screener_trend sweep. */
+export interface ScreenerTrendReadingRow {
+  client_id: number;
+  scale: string;
+  response_id: number;
+  score: number;
+  created_at: string;
+}
+
+/**
+ * The last `perScale` PHQ-2 / GAD-2 administrations per client and scale
+ * (oldest first within each group), limited to readings in the last
+ * `lookbackDays`. Who is covered:
+ *   - any client with at least one care-team edge (the item reaches that care
+ *     team through MEMBER_VISIBILITY; sandbox clients included, in-app only,
+ *     like every other kind), and
+ *   - real participants with NO care team (role 'participant', not sandbox):
+ *     the IRB study population. Their item is visible in the researcher org
+ *     view and the sweep notifies the org's researchers.
+ * Never read: demo/harness sessions (therapy_sessions.is_demo), withdrawn
+ * participants, staff/demo/sandbox accounts with no care team, anonymous
+ * sessions. created_at is returned as an ISO-8601 UTC string so the caller's
+ * Date parsing does not depend on the session's DateStyle/TimeZone.
+ */
+export async function listScreenerTrendReadings(
+  lookbackDays: number,
+  perScale: number,
+): Promise<ScreenerTrendReadingRow[]> {
+  const result = await pool.query<ScreenerTrendReadingRow>(
+    `WITH ranked AS (
+       SELECT ts.user_id AS client_id, sr.scale, sr.response_id, sr.score,
+              sr.created_at,
+              ROW_NUMBER() OVER (PARTITION BY ts.user_id, sr.scale
+                                 ORDER BY sr.created_at DESC, sr.response_id DESC) AS rn
+       FROM scale_responses sr
+       JOIN therapy_sessions ts ON ts.session_id = sr.session_id
+       JOIN users u ON u.userid = ts.user_id
+       WHERE sr.scale IN ('phq2', 'gad2')
+         AND ts.is_demo IS NOT TRUE
+         AND u.study_status <> 'withdrawn'
+         AND sr.created_at > now() - ($1 || ' days')::interval
+         AND (
+           EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.client_id = ts.user_id)
+           OR (u.role = 'participant' AND u.is_sandbox = FALSE)
+         )
+     )
+     SELECT client_id, scale, response_id, score,
+            to_char(ranked.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at
+     FROM ranked
+     WHERE rn <= $2
+     ORDER BY client_id, scale, ranked.created_at, response_id`,
+    [lookbackDays, perScale],
+  );
+  return result.rows.map((row) => ({
+    ...row,
+    client_id: Number(row.client_id),
+    response_id: Number(row.response_id),
+    score: Number(row.score),
+  }));
+}
+
+/**
+ * Expire a client's open/acked screener_trend items for one scale, except
+ * `keepSourceId` (the item for the current reading, when there is one).
+ * Used when a newer reading supersedes an item and when scores recover.
+ * With a `keepSourceId`, nothing is expired unless that item actually exists:
+ * enqueueWorkItem swallows insert failures, and a failed insert must not
+ * leave the client with no live item. Returns the expired rows so the caller
+ * can emit work_item:updated.
+ */
+export async function expireScreenerTrendItems(
+  clientId: number,
+  scale: string,
+  keepSourceId: string | null,
+): Promise<WorkItemRow[]> {
+  const result = await pool.query<WorkItemRow>(
+    `UPDATE work_items
+     SET status = 'expired'
+     WHERE item_type = 'screener_trend' AND client_id = $1
+       AND detail->>'scale' = $2
+       AND status IN ('open', 'acked')
+       AND (
+         $3::text IS NULL
+         OR (
+           source_id <> $3
+           AND EXISTS (
+             SELECT 1 FROM work_items kept
+             WHERE kept.item_type = 'screener_trend' AND kept.source_table = 'scale_responses'
+               AND kept.source_id = $3
+           )
+         )
+       )
+     RETURNING ${ITEM_COLUMNS}`,
+    [clientId, scale, keepSourceId],
+  );
+  return result.rows;
 }
