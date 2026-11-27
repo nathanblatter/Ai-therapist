@@ -733,13 +733,34 @@ the turn closes. It answers `no_speech` only when all of this holds:
    chunk, no batch without `seq`, no write error. One lost chunk (it may have
    been speech) and the session never gets a verdict again.
 2. No chunk the browser did not mark muted has arrived since 120 s before the
-   turn's first transcript fragment (`MUTED_TURN_WINDOW_MS`).
-3. The track has been received past the moment the turn closed, shown without
+   turn started (`MUTED_TURN_WINDOW_MS`). The start is the server's estimate:
+   the earlier of the first transcript fragment's arrival and "now minus the
+   audio the vendor says the turn spans".
+3. Every chunk marked muted in that window is exact digital silence. The flag
+   is `track.enabled` read on the main thread after the audio was captured,
+   and a disabled track reaches the tee as zeros; a muted-flagged chunk
+   holding anything else was captured with the microphone live, and there is
+   no verdict.
+4. The track has been received past the moment the turn closed, shown without
    comparing clocks: the uploader keeps one request in flight and cuts the
    next batch only after the previous one is answered, so the second batch
    appended after the turn closed was sent after it closed, and its `pushed`
    count covers everything captured up to then. The check waits for every
    chunk up to that index plus one more second of audio, all of it muted.
+5. Capture is proven continuous across the turn. The tee's AudioContext can be
+   suspended while WebRTC already carries the live microphone to the vendor (a
+   recovery session before the first tap, a backgrounded tab); words spoken
+   then are in no chunk, and a participant who mutes afterwards leaves a track
+   that is muted from its first chunk. So there must be a batch that had
+   arrived at least 5 s before the turn started (`MUTED_TURN_LEAD_MS`; not the
+   track's first batch) and a batch sent after the turn closed, with the audio
+   captured between them (the difference of their `pushed` counts) matching
+   the wall clock between their sends to within 750 ms
+   (`MUTED_TURN_CONTINUITY_TOLERANCE_MS`). Each batch was sent between the
+   previous batch's last append and its own arrival, so the comparison uses
+   this server's clock only. A track that started after the turn did, or a
+   pause in capture longer than the tolerance, means no verdict. A turn in
+   the first seconds of a session therefore never gets one.
 
 Until then the turn waits, for at most 5 s (`MUTED_TURN_TIMEOUT_MS`). Unmuted
 audio arriving ends the wait at once as real speech; a timeout, an irregular

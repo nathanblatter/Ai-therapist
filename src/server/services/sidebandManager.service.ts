@@ -140,14 +140,6 @@ const STEER_INTERRUPT_TAIL_MS = 1_200;
 /** The participant counts as still talking if a fragment of theirs arrived this recently. */
 const STEER_PARTICIPANT_TALKING_MS = 1_500;
 /**
- * Muted-turn check (ai-therapist-412): unmuted microphone audio arriving at
- * any time from this long before a participant turn's first transcript
- * fragment means the turn is real speech. Far longer than any delay between
- * speaking and the transcript arriving; a participant who spoke and then
- * muted within this window simply gets no verdict.
- */
-export const MUTED_TURN_WINDOW_MS = 120_000;
-/**
  * A check that finds the participant talking waits for them instead of being
  * dropped: it looks again this often, for at most STEER_TALKING_CEILING_MS.
  * Before, the check was simply skipped, so a participant who said "Mm-hmm"
@@ -2443,16 +2435,24 @@ export class SidebandManager {
     }
     // The verdict (ai-therapist-412) comes from the recorder's muted-turn
     // check, which answers `no_speech` only on complete, positive evidence
-    // that the microphone was muted from well before this turn's first
-    // fragment until after it closed (watchForMutedTurn). Null here, or any
-    // other answer later, and the turn is real speech: scored exactly as it
-    // always was. Only a `no_speech` turn is marked and left unscored.
+    // that the microphone was captured without a pause, and muted, from well
+    // before this turn started until after it closed (watchForMutedTurn).
+    // Null here, or any other answer later, and the turn is real speech:
+    // scored exactly as it always was. Only a `no_speech` turn is marked and
+    // left unscored.
+    //
+    // When the turn started: no later than its first transcript fragment
+    // arrived, and no later than now minus the audio the vendor says the turn
+    // spans. The recorder adds its own margin for the vendor's delay.
     const state = this.sessions.get(sessionId);
-    const firstDeltaAt = state?.userTurnFirstDeltaAt || Date.now();
+    const now = Date.now();
+    const firstDeltaAt = state?.userTurnFirstDeltaAt || now;
     if (state) state.userTurnFirstDeltaAt = 0;
+    const spanMs = endMs - startMs;
+    const turnStartedAt = Math.min(firstDeltaAt, now - (Number.isFinite(spanMs) && spanMs > 0 ? spanMs : 0));
     let mutedWatch: Promise<MutedTurnResult> | null = null;
     try {
-      mutedWatch = watchForMutedTurn(sessionId, firstDeltaAt - MUTED_TURN_WINDOW_MS);
+      mutedWatch = watchForMutedTurn(sessionId, turnStartedAt);
     } catch (err) {
       console.error(`[Live] Starting the muted-turn check failed for ${sessionId.substring(0, 12)}...:`, err);
     }

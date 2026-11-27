@@ -1577,7 +1577,9 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                               {turn.unverified && (
                                 <div className="mt-1 text-[11px] font-semibold bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded flex items-start gap-1">
                                   <MicOff size={12} aria-hidden="true" className="mt-0.5 shrink-0" />
-                                  <span>Unverified speech: microphone was muted. Not risk-scored.</span>
+                                  <span>
+                                    Unverified speech: the recording shows the microphone muted. Not risk-scored.
+                                  </span>
                                 </div>
                               )}
                             </div>
