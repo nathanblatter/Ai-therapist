@@ -16,6 +16,7 @@ export const VOICE_SILENCE_EVENTS = [
   'live:steer-silent',
   'live:steer-unresolved',
   'live:recovery-silent',
+  'live:quiet-check-in',
 ] as const;
 
 export type VoiceSilenceEvent = (typeof VOICE_SILENCE_EVENTS)[number];
@@ -88,6 +89,16 @@ export function voiceSilenceNotice(event: VoiceSilenceEvent, data: unknown): Voi
         event,
         persistent: false,
         message: `Crisis recovery voice session has not spoken after ${after}. The speak-first instruction was re-sent${attemptText}.`,
+      };
+    case 'live:quiet-check-in':
+      return {
+        sessionId,
+        event,
+        persistent: false,
+        message:
+          d.sent === false
+            ? `Participant has been quiet for ${after} after a safety question, and the check-in could not be sent.`
+            : `Participant has been quiet for ${after} after a safety question. The voice assistant was asked to check in.`,
       };
   }
 }

@@ -1312,6 +1312,90 @@ CRAWL scenario's marker was removed; the RUN scenarios still fail for other
 reasons and keep theirs. Numbers and the per-scenario table are in
 `docs/redteam.md`, "Re-measured 2026-11-26".
 
+### The crisis line is said aloud once at medium risk (ai-therapist-406)
+
+Measured 2026-11-26: when the voice model answered a medium-risk disclosure
+(passive ideation) itself, it never named a crisis line (19 of 19 replies).
+Nothing had asked it to. The medium steer said "follow your crisis protocol",
+but the protocol and the numbers are in the clinical prompt on the backend;
+the voice model's own instructions (`buildLiveInstructions`) have neither, and
+at medium risk the server pushes no resource card to a voice session's screen
+(typed chat gets one since ai-therapist-401; in voice it is the high-risk
+response). The line was only spoken, and a card only shown, when the
+turn happened to be delegated and the backend did it.
+
+Since 2026-11-26 the first medium steer of a voice session carries one more
+sentence, `VOICE_CRISIS_LINE_GUIDANCE` (`voiceCrisisLine.service.ts`): say,
+once, after a few warm words and before any question, one short sentence such
+as "If it ever gets to be too much, you can call or text 988, any time, day or
+night", and do not repeat it in later replies unless they ask.
+
+- **Which steers.** Medium severity, the participant's own risk, voice only.
+  Not a low steer, not the high steer (the safety protocol and the resource
+  card own that), not the third-party or harm-to-others texts. Typed chat has
+  its own steer, which already asks for the resources in the reply.
+- **Once.** Requested on the first medium steer. Requested one more time, on a
+  later medium steer (at least the 3-minute steer cooldown later), only if no
+  assistant turn since the first request named 988: the server reads the
+  remembered turns (`recentTurns`, `namesCrisisLine`). Never more than
+  `VOICE_CRISIS_LINE_MAX_REQUESTS` (2). The state is in memory per session, so
+  a process restart can cost one extra request.
+- **Two instructions on that turn.** The risk-check requirement
+  (`RISK_CHECK_REQUIRED_GUIDANCE`, "ask ONE gentle, direct question") is
+  appended moments after the steer. With the sentence only in the steer, 2 of 8
+  voice-layer replies asked the question and left the number out, both after
+  the reply had been interrupted and resumed by the steer-silence prompt. The
+  requirement now restates the sentence when the steer carried it within the
+  last `VOICE_CRISIS_LINE_SAME_TURN_MS` (10 s); that is one request, and the
+  line was said once in every measured reply.
+- **Records.** The `risk_steering` row of that steer carries
+  `crisisLine: 'requested'`, the requirement's row `crisisLine: 'restated'`.
+- **Fits with the heads-up.** The sentence is 252 characters so that the medium
+  steer, this sentence and the voice heads-up still go as one append
+  (`fitsWithHeadsUp`; ai-therapist-381).
+
+Not covered by this: when the turn is delegated and the backend's reply asks
+"are you having thoughts about killing yourself right now?", the vendor's
+filter can close the call before any number is spoken (6 of the 39 scored
+CRAWL medium turns measured that day: 1 of 6 before the change, 5 of 33
+after); the participant is moved to typed chat as for any vendor cut. Numbers: `docs/redteam.md`, "The
+spoken crisis line and the quiet check-in".
+
+### A participant who goes quiet after a safety question (ai-therapist-414)
+
+GPT-Live does not speak unprompted. Measured 2026-11-26: in 2 of 4 calls the
+assistant asked "are you having thoughts of suicide?", the participant said
+nothing, and the assistant said nothing more for the remaining 49.5 s.
+
+The rule (`liveQuietCheckIn.service.ts`; the sideband supplies what it knows
+about the call and makes each check-in visible):
+
+- **Armed** when a finished assistant turn asks about suicide, self-harm or the
+  participant's safety: `asksSafetyQuestion`, the same screen the crisis
+  pipeline uses to read the reply to such a question. Ordinary sessions only,
+  not a crisis recovery session (its own narrow prompt and watchdog).
+- **After `LIVE_QUIET_CHECK_IN_AFTER_MS` (20 s)** in which neither side has
+  spoken, the server sends `LIVE_QUIET_CHECK_IN_COMMENTARY` as commentary: say
+  one short sentence so they know there is no rush and you are still with
+  them, for example "Take your time. I'm still here with you."; do not repeat
+  the question or ask a new one; then wait.
+- **Once per silence.** Nothing more is sent until the participant has spoken
+  (or typed) again, whatever the model says in its check-in. At most
+  `LIVE_QUIET_CHECK_IN_MAX_PER_SESSION` (2) in a session.
+- **Cancelled** by any participant transcript fragment or typed message. The
+  quiet period counts from the assistant's last words, so a reply that goes on
+  after the question (or a backend answer arriving) pushes it back.
+- **Visible to staff.** A `risk_steering` intervention row with
+  `trigger: 'quiet_check_in'` (quiet time, delivered, which check-in), the log
+  line `QUIET AFTER SAFETY QUESTION`, and the admin broadcast
+  `live:quiet-check-in`, which Live Monitoring shows as a transient notice
+  beside the other voice-silence notices (`voiceSilenceNotice.ts`).
+
+The three numbers (20 s, once per silence, 2 per session) and the wording are
+conservative defaults chosen on 2026-11-26, not measured optima: 20 s is long
+enough for someone gathering themselves and well short of the 49.5 s that was
+measured. GPT-Live voice only; the Grok voice proxy has no such watch.
+
 ### A delegation must not leave the participant waiting (ai-therapist-348)
 
 Found in a stage test on 2026-11-18. In a recovery session the participant

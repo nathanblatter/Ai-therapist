@@ -57,6 +57,14 @@ import { rememberTurn } from '../utils/recentTurns.js';
 import { participantMicEvidence, type ParticipantMicEvidence } from './recorder.service.js';
 import { noteVoiceHeadsUpSpeech, voiceHeadsUpPending } from './voiceHeadsUp.service.js';
 import {
+  noteAssistantTurnForQuietCheckIn,
+  noteParticipantSpeechForQuietCheckIn,
+  stopQuietCheckIn,
+  type QuietCheckInDeps,
+  type QuietCheckInRecord,
+} from './liveQuietCheckIn.service.js';
+import { noteVoiceCrisisLineSpoken } from './voiceCrisisLine.service.js';
+import {
   clearLiveOpening,
   liveOpeningAwaitingSpeech,
   noteLiveOpeningAssistantSpeech,
@@ -2113,6 +2121,8 @@ export class SidebandManager {
         const state = this.sessions.get(sessionId);
         if (!state) break;
         state.lastUserDeltaAt = Date.now();
+        // They are speaking: no quiet check-in is due (liveQuietCheckIn.service).
+        noteParticipantSpeechForQuietCheckIn(sessionId);
         // Before any assistant speech this is a barge-in before the opening:
         // the opening watchdog stands down (liveOpening.service.ts).
         noteLiveOpeningParticipantSpeech(sessionId);
@@ -2527,6 +2537,13 @@ export class SidebandManager {
     // A finished turn without the heads-up counts toward "missed" (and a line
     // whose fragments only completed at the flush is caught here).
     noteVoiceHeadsUpSpeech(sessionId, text, true);
+    // A safety question the participant then meets with silence gets one
+    // short check-in (ai-therapist-414). Ordinary sessions only: a crisis
+    // recovery session runs on its own narrow prompt and watchdog.
+    if (this.sessions.get(sessionId)?.delegationMode === 'responses') {
+      noteVoiceCrisisLineSpoken(sessionId, text);
+      void noteAssistantTurnForQuietCheckIn(sessionId, text, this.quietCheckInDeps);
+    }
 
     void (async () => {
       try {
@@ -2545,6 +2562,64 @@ export class SidebandManager {
         console.error(`[Live] Failed to persist assistant turn for ${sessionId.substring(0, 12)}...:`, err);
       }
     })();
+  }
+
+  /** What the quiet check-in (liveQuietCheckIn.service) needs to know about a call. */
+  private readonly quietCheckInDeps: QuietCheckInDeps = {
+    isOpen: (sessionId) => {
+      const state = this.sessions.get(sessionId);
+      // Not once the call is ending (End pressed, the close is in flight) or
+      // has been handed to typed chat after a filtered reply: commentary sent
+      // then is rejected by the vendor and would tell staff a check-in was
+      // spoken when nobody heard one.
+      return (
+        !!state &&
+        !state.finalized &&
+        state.ws.readyState === WebSocket.OPEN &&
+        !this.endedSessions.has(sessionId) &&
+        !this.filteredReplyHandoffs.has(sessionId)
+      );
+    },
+    lastAssistantSpeechAt: (sessionId) => this.sessions.get(sessionId)?.lastAssistantDeltaAt ?? 0,
+    lastParticipantSpeechAt: (sessionId) => this.sessions.get(sessionId)?.lastUserDeltaAt ?? 0,
+    say: async (sessionId, text) => {
+      await this.appendCommentary(sessionId, text);
+      return true;
+    },
+    record: (sessionId, info) => this.recordQuietCheckIn(sessionId, info),
+  };
+
+  /**
+   * A quiet check-in was sent (or could not be): visible to staff the way a
+   * steer is, as a `risk_steering` intervention row (trigger
+   * `quiet_check_in`) and a broadcast to the monitoring dashboard. Numbers
+   * only. Never throws.
+   */
+  private async recordQuietCheckIn(sessionId: string, info: QuietCheckInRecord): Promise<void> {
+    const short = sessionId.substring(0, 12);
+    console.warn(
+      `[Live] QUIET AFTER SAFETY QUESTION for ${short}...: nobody has spoken for ${info.quietMs} ms; ` +
+        `check-in ${info.count} ${info.delivered ? 'sent' : 'could NOT be sent'}.`,
+    );
+    try {
+      if (global.io) {
+        void broadcastAdminEventForSession(
+          global.io,
+          'live:quiet-check-in',
+          { sessionId, afterMs: info.quietMs, sent: info.delivered, attempt: info.count, timestamp: new Date() },
+          sessionId,
+        );
+      }
+      const { logInterventionAction } = await import('./crisisDetection.service.js');
+      await logInterventionAction(sessionId, 'risk_steering', {
+        trigger: 'quiet_check_in',
+        quietMs: info.quietMs,
+        delivered: info.delivered,
+        count: info.count,
+      });
+    } catch (err) {
+      console.error(`[Live] Could not record the quiet check-in for ${short}...:`, err);
+    }
   }
 
   /**
@@ -2893,6 +2968,8 @@ export class SidebandManager {
   sendParticipantText(sessionId: string, text: string): boolean {
     const state = this.sessions.get(sessionId);
     if (!state || state.delegationMode === 'client' || state.ws.readyState !== WebSocket.OPEN) return false;
+    // A typed answer is an answer: no quiet check-in is due.
+    noteParticipantSpeechForQuietCheckIn(sessionId);
     const stamp = clientEventId('typed');
     this.sendEvent(sessionId, {
       type: 'response.item.create',
@@ -3536,6 +3613,7 @@ export class SidebandManager {
     }
 
     if (state) this.clearTimers(state);
+    stopQuietCheckIn(sessionId);
     this.sessions.delete(sessionId);
 
     await pool
@@ -3625,6 +3703,9 @@ export class SidebandManager {
     clearVoiceToolOutcomes(sessionId);
     const delegate = this.delegateFor(sessionId);
     if (delegate) return delegate.disconnect(sessionId, opts);
+    // Before the graceful-close wait below, not after it: a check-in timer
+    // due during that wait must not speak into a closing call.
+    stopQuietCheckIn(sessionId);
     this.endedSessions.add(sessionId);
     this.sidebandClosedAt.delete(sessionId);
     if (this.endedSessions.size > 1000) {
@@ -3678,6 +3759,7 @@ export class SidebandManager {
       current.userTranscript.dispose();
       current.assistantTranscript.dispose();
       this.clearTimers(current);
+      stopQuietCheckIn(sessionId);
       current.ws.close(1000, 'Session ended');
       this.sessions.delete(sessionId);
       this.attachSeqs.delete(sessionId);
