@@ -811,6 +811,60 @@ describe('ai-therapist-357: the trajectory bonus cannot carry a turn across the 
     expect(result.riskScore).toBe(75);
     expect(result.severity).toBe('high');
   });
+
+  // The cap is about a REPEAT of passive ideation. What must keep paging after
+  // a passive statement, with the very same run-up: a plan, the means, intent
+  // with a time. Each is scored at or above the cutoff on its own content, so
+  // the cap never touches it.
+  it.each([
+    ['a plan', "I've been thinking about how I would kill myself. I'd use the pills in the cabinet.", 85],
+    ['the means at hand', 'I have the pills right here and I want to kill myself.', 90],
+    ['intent with a time', "I'm going to kill myself tonight.", 95],
+    ['active ideation at the bottom of the high band', 'I keep thinking about suicide and it is getting louder.', 65],
+  ])('after passive ideation, %s still pages and is never capped', async (_what, text, assessorScore) => {
+    runUp([55, 20]);
+    createMock.mockResolvedValue(assess(assessorScore, 'genuine', ['escalation']));
+    const result = await analyzeMessageRisk(turn(text), []);
+    expect(result.severity).toBe('high');
+    expect(result.riskScore).toBe(Math.min(100, assessorScore + 10));
+    expect(riskRow().trajectory_capped_below_high).toBeUndefined();
+  });
+
+  it('a keyword-free escalation in a session holding passive ideation ("I have what I need.") pages on the assessor\'s score', async () => {
+    // A context wake: no bonus is added to it at all, so there is nothing to cap.
+    queryMock.mockImplementation(async (sql: unknown) => {
+      const text = String(sql);
+      if (text.includes('session-risk-context')) {
+        return {
+          rows: [
+            {
+              crisis_flagged: true,
+              crisis_severity: 'medium',
+              recent: [{ risk_score: 55, score_factors: { method: 'llm_assessed' } }],
+            },
+          ],
+        };
+      }
+      if (text.includes('LIMIT 5'))
+        return { rows: [55, 20].map((risk_score) => ({ risk_score, calculated_at: new Date() })) };
+      return { rows: [] };
+    });
+    createMock.mockResolvedValue(assess(80, 'genuine', ['means at hand']));
+    const result = await analyzeMessageRisk(turn('I have what I need.'), []);
+    expect(result.severity).toBe('high');
+    expect(result.riskScore).toBe(80);
+    expect(riskRow().trajectory_capped_below_high).toBeUndefined();
+  });
+
+  it('the cap holds at every assessor score in the passive band (50 to 64) and with the largest bonus', async () => {
+    for (const score of [50, 55, 60, 64]) {
+      runUp([45, 20, 5]); // most recent first: rising (+15) and a jump of 25 (+10), the 20 maximum
+      createMock.mockResolvedValue(assess(score, 'genuine', ['passive ideation']));
+      const result = await analyzeMessageRisk(turn("I wouldn't mind not waking up."), []);
+      expect(result.severity, `assessor ${score}`).toBe('medium');
+      expect(result.riskScore, `assessor ${score}`).toBeLessThan(65);
+    }
+  });
 });
 
 describe('own risk beside harm to others in the same message', () => {
