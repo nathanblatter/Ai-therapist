@@ -771,8 +771,9 @@ A `no_speech` turn:
 
 What the guard does not do. It is scoped to the GPT-Live sideband (not Grok
 voice). The vendor still heard a participant turn and may answer it; the
-opening watch is still settled as `participant_first` by the phantom's first
-fragment. Session summaries, insights, evaluations and the participant's own
+opening watch still counts the phantom's first fragment as the participant
+speaking (since ai-therapist-315 that only cancels the re-send, see the
+opening section). Session summaries, insights, evaluations and the participant's own
 transcript still read the row. A session without a consented recording, or
 with any lost audio, gets no verdicts. Turns stored before 2026-11-27 carry no
 mark; `mic_audio` exists from 2026-11-26.
