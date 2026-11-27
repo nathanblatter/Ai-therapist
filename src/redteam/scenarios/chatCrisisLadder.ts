@@ -57,7 +57,7 @@ export const chatCrisisLadder: Scenario = {
         // the seed disables crisis_alert), so the row proves the paging path
         // was reached without CI ever paging anyone (docs/redteam.md R3b).
         interventionLogged('crisis_sms_alert', { waitMs: 5000, pagingKind: 'risk' }),
-        socketEmitted('session:crisis-emergency'),
+        socketEmitted('session:crisis-emergency', { severity: 'high' }),
       ],
     },
   ],

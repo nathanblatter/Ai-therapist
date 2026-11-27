@@ -40,7 +40,9 @@ const {
   clearSteeringState,
   buildChatSteeringGuidance,
   CHAT_SAFETY_PROTOCOL_GUIDANCE,
+  CHAT_RISK_CHECK_REPLY_GUIDANCE,
   RISK_CHECK_REQUIRED_GUIDANCE,
+  chatRiskCheckRequiredGuidance,
 } = await import('./crisisIntervention.service.js');
 
 let sessionCounter = 0;
@@ -63,6 +65,51 @@ describe('steering copy names the run_risk_check tool', () => {
 
   it('chat high-severity safety protocol instructs the model to log the ladder', () => {
     expect(CHAT_SAFETY_PROTOCOL_GUIDANCE).toContain('run_risk_check');
+  });
+});
+
+// ai-therapist-401: the first reply to passive ideation sometimes carried no
+// crisis line. The ladder requirement said "ask ONE question" and the medium
+// steer left the lines to "if anything suggests thoughts of self-harm".
+describe('a medium typed-chat turn is told to give the crisis lines AND ask its one question', () => {
+  const LINES = ['call or text 988', 'text HOME to 741741'];
+
+  it('the medium steer asks for the lines unconditionally, with one safety question', () => {
+    const guidance = buildChatSteeringGuidance(55, 'medium');
+    for (const line of LINES) expect(guidance).toContain(line);
+    expect(guidance).not.toContain('If anything suggests');
+    expect(guidance).toContain('ask one direct question about their safety');
+    expect(guidance).toContain('Tell them you are staying right here with them.');
+    expect(guidance).toContain('(score 55/100)');
+  });
+
+  it('the low steer keeps its conditional wording', () => {
+    const guidance = buildChatSteeringGuidance(30, 'low');
+    expect(guidance).toContain('If anything suggests thoughts of self-harm');
+    expect(guidance).not.toContain('741741');
+  });
+
+  it('the ladder requirement for chat says one question is not the whole reply, and carries the lines by itself', () => {
+    // By itself: the requirement is also sent on turns where the steer is
+    // inside its cooldown and is not sent.
+    const guidance = chatRiskCheckRequiredGuidance();
+    expect(guidance).toContain('ask ONE gentle, direct question');
+    expect(guidance).toContain('one assessment question per reply, not that the reply is only a question');
+    for (const line of LINES) expect(guidance).toContain(line);
+    expect(guidance).toContain('Do not leave the crisis lines for a later turn.');
+  });
+
+  it('the voice ladder requirement is unchanged: the chat sentences are not in it', () => {
+    expect(RISK_CHECK_REQUIRED_GUIDANCE).not.toContain(CHAT_RISK_CHECK_REPLY_GUIDANCE);
+    expect(RISK_CHECK_REQUIRED_GUIDANCE).not.toContain('741741');
+  });
+
+  it('the high chat protocol tells the model to say it is staying', () => {
+    expect(CHAT_SAFETY_PROTOCOL_GUIDANCE).toContain('tell them you are staying right here with them');
+    expect(CHAT_SAFETY_PROTOCOL_GUIDANCE).toContain('offer to stay while they call or text');
+    // Measured: with the staying sentence alone, the question about company
+    // (Crisis Protocol) dropped from 4 of 5 runs to 1 of 5; the steer names it.
+    expect(CHAT_SAFETY_PROTOCOL_GUIDANCE).toContain('ask whether someone could be with them in person');
   });
 });
 
@@ -100,7 +147,9 @@ describe('maybeRequireRiskCheck', () => {
   it('chat: returns the ladder demand and records the attempt', async () => {
     const s = freshSession();
     const guidance = await maybeRequireRiskCheck(s, 40, 'medium', 'chat');
-    expect(guidance).toBe(RISK_CHECK_REQUIRED_GUIDANCE);
+    // Chat gets the shared requirement plus what the reply itself must hold (ai-therapist-401).
+    expect(guidance).toBe(chatRiskCheckRequiredGuidance());
+    expect(guidance).toBe(`${RISK_CHECK_REQUIRED_GUIDANCE} ${CHAT_RISK_CHECK_REPLY_GUIDANCE}`);
     expect(guidance).toContain('run_risk_check');
     expect(logInterventionActionMock).toHaveBeenCalledWith(
       s,

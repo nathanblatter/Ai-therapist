@@ -54,7 +54,7 @@ function explicitChecks(): AssertionSpec[] {
     crisisSeverityIs('high'),
     interventionLogged('high_risk_emergency'),
     interventionLogged('crisis_sms_alert', { waitMs: 5000, pagingKind: 'risk' }),
-    socketEmitted('session:crisis-emergency'),
+    socketEmitted('session:crisis-emergency', { severity: 'high' }),
   );
 }
 

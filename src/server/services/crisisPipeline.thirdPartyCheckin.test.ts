@@ -70,6 +70,7 @@ vi.mock('./crisisIntervention.service.js', () => ({
 vi.mock('./crisisResources.js', () => ({
   emitCrisisResources: emitCrisisResourcesMock,
   hasEmittedHighRiskResources: () => false,
+  hasEmittedRiskResources: () => false,
 }));
 vi.mock('../db/index.js', () => ({
   getRecentSessionMessages: getRecentSessionMessagesMock,

@@ -47,7 +47,7 @@ export const crisisAcrossQuietHours: Scenario = {
         sessionFlagged(true),
         interventionLogged('high_risk_emergency'),
         interventionLogged('crisis_sms_alert', { waitMs: 5000, pagingKind: 'risk' }),
-        socketEmitted('session:crisis-emergency'),
+        socketEmitted('session:crisis-emergency', { severity: 'high' }),
         replyGivesLine('988'),
         replyIsNotFarewell(),
         sessionStillActive(),

@@ -14,6 +14,8 @@
 // it:
 //
 //   - the crisis pipeline, the moment a turn scores high (before any DB write);
+//   - the crisis pipeline, once per typed-chat session, when a turn scores
+//     medium (ai-therapist-401, see 'medium_risk' below);
 //   - executeHighRiskResponse, as before (deduplicated against the line above);
 //   - the sideband, when the vendor stops a generation (`error` with code
 //     content_filter) or closes the session for content or, in a crisis, at
@@ -26,6 +28,13 @@ import { noteLiveOpeningCrisis } from './liveOpening.service.js';
 export type CrisisResourceReason =
   /** Our own pipeline scored the turn high. */
   | 'high_risk'
+  /** Our own pipeline scored a typed-chat turn medium (passive ideation and the
+   *  like). ai-therapist-401: the first reply to "I don't want to be here
+   *  anymore" sometimes carried no crisis line, and at medium nothing but the
+   *  model's wording put one on screen. The card now does, by code. Chat only,
+   *  once per session, never after the high card; it does not mark the session
+   *  as in crisis (`severity` is 'medium', and the browser reads 'high'). */
+  | 'medium_risk'
   /** The vendor's moderation stopped the assistant mid-reply (session may live on). */
   | 'vendor_moderation_stop'
   /** The vendor closed the session for content. */
@@ -35,8 +44,8 @@ export type CrisisResourceReason =
 
 export interface CrisisResourcePayload {
   reason: CrisisResourceReason;
-  /** 'high' when our pipeline scored it; null when only the vendor acted. */
-  severity?: 'high' | null;
+  /** 'high' or 'medium' when our pipeline scored it; null when only the vendor acted. */
+  severity?: 'high' | 'medium' | null;
   riskScore?: number | null;
 }
 
@@ -48,7 +57,7 @@ export interface CrisisResourcePayload {
  *  reads `severity: 'high'` to know the session is in crisis). */
 export const CRISIS_RESOURCE_DEDUPE_MS = 10_000;
 
-type Kind = 'high' | 'vendor';
+type Kind = 'high' | 'medium' | 'vendor';
 const lastEmittedAt = new Map<string, Partial<Record<Kind, number>>>();
 
 // The card for a high flag raised BEFORE the participant's browser is in the
@@ -65,7 +74,7 @@ const participantJoined = new Set<string>();
 const pendingForJoin = new Map<string, { at: number; event: Record<string, unknown> }>();
 
 function kindOf(reason: CrisisResourceReason): Kind {
-  return reason === 'high_risk' ? 'high' : 'vendor';
+  return reason === 'high_risk' ? 'high' : reason === 'medium_risk' ? 'medium' : 'vendor';
 }
 
 /**
@@ -89,7 +98,7 @@ export function emitCrisisResources(sessionId: string, payload: CrisisResourcePa
     if (lastEmittedAt.size > 500) {
       const cutoff = now - 60 * 60 * 1000;
       for (const [id, e] of lastEmittedAt) {
-        if (Math.max(e.high ?? 0, e.vendor ?? 0) < cutoff) lastEmittedAt.delete(id);
+        if (Math.max(e.high ?? 0, e.medium ?? 0, e.vendor ?? 0) < cutoff) lastEmittedAt.delete(id);
       }
     }
     const event = {
@@ -99,7 +108,10 @@ export function emitCrisisResources(sessionId: string, payload: CrisisResourcePa
       reason: payload.reason,
     };
     global.io.to(`session:${sessionId}`).emit('session:crisis-emergency', event);
-    if (kind === 'high' && !participantJoined.has(sessionId)) {
+    // A medium card raised before the join is held the same way, but never
+    // replaces a high one already waiting (the browser reads its severity).
+    const holdsHigh = kind === 'medium' && pendingForJoin.get(sessionId)?.event.severity === 'high';
+    if ((kind === 'high' || kind === 'medium') && !holdsHigh && !participantJoined.has(sessionId)) {
       pendingForJoin.set(sessionId, { at: now, event });
       if (pendingForJoin.size > 500) {
         for (const [id, p] of pendingForJoin) {
@@ -117,6 +129,13 @@ export function emitCrisisResources(sessionId: string, payload: CrisisResourcePa
 /** Has this session's browser already been sent the card for our own high flag? */
 export function hasEmittedHighRiskResources(sessionId: string): boolean {
   return lastEmittedAt.get(sessionId)?.high !== undefined;
+}
+
+/** Has this session's browser already been sent the card for a medium or a
+ *  high flag of ours? The medium card is sent once, and never after either. */
+export function hasEmittedRiskResources(sessionId: string): boolean {
+  const entry = lastEmittedAt.get(sessionId);
+  return entry?.high !== undefined || entry?.medium !== undefined;
 }
 
 /**

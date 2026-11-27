@@ -54,6 +54,29 @@ export const RISK_CHECK_REQUIRED_GUIDANCE =
   `this is an assessment, not an interrogation. ` +
   `Ask the question plainly. Do not say or imply that the participant told you something they did not say, and do not describe their feelings for them.`;
 
+/**
+ * Typed chat only: what the ladder requirement adds about the reply itself
+ * (ai-therapist-401). "Ask ONE question" was read as "the reply is one
+ * question": measured, the first reply to passive ideation acknowledged it,
+ * asked about suicide and stopped, with no crisis line, although the steer
+ * sent alongside said to include them (conditionally: "if anything suggests").
+ * The two now say the same thing: one question, and the lines, in one reply.
+ * It also stands on its own, because the ladder requirement is sent on turns
+ * where the steer is inside its cooldown and is not sent at all.
+ */
+export const CHAT_RISK_CHECK_REPLY_GUIDANCE =
+  `ONE question means one assessment question per reply, not that the reply is only a question. ` +
+  `In the same short reply, acknowledge what they said, ask your one question, and give the crisis lines by name ` +
+  `as help alongside you and not instead of you: the 988 Suicide & Crisis Lifeline (call or text 988) and the Crisis Text Line (text HOME to 741741). ` +
+  `Tell them you are staying right here with them. Do not leave the crisis lines for a later turn.`;
+
+/** The ladder requirement as typed chat receives it. A function, not an
+ *  exported steer constant: it never travels over the voice sideband, whose
+ *  length cap (clinicalSteerLength.test.ts) applies to those. */
+export function chatRiskCheckRequiredGuidance(): string {
+  return `${RISK_CHECK_REQUIRED_GUIDANCE} ${CHAT_RISK_CHECK_REPLY_GUIDANCE}`;
+}
+
 /** Default trigger score: the moderate/medium entry boundary the stage-2 risk
  *  assessor already uses (40-60 = medium/passive ideation in its rubric).
  *  Override with system_config crisis.risk_check_min_score, mirroring how
@@ -158,7 +181,7 @@ export async function maybeRequireRiskCheck(
       );
     }
 
-    return channel === 'chat' ? RISK_CHECK_REQUIRED_GUIDANCE : null;
+    return channel === 'chat' ? chatRiskCheckRequiredGuidance() : null;
   } catch (error) {
     // Safety-adjacent but strictly additive: never break the pipeline over it.
     console.error('[crisis] risk-check requirement failed (non-fatal):', error);
@@ -231,12 +254,28 @@ export function clearSteeringState(sessionId: string): void {
 
 /** Chat-channel steering guidance (severity low/medium). */
 export function buildChatSteeringGuidance(riskScore: number, severity: string): string {
-  void severity; // reserved for future severity-specific tuning; base copy is shared.
-  return (
+  const base =
     `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
     `Risk signals in this conversation are elevated (score ${riskScore}/100). ` +
     `Slow your pace and keep responses short, warm, and grounded. Prioritize validation and reflective listening over problem-solving. ` +
-    `Gently check how the participant is feeling right now. ` +
+    `Gently check how the participant is feeling right now. `;
+  // Medium (ai-therapist-401): the detector has already judged that the
+  // message carries risk (passive ideation is 50 to 64), so the crisis lines
+  // are no longer left to the model's own "if anything suggests": this reply
+  // gives them, alongside one safety question. Low keeps the conditional.
+  if (severity === 'medium') {
+    return (
+      base +
+      `The participant's latest message may express a wish not to be alive or thoughts of self-harm. ` +
+      `Follow your crisis protocol in this reply: acknowledge what they said and ask one direct question about their safety. ` +
+      `Include the crisis resources from your instructions directly in this reply, as help alongside you and not instead of you: ` +
+      `the 988 Suicide & Crisis Lifeline (call or text 988) and the Crisis Text Line (text HOME to 741741). ` +
+      `Tell them you are staying right here with them. ` +
+      RISK_CHECK_DIRECTIVE
+    );
+  }
+  return (
+    base +
     `If anything suggests thoughts of self-harm, follow your crisis protocol and include the crisis resources from your instructions in your reply. ` +
     RISK_CHECK_DIRECTIVE
   );
@@ -256,7 +295,8 @@ export const CHAT_SAFETY_PROTOCOL_GUIDANCE =
   `Between questions, validate and stay warm — do not interrogate. ` +
   `Include the crisis resources from your instructions directly in your reply — the 988 Suicide & Crisis Lifeline (call or text 988), the Crisis Text Line (text HOME to 741741), and the BYU CAPS crisis line (801-422-3035) — ` +
   `and, if they engage, offer to write out a simple safety plan together in the chat. ` +
-  `Do not end the session yourself. Stay with them. ` +
+  `Do not end the session yourself. Stay with them, and say so: tell them you are staying right here with them, offer to stay while they call or text, ` +
+  `and, alongside your one assessment question, ask whether someone could be with them in person. ` +
   RISK_CHECK_DIRECTIVE;
 
 // ============================================

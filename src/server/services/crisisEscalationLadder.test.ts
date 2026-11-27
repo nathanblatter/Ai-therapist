@@ -140,6 +140,7 @@ vi.mock('./sidebandManager.service.js', () => ({
 vi.mock('./crisisResources.js', () => ({
   emitCrisisResources: vi.fn(),
   hasEmittedHighRiskResources: () => true,
+  hasEmittedRiskResources: () => true,
   clearCrisisResourceState: vi.fn(),
 }));
 vi.mock('./workQueue.service.js', () => ({ enqueueWorkItem: vi.fn(async () => null) }));
