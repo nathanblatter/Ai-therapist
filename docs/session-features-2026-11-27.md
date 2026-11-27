@@ -560,7 +560,7 @@ worse than not having it. Eight are marked weak. The mark is in the code
 
 | variable | what went wrong |
 |---|---|
-| `topic_work_school` | Over-inclusive when work or study is only the setting: 3 false alarms in 7 intended-absent held-out sessions; 1 in 7 after an exclusion was added. Changed in 2 transcripts under surface edits. |
+| `topic_work_school` | Over-inclusive when work or study is only the setting: 3 false alarms in 7 intended-absent held-out sessions; 1 in 7 after an exclusion was added (on the same sessions, so no longer a held-out figure for this variable). Changed in 2 transcripts under surface edits. |
 | `topic_anxiety_worry` | The least stable topic (3 of 25 transcripts under surface edits, 1 of 8 under paraphrase); false alarms on rumination and money stress; reworded after draft 1 (22 of 25). |
 | `coping_planning_problem_solving` | The second-worst variable of draft 1 (20 of 25) and rewritten. Overlaps `practice_agreed` whenever a plan is a dated step; both independent coders named this boundary as the hardest. |
 | `practice_agreed` | Hard to separate from a plan the participant makes alone and from a weak "maybe". Present in 12 of 18 stage sessions and uncertain in 4 more; one held-out false alarm. |
@@ -583,7 +583,10 @@ a script that only SELECTs, the method of the alliance work. Nothing was
 written to stage and no row was stored. Stage sessions are test conversations
 by staff and simulated participants, so the rates below are not estimates of
 anything about participants. (The alliance document counted 72 eligible stage
-sessions a day earlier; the difference was not investigated.)
+sessions a day earlier, under its original rule: any session whose owner is
+not a sandbox account. The rule was then tightened to enrolled participants
+only. A read-only count on stage gives 49 researcher-owned, 3 ownerless and
+20 participant sessions, which sum to 72; 20 is the right number now.)
 
 - 2 of 20 under the length floor: no model call. 18 coded, 0 errored.
 - 0 of 612 variables unknown (no refusal, nothing malformed), including the
@@ -634,9 +637,13 @@ sessions a day earlier; the difference was not investigated.)
   None on stage came near the budget.
 - **Withheld messages.** A message waiting for leak review is not read, so a
   variable evidenced only in such a message is coded absent until the review
-  and the re-run; the row is stale in between and marked so.
-- **Per-variable unknowns are not retried.** A row with some unknown
-  variables is `extracted`; the backfill does not list it again. `--session
+  and the re-run. In between the row is NOT stale (the fingerprint covers
+  readable messages only and changes when the review releases the message);
+  the export's `messages_withheld` column shows how many messages were held
+  back at export time, and a row with a value above 0 is incomplete.
+- **Per-variable unknowns are not retried.** A row with up to a quarter of
+  its variables unknown is `extracted` and the backfill does not list it
+  again; with more than that the whole row is errored and is retried. `--session
   <id> --force` re-runs one session. None occurred in 283 calls.
 - **IRB prompts attachment.** `src/server/irb/promptsAttachment.ts` does not
   hold the alliance judge's wording and does not hold this codebook either.

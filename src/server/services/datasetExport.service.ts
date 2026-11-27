@@ -1015,6 +1015,13 @@ export const DATASET_FILES: DatasetFileSpec[] = [
           'true when the session transcript the judge may read has changed since this row was computed (a late message was redacted, a message was re-redacted or corrected, a leak review released or withheld a message) and the session has not been coded again yet. Exclude stale rows, or re-run the backfill and export again.',
       },
       {
+        name: 'messages_withheld',
+        type: 'int',
+        source: 'derived: messages of the session awaiting leak review at export time',
+        notes:
+          "the number of this session's participant and assistant messages that the judge may not read at export time because their redaction leak check awaits review. While it is above 0 the row was computed without them and is NOT marked stale: a variable evidenced only in a withheld message is coded absent until the review releases it and the session is coded again. Treat rows with a value above 0 as incomplete.",
+      },
+      {
         name: 'extracted_at',
         type: 'timestamp',
         source: 'session_features.extracted_at',

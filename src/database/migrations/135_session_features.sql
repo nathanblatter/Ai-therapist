@@ -102,10 +102,18 @@ CREATE TABLE IF NOT EXISTS session_features (
         OR (status = 'errored'
             AND features IS NULL AND unknown_count IS NULL)
     ),
-    -- The features are a non-empty object of variables.
+    -- The features are a non-empty object of variables, and every entry is an
+    -- object the application wrote: its kind is predicate, choice or unknown.
+    -- (Anything else would be exported as a row of empty cells that counts as
+    -- coded.)
     CONSTRAINT session_features_object CHECK (
         features IS NULL
-        OR CASE WHEN jsonb_typeof(features) = 'object' THEN features <> '{}'::jsonb ELSE FALSE END
+        OR CASE WHEN jsonb_typeof(features) = 'object'
+                THEN features <> '{}'::jsonb
+                     AND NOT jsonb_path_exists(
+                           features,
+                           '$.* ? (!exists(@.kind) || !(@.kind == "predicate" || @.kind == "choice" || @.kind == "unknown"))')
+                ELSE FALSE END
     ),
     CONSTRAINT session_features_error_only_when_errored CHECK ((status = 'errored') = (error IS NOT NULL))
 );

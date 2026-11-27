@@ -14,6 +14,7 @@ import { notUnverifiedSpeechSql } from './unverifiedSpeech.js';
 import { studyWeekSql } from './qualtricsResponses.queries.js';
 import { allianceRatingStaleSql } from './allianceRatings.queries.js';
 import { sessionFeaturesStaleSql } from './sessionFeatures.queries.js';
+import { judgeWithheldCountSql } from './sessionJudge.queries.js';
 import { SESSION_FEATURES, featureExportCells, type SessionFeatureValues } from '../services/sessionFeatures.js';
 
 // Every export row is a flat string/number/bool/null map keyed by column name.
@@ -770,6 +771,7 @@ export async function getSessionFeaturesExport(asOf: string): Promise<DatasetRow
             sf.participant_words,
             sf.transcript_truncated,
             ${sessionFeaturesStaleSql('sf')} AS stale,
+            ${judgeWithheldCountSql('sf.session_id')} AS messages_withheld,
             ${tsUtc('sf.extracted_at')} AS extracted_at
      FROM session_features sf
      JOIN therapy_sessions ts ON ts.session_id = sf.session_id
@@ -787,11 +789,21 @@ export async function getSessionFeaturesExport(asOf: string): Promise<DatasetRow
       participant_words,
       transcript_truncated,
       stale,
+      messages_withheld,
       extracted_at,
       ...head
     } = r as Record<string, unknown> & { features: SessionFeatureValues | null };
     const cells: DatasetRow = { ...head };
     for (const feature of SESSION_FEATURES) Object.assign(cells, featureExportCells(feature, features?.[feature.name]));
-    return { ...cells, unknown_count, participant_turns, participant_words, transcript_truncated, stale, extracted_at };
+    return {
+      ...cells,
+      unknown_count,
+      participant_turns,
+      participant_words,
+      transcript_truncated,
+      stale,
+      messages_withheld,
+      extracted_at,
+    };
   });
 }

@@ -58,7 +58,10 @@ import {
 import { getTranscriptForJudge, isSessionJudgeEligible } from '../db/sessionJudge.queries.js';
 import { createLogger } from '../utils/logger.js';
 // The transcript as a judge reads it, and the length floor, are the alliance
-// judge's: one rendering and one floor for both.
+// judge's: one rendering and one floor for both. Changing the floor, the
+// character budget or the rendering in allianceMarkers.ts changes what this
+// judge reads: bump SESSION_FEATURE_SET_VERSION in the same change (a test in
+// sessionFeatures.test.ts pins the three values to make that hard to miss).
 import { belowLengthFloor, renderTranscript, transcriptStats } from './allianceMarkers.js';
 import { shouldSkipPostSessionWork } from './harnessPostSession.service.js';
 import {

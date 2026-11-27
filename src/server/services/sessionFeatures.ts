@@ -496,7 +496,7 @@ export const SESSION_FEATURE_NAMES: string[] = SESSION_FEATURES.map((f) => f.nam
  */
 export const FEATURE_CAUTIONS: Readonly<Record<string, string>> = {
   topic_work_school:
-    'Over-inclusive when work or study is only the setting of another problem: 3 false alarms in 7 intended-absent held-out sessions before an exclusion was added, 1 in 7 after.',
+    'Over-inclusive when work or study is only the setting of another problem: 3 false alarms in 7 intended-absent held-out sessions before an exclusion was added. After it, 1 in 7 on the same sessions, which are no longer a held-out test for this variable.',
   topic_anxiety_worry:
     'The least stable topic: its answer changed in 3 of 25 invented sessions when only the surface of the text changed, and it is prone to false alarms on rumination and money stress.',
   coping_planning_problem_solving:
@@ -593,6 +593,9 @@ function round4(n: number): number {
   return Math.round(n * 10_000) / 10_000;
 }
 
+/** More unknown variables than this (a quarter of the set) and the row is errored. */
+export const MAX_UNKNOWN_FEATURES = Math.floor(SESSION_FEATURES.length / 4);
+
 const isProbability = (p: unknown): p is number => typeof p === 'number' && Number.isFinite(p) && p >= 0 && p <= 1;
 
 /** Present / absent / uncertain from a probability. */
@@ -606,7 +609,9 @@ function parsePredicate(answer: Record<string, unknown>): FeatureValue {
   if (answer.type !== 'predicate' || !isProbability(answer.probability))
     return { kind: 'unknown', reason: 'malformed' };
   const p = round4(answer.probability);
-  return { kind: 'predicate', p, present: thresholdPresent(answer.probability) };
+  // Thresholded on the stored (rounded) value, so the exported yes/no always
+  // agrees with the exported probability at the cut-offs.
+  return { kind: 'predicate', p, present: thresholdPresent(p) };
 }
 
 function parseChoice(answer: Record<string, unknown>, feature: ChoiceFeature): FeatureValue {
@@ -663,8 +668,13 @@ export function parseSessionFeaturesResponse(raw: unknown): SessionFeaturesAnswe
     if (value.kind === 'unknown') unknownCount++;
     features[feature.name] = value;
   });
-  if (unknownCount === SESSION_FEATURES.length) {
-    throw new Error('Decisions API response had no usable answer for any variable');
+  // A few holes are stored as unknown per variable. More than that is not a
+  // coded session: it is errored as a whole, so the backfill lists it again
+  // instead of leaving a mostly-empty row that counts as done.
+  if (unknownCount > MAX_UNKNOWN_FEATURES) {
+    throw new Error(
+      `Decisions API response left ${unknownCount} of ${SESSION_FEATURES.length} variables without a usable answer`,
+    );
   }
 
   const u = root.usage as { input_tokens?: number; output_tokens?: number } | undefined;

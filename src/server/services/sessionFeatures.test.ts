@@ -1,9 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
+import { MAX_TRANSCRIPT_CHARS, MIN_PARTICIPANT_TURNS, MIN_PARTICIPANT_WORDS } from './allianceMarkers.js';
 import {
   ABSENT_MAX_P,
   CHOICE_MIN_P,
   FEATURE_CAUTIONS,
   FEATURE_GROUPS,
+  MAX_UNKNOWN_FEATURES,
   PRESENT_MIN_P,
   SESSION_FEATURES,
   SESSION_FEATURES_MODEL,
@@ -229,7 +231,33 @@ describe('parseSessionFeaturesResponse', () => {
     expect(() => parseSessionFeaturesResponse(null)).toThrow(/no answers/);
     expect(() => parseSessionFeaturesResponse({ answers: [] })).toThrow(/no answers/);
     const allRefused = { answers: SESSION_FEATURES.map((f) => ({ type: 'refusal', name: f.name })) };
-    expect(() => parseSessionFeaturesResponse(allRefused)).toThrow(/no usable answer/);
+    expect(() => parseSessionFeaturesResponse(allRefused)).toThrow(/without a usable answer/);
+  });
+
+  // Review of PR #156: with 33 of 34 variables refused the row used to be
+  // stored as coded, and the backfill never listed it again.
+  it('a response with more than a quarter of its variables unusable is an error, a few holes are not', () => {
+    const refuse = (n: number) =>
+      response(
+        Object.fromEntries(SESSION_FEATURES.slice(0, n).map((f) => [f.name, { type: 'refusal', name: f.name }])),
+      );
+    expect(parseSessionFeaturesResponse(refuse(MAX_UNKNOWN_FEATURES)).unknownCount).toBe(MAX_UNKNOWN_FEATURES);
+    expect(() => parseSessionFeaturesResponse(refuse(MAX_UNKNOWN_FEATURES + 1))).toThrow(/without a usable answer/);
+  });
+
+  it('the yes/no is thresholded on the stored, rounded probability', () => {
+    const f = SESSION_FEATURES.find((x) => x.type === 'predicate')!;
+    const answer = parseSessionFeaturesResponse(
+      response({ [f.name]: { type: 'predicate', name: f.name, probability: PRESENT_MIN_P - 0.00004 } }),
+    );
+    expect(answer.features[f.name]).toEqual({ kind: 'predicate', p: PRESENT_MIN_P, present: true });
+  });
+
+  // This judge reads the transcript through the alliance judge's rendering,
+  // length floor and character budget. A change to any of them changes these
+  // answers: bump SESSION_FEATURE_SET_VERSION in the same change, then this pin.
+  it('pins the transcript rules it shares with the alliance judge', () => {
+    expect([MIN_PARTICIPANT_TURNS, MIN_PARTICIPANT_WORDS, MAX_TRANSCRIPT_CHARS]).toEqual([3, 40, 120_000]);
   });
 
   it('falls back to question order only when the answers carry no names', () => {

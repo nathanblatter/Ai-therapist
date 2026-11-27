@@ -104,6 +104,24 @@ export function judgeReadableTurnSql(alias: string): string {
     AND NOT ${leakCheckNeedsReviewSql(alias)})`;
 }
 
+/**
+ * SQL integer: how many of a session's participant and assistant turns with
+ * redacted text are withheld from a judge RIGHT NOW because their leak check
+ * awaits review. While this is above zero a stored answer was computed
+ * without those turns and is NOT stale (the fingerprint covers readable
+ * turns only, and it changes only when the review releases them), so an
+ * export must show the number beside the answer.
+ */
+export function judgeWithheldCountSql(sessionIdExpr: string): string {
+  return `(SELECT COUNT(*)::int
+             FROM messages wm
+            WHERE wm.session_id = ${sessionIdExpr}
+              AND wm.role IN ('user', 'assistant')
+              AND wm.content_redacted IS NOT NULL
+              AND ${notUnverifiedSpeechSql('wm')}
+              AND ${leakCheckNeedsReviewSql('wm')})`;
+}
+
 /** Fingerprint of a session with no readable turn. */
 export const EMPTY_TRANSCRIPT_FINGERPRINT = 'empty';
 
