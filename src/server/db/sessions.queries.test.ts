@@ -7,7 +7,12 @@ vi.mock('../config/db.js', () => ({
   pool: { query: queryMock, connect: vi.fn(), on: vi.fn() },
 }));
 
-import { upsertSessionConfig, setSessionPsychoeducationCue } from './sessions.queries.js';
+import {
+  upsertSessionConfig,
+  setSessionPsychoeducationCue,
+  activeSessionIdsForUser,
+  userIdsInActiveSessions,
+} from './sessions.queries.js';
 
 function undefinedColumn(): Error {
   return Object.assign(new Error('column "psychoeducation_cue" does not exist'), { code: '42703' });
@@ -51,5 +56,27 @@ describe('setSessionPsychoeducationCue', () => {
   it('rethrows any other database error', async () => {
     queryMock.mockRejectedValueOnce(new Error('connection refused'));
     await expect(setSessionPsychoeducationCue('s1', true)).rejects.toThrow('connection refused');
+  });
+});
+
+// A researcher changes or deletes an account while it is in a session
+// (accounts.service endSessions): which sessions are open, and for whom.
+describe('the therapy sessions open right now', () => {
+  beforeEach(() => queryMock.mockReset());
+
+  it('activeSessionIdsForUser reads the active sessions of one account, oldest first', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ session_id: 'sess_a' }, { session_id: 'sess_b' }] });
+    expect(await activeSessionIdsForUser(7)).toEqual(['sess_a', 'sess_b']);
+    const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain("WHERE user_id = $1 AND status = 'active'");
+    expect(params).toEqual([7]);
+  });
+
+  it('userIdsInActiveSessions lists each account once and skips sessions with no account', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ user_id: '7' }, { user_id: 9 }] });
+    expect(await userIdsInActiveSessions()).toEqual([7, 9]);
+    const sql = String(queryMock.mock.calls[0][0]);
+    expect(sql).toContain('SELECT DISTINCT user_id');
+    expect(sql).toContain("status = 'active' AND user_id IS NOT NULL");
   });
 });

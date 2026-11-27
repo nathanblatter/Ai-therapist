@@ -445,7 +445,9 @@ io.on('connection', (socket: AuthSocket) => {
 
   // Every authenticated socket (any role, incl. participants) joins its
   // user:<id> room. The room carries ONLY messaging:* events (spec C7) —
-  // correspondence channel, separate from admin monitoring fan-out.
+  // correspondence channel, separate from admin monitoring fan-out — and the
+  // one account:signed-out notice sent just before the account's sockets are
+  // closed (accounts.service endSessions).
   if (typeof socket.userId === 'number') {
     socket.join(`user:${socket.userId}`);
   }

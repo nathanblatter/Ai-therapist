@@ -51,6 +51,8 @@ interface User {
   memory_enabled?: boolean;
   /** Staff address on the study domain (ai-therapist-283); never for participants. */
   email?: string | null;
+  /** A therapy session of theirs is open right now (as of the last list load). */
+  in_active_session?: boolean;
   created_at: string;
 }
 
@@ -197,8 +199,33 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
     }
   };
 
+  /** Whether this account has a therapy session open right now, read fresh
+   *  (the list on screen may be minutes old). False when it cannot be read:
+   *  the warning is a courtesy, never a gate. */
+  const isInSessionNow = async (userid: number): Promise<boolean> => {
+    try {
+      const data = await getJson<{ users: User[] }>('/api/users', { fallback: 'Failed to fetch users' });
+      return data.users.find((u) => u.userid === userid)?.in_active_session === true;
+    } catch {
+      return users.find((u) => u.userid === userid)?.in_active_session === true;
+    }
+  };
+
   const handleEditUser = async (userid: number, updates: UserUpdates) => {
     setFormError(null);
+
+    // A role change signs the account out everywhere and ends a session it is
+    // in the middle of: say so first when this person is in one right now.
+    const current = users.find((u) => u.userid === userid);
+    if (current && updates.role !== undefined && updates.role !== current.role && (await isInSessionNow(userid))) {
+      if (
+        !confirm(
+          `"${current.username}" is in a session right now. Changing their role will end that session and sign them out. Continue?`,
+        )
+      ) {
+        return;
+      }
+    }
 
     try {
       await postJson(`/api/users/${userid}`, updates, { method: 'PUT', fallback: 'Failed to update user' });
@@ -211,7 +238,11 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
   };
 
   const handleDeleteUser = async (userid: number, username: string) => {
-    if (!confirm(`Are you sure you want to delete user "${username}"? This action cannot be undone.`)) {
+    const inSession = await isInSessionNow(userid);
+    const warning = inSession
+      ? `"${username}" is in a session right now. Deleting the account will end that session and sign them out.\n\n`
+      : '';
+    if (!confirm(`${warning}Are you sure you want to delete user "${username}"? This action cannot be undone.`)) {
       return;
     }
 

@@ -52,6 +52,9 @@ import { VoiceOverlayGate, type PendingOverlay } from '../lib/voiceOverlayGate';
 import type { ToolOverlayOutcome } from '../../../shared/toolOverlayPolicy';
 import type { GrokServerMessage } from '../../../shared/grokVoiceProtocol';
 import { getUserSocket, closeUserSocket } from '../lib/userSocket';
+import { onAccountSignedOut, type AccountSignedOutNotice } from '../lib/accountSignedOut';
+import AccountSignedOutScreen from './AccountSignedOutScreen';
+import { ACCOUNT_CHANGED_END_REASON } from '../../../shared/accountSignedOut';
 import {
   SESSION_START_OK,
   classifySessionStartRefusal,
@@ -588,6 +591,29 @@ export default function App() {
     return () => closeUserSocket();
   }, [isAuthenticated]);
 
+  // The study team changed or removed this account while the page was open.
+  // The server has ended the sign-in and any session and is closing the
+  // sockets; it said why first. Show that over everything (nothing underneath
+  // works any more), and let go of a session still running in this browser:
+  // the microphone and the call must not stay open behind the notice.
+  const [signedOutNotice, setSignedOutNotice] = useState<AccountSignedOutNotice | null>(null);
+  const sessionActiveRef = useRef(false);
+  useEffect(() => {
+    sessionActiveRef.current = isSessionActive;
+  }, [isSessionActive]);
+  useEffect(
+    () =>
+      onAccountSignedOut((notice) => {
+        setSignedOutNotice((shown) => shown ?? notice);
+        if (sessionActiveRef.current) {
+          void stopSessionRef.current().catch((err: unknown) => {
+            console.error('Ending the session after the account was signed out failed:', err);
+          });
+        }
+      }),
+    [],
+  );
+
   // Phase 2 engagement telemetry (flag-gated, default off). Reply timing is
   // measured from the last assistant message rendered to the next user send;
   // events are scoped to the active session and flushed when it ends.
@@ -1103,7 +1129,14 @@ export default function App() {
     socket.on('session:status', (data) => {
       console.log('Received session:status event:', data);
       if (data.status === 'ended' && data.remoteTermination) {
-        toast.warning(`Your session has been remotely ended by ${data.endedBy}. The session will now close.`);
+        if (data.reason === ACCOUNT_CHANGED_END_REASON) {
+          // An account change says so itself, on the signed-out screen; if that
+          // notice was lost, the reason still must not read as "ended by
+          // account_changed".
+          toast.warning(data.message || 'Your session has ended because your account was changed.');
+        } else {
+          toast.warning(`Your session has been remotely ended by ${data.endedBy}. The session will now close.`);
+        }
         // Via the latest-ref (ai-therapist-113 pattern): this handler closes
         // over the render where sessionId/sessionType state were still null,
         // so a direct stopSession() would take the wrong teardown path and
@@ -2720,6 +2753,11 @@ export default function App() {
       if (data.status === 'ended' && data.remoteTermination) {
         if (data.endedBy === 'system' && data.reason === 'duration_limit') {
           toast.warning(data.message || 'Your session has ended due to time limit.');
+        } else if (data.reason === ACCOUNT_CHANGED_END_REASON) {
+          // An account change says so itself, on the signed-out screen; if that
+          // notice was lost, the reason still must not read as "ended by
+          // account_changed".
+          toast.warning(data.message || 'Your session has ended because your account was changed.');
         } else {
           toast.warning(`Your session has been remotely ended by ${data.endedBy}. The session will now close.`);
         }
@@ -4122,6 +4160,8 @@ export default function App() {
         onSettingsChange={setSessionSettings}
         disabled={isSessionActive}
       />
+
+      {signedOutNotice && <AccountSignedOutScreen notice={signedOutNotice} crisisLine={crisisContact} />}
 
       {/* Toast Notifications */}
       <ToastContainer />

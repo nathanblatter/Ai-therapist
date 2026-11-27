@@ -16,8 +16,12 @@ const db = vi.hoisted(() => ({
   setCognitoTotpEnrolledAt: vi.fn(),
   getUserByUsernameForCognito: vi.fn(),
   deleteSessionsForUser: vi.fn(),
+  activeSessionIdsForUser: vi.fn(),
 }));
 vi.mock('../db/index.js', () => db);
+
+const lifecycle = vi.hoisted(() => ({ serverEndSession: vi.fn() }));
+vi.mock('./sessionLifecycle.service.js', () => lifecycle);
 
 const squawk = vi.hoisted(() => {
   class SquawkError extends Error {
@@ -107,6 +111,8 @@ beforeEach(() => {
   db.setCognitoTotpEnrolledAt.mockResolvedValue(undefined);
   db.getUserByUsernameForCognito.mockResolvedValue(null);
   db.deleteSessionsForUser.mockResolvedValue(0);
+  db.activeSessionIdsForUser.mockResolvedValue([]);
+  lifecycle.serverEndSession.mockResolvedValue(true);
   pool.getUserSub.mockResolvedValue(null);
   pool.globalSignOut.mockResolvedValue(undefined);
   db.setSquawkUserId.mockResolvedValue(undefined);
@@ -473,10 +479,168 @@ describe('app sessions end with the account change that outdates them (review C5
       db.updateUser.mockResolvedValue({ ...ROW, role: 'therapist' });
       await updateAccount(7, { role: 'therapist' });
       expect(inRoom).toHaveBeenCalledWith('user:7');
+      // This fake room has no emit: the notice failing must not stop the close.
       expect(disconnectSockets).toHaveBeenCalledWith(true);
     } finally {
       g.io = before;
     }
+  });
+});
+
+// A researcher changes a participant's role, or deletes the account, while
+// that participant is in a chat or voice session. The sockets used to be
+// closed under them with no word, and the session stayed 'active' until the
+// abandoned-session sweep.
+describe('an account changed in the middle of a therapy session', () => {
+  const END = { endedBy: 'account_changed', reason: 'account_changed' };
+  const modes: [string, () => void][] = [
+    ['no provider', () => {}],
+    ['Cognito', () => cognito.enabled.mockReturnValue(true)],
+    [
+      'Squawk',
+      () => {
+        squawk.enabled.mockReturnValue(true);
+        db.getSquawkUserId.mockResolvedValue('sq-1');
+      },
+    ],
+  ];
+
+  /** A fake io whose user room records the order of the notice and the close. */
+  function fakeIo() {
+    const emit = vi.fn();
+    const disconnectSockets = vi.fn();
+    const inRoom = vi.fn(() => ({ emit, disconnectSockets }));
+    return { io: { in: inRoom }, inRoom, emit, disconnectSockets };
+  }
+
+  async function withIo<T>(io: unknown, run: () => Promise<T>): Promise<T> {
+    const g = globalThis as unknown as { io?: unknown };
+    const before = g.io;
+    g.io = io;
+    try {
+      return await run();
+    } finally {
+      g.io = before;
+    }
+  }
+
+  it.each(modes)(
+    'a role change ends the session cleanly, says why, then closes the sockets (%s)',
+    async (_l, setUp) => {
+      setUp();
+      db.activeSessionIdsForUser.mockResolvedValue(['sess_a']);
+      db.updateUser.mockResolvedValue({ ...ROW, role: 'therapist' });
+      const fake = fakeIo();
+      await withIo(fake.io, () => updateAccount(7, { role: 'therapist' }));
+
+      expect(db.activeSessionIdsForUser).toHaveBeenCalledWith(7);
+      expect(lifecycle.serverEndSession).toHaveBeenCalledExactlyOnceWith('sess_a', {
+        ...END,
+        message: expect.stringContaining('signed out'),
+      });
+      expect(fake.inRoom).toHaveBeenCalledWith('user:7');
+      expect(fake.emit).toHaveBeenCalledExactlyOnceWith('account:signed-out', {
+        reason: 'role_changed',
+        message: expect.stringContaining('sign in again'),
+      });
+      expect(fake.disconnectSockets).toHaveBeenCalledWith(true);
+      // Order: the session is ended (its own room is told), then the account's
+      // sockets are told, and only then closed.
+      const ended = lifecycle.serverEndSession.mock.invocationCallOrder[0];
+      const told = fake.emit.mock.invocationCallOrder[0];
+      const closed = fake.disconnectSockets.mock.invocationCallOrder[0];
+      expect(ended).toBeLessThan(told);
+      expect(told).toBeLessThan(closed);
+    },
+  );
+
+  it.each(modes)(
+    'a deletion reads the open sessions before the row goes, and ends them after (%s)',
+    async (_l, setUp) => {
+      setUp();
+      db.activeSessionIdsForUser.mockResolvedValue(['sess_a', 'sess_b']);
+      const fake = fakeIo();
+      await withIo(fake.io, () => removeAccount('07'));
+
+      // Deleting the user unlinks its sessions (user_id becomes NULL): a read
+      // after it would find none.
+      expect(db.activeSessionIdsForUser).toHaveBeenCalledExactlyOnceWith(7);
+      expect(db.activeSessionIdsForUser.mock.invocationCallOrder[0]).toBeLessThan(
+        db.deleteUser.mock.invocationCallOrder[0],
+      );
+      expect(lifecycle.serverEndSession.mock.calls.map((c) => c[0])).toEqual(['sess_a', 'sess_b']);
+      expect(db.deleteUser.mock.invocationCallOrder[0]).toBeLessThan(
+        lifecycle.serverEndSession.mock.invocationCallOrder[0],
+      );
+      expect(lifecycle.serverEndSession).toHaveBeenCalledWith('sess_a', { ...END, message: expect.any(String) });
+      expect(fake.emit).toHaveBeenCalledExactlyOnceWith('account:signed-out', {
+        reason: 'account_deleted',
+        message: expect.stringContaining('removed this account'),
+      });
+      expect(fake.disconnectSockets).toHaveBeenCalledWith(true);
+    },
+  );
+
+  it('an account in no session: nothing is ended, the sockets are still told and closed', async () => {
+    db.updateUser.mockResolvedValue({ ...ROW, role: 'therapist' });
+    const fake = fakeIo();
+    await withIo(fake.io, () => updateAccount(7, { role: 'therapist' }));
+    expect(lifecycle.serverEndSession).not.toHaveBeenCalled();
+    expect(fake.emit).toHaveBeenCalledTimes(1);
+    expect(fake.disconnectSockets).toHaveBeenCalledWith(true);
+  });
+
+  it('saving the same role, or only a password, ends no session and tells no one', async () => {
+    db.activeSessionIdsForUser.mockResolvedValue(['sess_a']);
+    const fake = fakeIo();
+    await withIo(fake.io, async () => {
+      await updateAccount(7, { username: 'p_one', role: 'participant' });
+      await updateAccount(7, { password: 'another passphrase' });
+    });
+    expect(db.activeSessionIdsForUser).not.toHaveBeenCalled();
+    expect(lifecycle.serverEndSession).not.toHaveBeenCalled();
+    expect(fake.emit).not.toHaveBeenCalled();
+    expect(fake.disconnectSockets).not.toHaveBeenCalled();
+  });
+
+  it('a deletion that fails ends nothing', async () => {
+    db.activeSessionIdsForUser.mockResolvedValue(['sess_a']);
+    db.deleteUser.mockRejectedValue(new Error('User not found'));
+    const fake = fakeIo();
+    await expect(withIo(fake.io, () => removeAccount(7))).rejects.toThrow('User not found');
+    expect(lifecycle.serverEndSession).not.toHaveBeenCalled();
+    expect(fake.emit).not.toHaveBeenCalled();
+    expect(fake.disconnectSockets).not.toHaveBeenCalled();
+  });
+
+  it('one session that cannot be ended does not stop the next, the notice, the close or the change', async () => {
+    db.activeSessionIdsForUser.mockResolvedValue(['sess_a', 'sess_b']);
+    lifecycle.serverEndSession.mockRejectedValueOnce(new Error('db down'));
+    db.updateUser.mockResolvedValue({ ...ROW, role: 'therapist' });
+    const fake = fakeIo();
+    await expect(withIo(fake.io, () => updateAccount(7, { role: 'therapist' }))).resolves.toMatchObject({ userid: 7 });
+    expect(lifecycle.serverEndSession.mock.calls.map((c) => c[0])).toEqual(['sess_a', 'sess_b']);
+    expect(fake.emit).toHaveBeenCalledTimes(1);
+    expect(fake.disconnectSockets).toHaveBeenCalledWith(true);
+  });
+
+  it('the open sessions cannot be read: the change stands, the sockets are still told and closed', async () => {
+    db.activeSessionIdsForUser.mockRejectedValue(new Error('db down'));
+    const fake = fakeIo();
+    await expect(withIo(fake.io, () => removeAccount(7))).resolves.toMatchObject({ userid: 7 });
+    expect(lifecycle.serverEndSession).not.toHaveBeenCalled();
+    expect(fake.emit).toHaveBeenCalledTimes(1);
+    expect(fake.disconnectSockets).toHaveBeenCalledWith(true);
+  });
+
+  it('a notice that cannot be sent does not stop the close', async () => {
+    db.updateUser.mockResolvedValue({ ...ROW, role: 'therapist' });
+    const fake = fakeIo();
+    fake.emit.mockImplementation(() => {
+      throw new Error('adapter closed');
+    });
+    await withIo(fake.io, () => updateAccount(7, { role: 'therapist' }));
+    expect(fake.disconnectSockets).toHaveBeenCalledWith(true);
   });
 });
 

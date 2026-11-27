@@ -264,6 +264,28 @@ export async function participantSessionIds(userId: number | string): Promise<st
   }
 }
 
+/**
+ * The therapy sessions an account has open right now (status 'active'). Read
+ * BEFORE an account deletion, which sets therapy_sessions.user_id to NULL. A
+ * session whose browser went away stays 'active' until the abandoned-session
+ * sweep ends it, so this can include one nobody is in any more.
+ */
+export async function activeSessionIdsForUser(userId: number): Promise<string[]> {
+  const { rows } = await pool.query<{ session_id: string }>(
+    `SELECT session_id FROM therapy_sessions WHERE user_id = $1 AND status = 'active' ORDER BY created_at`,
+    [userId],
+  );
+  return rows.map((r) => r.session_id);
+}
+
+/** The accounts that have a therapy session open right now (see activeSessionIdsForUser). */
+export async function userIdsInActiveSessions(): Promise<number[]> {
+  const { rows } = await pool.query<{ user_id: number }>(
+    `SELECT DISTINCT user_id FROM therapy_sessions WHERE status = 'active' AND user_id IS NOT NULL`,
+  );
+  return rows.map((r) => Number(r.user_id));
+}
+
 /** Create or update a session's realtime configuration. */
 export async function upsertSessionConfig(
   sessionId: string,

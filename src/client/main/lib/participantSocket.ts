@@ -27,6 +27,7 @@
 // is used only for remote-termination notices and live crisis messages.
 import { io, type Socket } from 'socket.io-client';
 import { reportClientEvent } from '../utils/telemetry';
+import { watchAccountSignedOut } from './accountSignedOut';
 
 export function createParticipantSocket(sessionId: string, label: string): Socket {
   const socket = io({
@@ -40,6 +41,10 @@ export function createParticipantSocket(sessionId: string, label: string): Socke
     reconnectionAttempts: 10,
     timeout: 20000,
   });
+
+  // The study team changed or removed this account: the server says why just
+  // before it closes the socket (lib/accountSignedOut.ts).
+  watchAccountSignedOut(socket);
 
   socket.on('connect', () => {
     console.log(`[socket:${label}] connected (${socket.id}); joining session ${sessionId}`);

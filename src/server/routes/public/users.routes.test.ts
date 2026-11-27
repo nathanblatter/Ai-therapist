@@ -464,3 +464,32 @@ describe('GET /api/users/audit', () => {
     expect(dbMocks.getUserById).not.toHaveBeenCalled();
   });
 });
+
+// So User Management can warn before a role change or a deletion ends a
+// session the person is in the middle of.
+describe('GET /api/users says who is in a session right now', () => {
+  const LIST = [
+    { userid: 5, username: 'p_five', role: 'participant' },
+    { userid: 6, username: 'p_six', role: 'participant' },
+  ];
+  const db = dbMocks as Record<string, unknown>;
+
+  it('marks the accounts with an open therapy session', async () => {
+    dbMocks.getAllUsers.mockResolvedValue(LIST);
+    db.userIdsInActiveSessions = vi.fn().mockResolvedValue([6]);
+    const res = await request(appAs('researcher')).get('/api/users');
+    expect(res.status).toBe(200);
+    expect(res.body.users).toEqual([
+      { ...LIST[0], in_active_session: false },
+      { ...LIST[1], in_active_session: true },
+    ]);
+  });
+
+  it('still serves the list when that cannot be read', async () => {
+    dbMocks.getAllUsers.mockResolvedValue(LIST);
+    db.userIdsInActiveSessions = vi.fn().mockRejectedValue(new Error('db down'));
+    const res = await request(appAs('researcher')).get('/api/users');
+    expect(res.status).toBe(200);
+    expect(res.body.users).toEqual(LIST.map((u) => ({ ...u, in_active_session: false })));
+  });
+});

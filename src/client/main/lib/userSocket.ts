@@ -14,6 +14,7 @@
 // participantSocket.ts so the handshake survives proxy paths that drop raw
 // Upgrade requests.
 import { io, type Socket } from 'socket.io-client';
+import { watchAccountSignedOut } from './accountSignedOut';
 
 let socket: Socket | null = null;
 
@@ -33,6 +34,8 @@ export function getUserSocket(): Socket {
     reconnectionAttempts: Infinity,
     timeout: 20000,
   });
+
+  watchAccountSignedOut(socket);
 
   socket.on('connect', () => {
     console.log(`[socket:user] connected (${socket?.id})`);
