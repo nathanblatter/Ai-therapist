@@ -149,6 +149,16 @@ export async function redactSession(sessionId: string): Promise<void> {
         ),
       )
       .catch((err) => console.error('[RedactionVerifier] leak-check failed (non-fatal):', err));
+
+    // Linguistic working-alliance markers (ai-therapist-173): rate the session
+    // on Task / Bond / Goal from the redacted text just stored. OFF unless
+    // system_config.alliance_markers.enabled is true; the job itself refuses a
+    // session whose redaction is not complete (a rejected or deferred message
+    // above), a demo, harness or sandbox session. Fire-and-forget: it never
+    // delays the wipe, naming or insights.
+    import('./allianceRating.service.js')
+      .then((m) => m.maybeRateAllianceForSession(sessionId))
+      .catch((err) => console.error('[AllianceRating] could not start (non-fatal):', err));
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`Session redaction failed for ${sessionId}:`, errorMessage);

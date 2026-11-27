@@ -10,6 +10,7 @@ import {
 import ConversationBubble from './ConversationBubble';
 import SessionInsightsPanel from './SessionInsightsPanel';
 import SessionEvalPanel from './SessionEvalPanel';
+import SessionAlliancePanel from './SessionAlliancePanel';
 import RiskTimeline from './RiskTimeline';
 import SessionCrisisEvents from './SessionCrisisEvents';
 import SessionHandoffLinks from './SessionHandoffLinks';
@@ -858,6 +859,10 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
 
           {/* LLM-judge quality scores (ended sessions only) */}
           {!loading && <SessionEvalPanel sessionId={sessionId} sessionStatus={session?.status} />}
+          {/* Working-alliance markers (ai-therapist-173): researcher-only, shown only when a rating exists */}
+          {!loading && userRole === 'researcher' && session?.status === 'ended' && (
+            <SessionAlliancePanel sessionId={sessionId} />
+          )}
           {/* Cost/token tracking (ai-therapist-25c) + participant feedback (ai-therapist-25b) */}
           {!loading && (cost || feedback) && (
             <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-4">

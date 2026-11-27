@@ -136,10 +136,28 @@ export async function getEnrollmentFunnel(): Promise<EnrollmentFunnel> {
   };
 }
 
+/**
+ * SQL for the 1-based study week a timestamp falls in for a participant:
+ * week 1 is the first 7 days after enrollment (the earliest
+ * qualtrics_signups.registered_at, the same anchor and arithmetic as
+ * surveySchedule.service.ts). NULL when the participant never enrolled
+ * through the baseline survey or the timestamp precedes enrollment.
+ * Used by every export row that must line up on the study calendar (weekly
+ * survey responses, per-session alliance ratings).
+ */
+export function studyWeekSql(userIdExpr: string, atExpr: string): string {
+  return `(SELECT FLOOR(EXTRACT(EPOCH FROM (${atExpr} - MIN(sw.registered_at))) / 604800)::int + 1
+             FROM qualtrics_signups sw
+            WHERE sw.user_id = ${userIdExpr}
+           HAVING ${atExpr} >= MIN(sw.registered_at))`;
+}
+
 export interface SurveyAnswersExportRow {
   participant_id: string;
   survey_role: QualtricsSurveyRole;
   recorded_at: string;
+  /** 1-based study week of recorded_at; null when not derivable. */
+  study_week: number | null;
   answers: Record<string, unknown>;
 }
 
@@ -151,6 +169,7 @@ export async function getSurveyAnswersForExport(asOf: string): Promise<SurveyAns
     `SELECT rp.pseudonym AS participant_id,
             qr.survey_role,
             to_char(qr.recorded_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS recorded_at,
+            ${studyWeekSql('qr.user_id', 'qr.recorded_at')} AS study_week,
             qr.answers
      FROM qualtrics_responses qr
      JOIN research_pseudonyms rp

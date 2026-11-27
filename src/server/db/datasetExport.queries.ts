@@ -11,6 +11,7 @@
 // The research_pseudonyms table itself is NEVER selected into any artifact.
 import { pool } from '../config/db.js';
 import { notUnverifiedSpeechSql } from './unverifiedSpeech.js';
+import { studyWeekSql } from './qualtricsResponses.queries.js';
 
 // Every export row is a flat string/number/bool/null map keyed by column name.
 export type DatasetRow = Record<string, unknown>;
@@ -673,6 +674,51 @@ export async function getCrisisAdjudicationsExport(asOf: string): Promise<Datase
          OR (ce.session_id IS NULL AND ce.client_user_id IS NOT NULL
              AND cu.is_sandbox IS NOT TRUE AND ce.created_at <= $1))
      ORDER BY COALESCE(sess.session_pseudo_id, ''), ce.created_at, ce.event_id, a.adjudicated_at, a.adjudication_id`,
+    [asOf],
+  );
+  return rows;
+}
+
+/**
+ * alliance_ratings.csv: one row per (in-scope session, judge version) rating
+ * of the linguistic working-alliance markers (migration 134,
+ * ai-therapist-173). Numbers only. Rows of every status are exported so
+ * coverage is auditable; a subscale that could not be rated has
+ * <subscale>_rateable = false and empty score columns.
+ *
+ * participant_id + study_week (or session_started_at) are the join to the
+ * weekly WAI-SR subscales in surveys_scored.csv.
+ */
+export async function getAllianceRatingsExport(asOf: string): Promise<DatasetRow[]> {
+  const subscaleColumns = (['task', 'bond', 'goal'] as const)
+    .map(
+      (s) => `ar.${s}_rateable AS ${s}_rateable,
+            ROUND(ar.${s}_p_rateable::numeric, 4)::float8 AS ${s}_p_rateable,
+            ROUND(ar.${s}_score::numeric, 4)::float8 AS ${s}_score,
+            ar.${s}_level::int AS ${s}_level,
+            ROUND(ar.${s}_confidence::numeric, 4)::float8 AS ${s}_confidence,
+            ar.${s}_distribution AS ${s}_distribution`,
+    )
+    .join(',\n            ');
+  const { rows } = await pool.query(
+    `SELECT pp.pseudonym AS participant_id,
+            sp.pseudonym AS session_pseudo_id,
+            ${tsUtc('ts.created_at')} AS session_started_at,
+            ${studyWeekSql('ts.user_id', 'ts.created_at')} AS study_week,
+            ar.judge_version,
+            ar.status,
+            ar.model,
+            ${subscaleColumns},
+            ar.participant_turns,
+            ar.participant_words,
+            ar.transcript_truncated,
+            ${tsUtc('ar.rated_at')} AS rated_at
+     FROM session_alliance_ratings ar
+     JOIN therapy_sessions ts ON ts.session_id = ar.session_id
+     JOIN research_pseudonyms sp ON sp.entity_type = 'session' AND sp.entity_key = ar.session_id
+     LEFT JOIN research_pseudonyms pp ON pp.entity_type = 'participant' AND pp.entity_key = ts.user_id::text
+     WHERE ts.is_demo IS NOT TRUE AND ts.created_at <= $1
+     ORDER BY sp.pseudonym, ar.judge_version`,
     [asOf],
   );
   return rows;
