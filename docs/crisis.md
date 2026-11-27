@@ -1124,6 +1124,87 @@ English.
 
 ---
 
+## Shadow risk scorer (2026-11-26, ai-therapist-83, ships OFF)
+
+A second, independent opinion on every participant turn the pipeline scores.
+It runs beside the pipeline and **never acts**: no steering, no flag, no page,
+no socket event, no work item. Its only output is one row per turn in
+`shadow_risk_scores`, which researchers read in Admin > Evals > "Shadow
+scorer" (disagreements between production severity and shadow severity,
+counts, and an agreement table, scoped to the researcher's organisation).
+
+How it works:
+
+- `runCrisisPipeline` calls `shadowScoreTurn(...)` once, right after
+  `analyzeMessageRisk` returns, with the scored text, the history the assessor
+  was given, and the production score and severity. The call is synchronous,
+  returns nothing and is not awaited; nothing after it reads anything from it.
+- `shadowRiskScorer.service.ts` sends one request to the OpenAI Decisions API
+  (`POST /v1/decisions`, model `gpt-6-luna`; no text is generated). The
+  question set is in `shadowRiskQuestions.ts`: one `score` question on the
+  pipeline's bands (none / low / medium / high, level descriptions taken from
+  the assessor rubric) and eight yes/no predicates (own suicidal intent,
+  passive ideation, plan or means, self-harm without intent, means inquiry,
+  harm to others, a third party's crisis, figure of speech). Why these, and
+  how they did on the goldens: `docs/shadow-risk-scorer-eval-2026-11-26.md`.
+- The row holds the production score and severity at that moment, the shadow
+  severity with the probability of each band, the probability of each
+  predicate, model, question-set version, token counts and latency. **No
+  message text.**
+- A failure is its own state. A call that failed or timed out, and an answer
+  with any question refused, is stored as `status = 'errored'` with a short
+  code (`refused`, `timeout`, `http_503`, ...): unknown, never "none". The
+  panel counts errored turns separately and keeps them out of the agreement
+  table.
+
+Why it cannot affect a participant or the on-call:
+
+- The scorer imports nothing from detection, steering, flagging, paging or the
+  socket layer, and nothing else reads its table
+  (`shadowRiskScorer.isolation.test.ts`).
+- `crisisPipeline.shadowScorer.test.ts` runs the same turn with the scorer
+  off, answering the opposite of production, failing, hanging, refusing and
+  unable to write, and checks the pipeline's result and every call it makes
+  are identical, and that the pipeline returns while the Decisions call is
+  still open.
+- Its own deadline (8 s, no retries) and at most four turns in flight; a turn
+  beyond that is dropped and counted in a log line. Errors are caught inside
+  the scorer.
+
+Switches (both needed):
+
+1. `system_config.shadow_risk_scorer = {"enabled": true}`. The code default is
+   **off**; there is no seed row; only a literal `true` turns it on
+   (`docs/system-config-keys.md`). A change applies within 30 seconds.
+2. The server process (`startShadowRiskScorer()` at boot). Scripts and
+   harnesses that import the pipeline never shadow-score.
+
+Data flow when on: the participant's message and the recent transcript go to
+the Decisions API. That API has no per-request `store: false`; retention
+follows the OpenAI organisation's data controls. The production assessor
+already sends the same text to OpenAI, but with `store: false`, which this
+API does not offer: confirm the organisation's retention setting before
+switching it on. Size: about 3,200 input tokens per turn was measured on the
+goldens, whose inputs are short (56 characters on average, 46 of 273 with any
+history). A live turn carries up to 6,000 characters of recent transcript and
+all nine questions read it, so expect several times that per turn; it has not
+been measured on live sessions. It runs on every participant turn of every
+session that is not a demo or sandbox session.
+
+Data rules for `shadow_risk_scores` (migration 133), the same as
+`risk_score_history`: `session_id` cascades on session delete, `message_id` is
+set NULL when the message is deleted, organisation scope comes from the
+session's owner (demo and sandbox excluded), an account deletion leaves the
+rows with the now-unattributed session, and it is not part of the dataset
+export. The nightly content wipe has nothing to remove because no text is
+stored. Token counts live on the row; they are not written to
+`session_llm_usage` (its `purpose` check would need a migration), so the cost
+dashboard's per-session estimate does not include shadow calls. The OpenAI
+costs API does.
+
+Not covered: caseworker thread messages (`messageSafety.service.ts`) are not
+shadow-scored, only session turns and the pre-session check-in.
+
 ## Auto-Flag Condition
 
 **File:** `src/server/index.js` (crisis detection block)

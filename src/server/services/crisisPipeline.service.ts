@@ -56,6 +56,7 @@ import {
   type PageSubject,
 } from './crisisPaging.service.js';
 import type { MinorVerdict } from './minorSafeguard.service.js';
+import { shadowScoreTurn } from './shadowRiskScorer.service.js';
 
 export interface ParticipantTurn {
   sessionId: string;
@@ -378,6 +379,9 @@ export async function runCrisisPipeline(
       if (earlyPage) return;
       earlyPage = respondToHighVerdict(turn, verdict);
     };
+    // What the assessor is shown for this turn. Named so the shadow scorer
+    // below can be handed the same history.
+    const assessorHistory = await withCheckinContext(turn.sessionId, history, turn, checkinRead);
     const risk = await analyzeMessageRisk(
       {
         content: scoredTurn.content,
@@ -395,12 +399,26 @@ export async function runCrisisPipeline(
         // context-blind rule in the scorer.
         ...(historySource !== 'database' ? { history_source: historySource } : {}),
       },
-      await withCheckinContext(turn.sessionId, history, turn, checkinRead),
+      assessorHistory,
       { onScored },
     );
     // A scorer that returned without calling the hook (an error path) is
     // answered here, from what it returned.
     onScored(risk);
+    // Shadow risk scorer (ai-therapist-83): a second opinion on the same turn,
+    // recorded for researchers and never acted on. Fire-and-forget: the call
+    // returns at once, nothing below reads anything from it, and it is off
+    // unless system_config.shadow_risk_scorer says otherwise
+    // (shadowRiskScorer.service.ts).
+    shadowScoreTurn({
+      sessionId: turn.sessionId,
+      messageId: turn.messageId,
+      content: scoredTurn.content,
+      ...(turn.source ? { source: turn.source } : {}),
+      history: assessorHistory,
+      productionScore: risk.riskScore,
+      productionSeverity: risk.severity,
+    });
     const pageRequested = (earlyPage as EarlyPageOutcome | null)?.pageRequested === true;
 
     const severity = risk.severity as CrisisSeverity;

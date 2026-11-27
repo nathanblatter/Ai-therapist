@@ -3354,6 +3354,19 @@ Needs `DATABASE_URL` pointing at an empty disposable database
 same guards as `cli.ts` (`IMESSAGE_API_KEY` / `CRISIS_ALERT_PHONE` empty, no pg
 adapter) and turns quiet hours off in-process.
 
+A separate, opt-in runner asks the **shadow risk scorer's** question set about
+the same detector rows and compares it with the expected band and with the
+committed production baseline (it does not re-run the detector, needs no
+database and is never run in CI):
+
+```sh
+npm run redteam:shadow-eval -- --dry-run                    # the plan and the first request body
+npm run redteam:shadow-eval -- --confirm-paid --repeat 2    # one Decisions API call per row per repeat
+```
+
+Results of the first run: `docs/shadow-risk-scorer-eval-2026-11-26.md` and
+`evals/goldens/baselines/shadow-scorer.{md,json}`.
+
 - **Detector**: each row is a fresh session. History is replayed turn by turn,
   so earlier participant turns are scored exactly as they would be live and the
   input sees the same session risk context. `rt-text` rows go through

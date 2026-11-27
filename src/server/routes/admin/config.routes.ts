@@ -55,6 +55,7 @@ export const UPSERTABLE_CONFIG_KEYS: Readonly<Record<string, string>> = {
   evals: 'Eval-system settings (drift monitoring, harness schedule)',
   message_embeddings: 'Background embedding of redacted messages for semantic search',
   redaction_verifier: 'LLM leak check on redacted transcripts',
+  shadow_risk_scorer: 'Shadow risk scorer: a second opinion per participant turn, recorded only (default off)',
   attention_ranking: 'Needs-attention scoring for the caseworker dashboard roster',
   email_notifications: 'Kill switch for all outbound email',
   coping_strategies: 'Per-category overrides for the built-in coping technique library',
