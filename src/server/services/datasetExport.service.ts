@@ -27,6 +27,7 @@ import {
   getFeedbackCommentsExport,
   getSemanticMetricsExport,
   getAcousticFeaturesExport,
+  getAllianceRatingsExport,
   type DatasetRow,
 } from '../db/datasetExport.queries.js';
 import { getSurveyResponsesExport, getSurveyAnswersForExport } from '../db/qualtricsResponses.queries.js';
@@ -546,6 +547,7 @@ export const DATASET_FILES: DatasetFileSpec[] = [
           participant_id: row.participant_id,
           survey_role: row.survey_role,
           recorded_at: row.recorded_at,
+          study_week: row.study_week,
           completion_seconds: paradata.completionSeconds,
           speeder: paradata.speeder,
           phq2: scores.phq2,
@@ -571,6 +573,14 @@ export const DATASET_FILES: DatasetFileSpec[] = [
         values: 'baseline, weekly, exit, week12',
       },
       { name: 'recorded_at', type: 'timestamp', source: 'qualtrics_responses.recorded_at' },
+      {
+        name: 'study_week',
+        type: 'int',
+        source: 'derived: 1 + whole weeks from enrollment (earliest qualtrics_signups.registered_at) to recorded_at',
+        values: '1, 2, ...; empty when the participant has no enrollment record or recorded_at precedes it',
+        notes:
+          'Same calendar as the in-app survey schedule (week 1 = first 7 days after enrollment). Join key to alliance_ratings.csv on (participant_id, study_week). NOT unique per participant and week: a participant can have two weekly responses in one study week (a late response and the next one on time) and several sessions in a week, so reduce each side to one row per (participant_id, study_week) before joining. Rule for this file: among survey_role = weekly rows of a study week, take the one with the latest recorded_at.',
+      },
       {
         name: 'completion_seconds',
         type: 'int',
@@ -734,6 +744,198 @@ export const DATASET_FILES: DatasetFileSpec[] = [
       { name: 'f0_iqr_hz', type: 'float', source: 'features.f0_iqr_hz' },
       { name: 'zcr_mean', type: 'float', source: 'features.zcr_mean', notes: 'Zero-crossing rate (spectral proxy).' },
       { name: 'zcr_sd', type: 'float', source: 'features.zcr_sd' },
+    ],
+  },
+  {
+    file: 'alliance_ratings.csv',
+    description:
+      'Per-session linguistic working-alliance markers (ai-therapist-173, migration 134): an automated judge rates each finished session on Task, Bond and Goal (Bordin 1979) from the REDACTED transcript. Numbers only; the judge generates no text. A behavioural counterpart to the weekly WAI-SR subscales in surveys_scored.csv: join on (participant_id, study_week) after reducing each file to one row per participant and week (aggregate the rated, non-stale sessions of the week here; take the latest weekly response there; see study_week in surveys_scored.csv). Only ended sessions of enrolled participants are rated (not staff, sandbox or anonymous sessions, and none of a participant who had withdrawn when the job ran); a message waiting for leak review is not read. Not yet validated against the self-report (docs/alliance-markers-2026-11-26.md). Empty until system_config.alliance_markers is enabled or the backfill is run.',
+    fetch: getAllianceRatingsExport,
+    columns: [
+      {
+        name: 'participant_id',
+        type: 'string',
+        source: 'research_pseudonyms',
+        notes:
+          'Anonymous sessions are never rated; empty only when the account was deleted after the rating. A rating made before a participant withdrew stays (see participants.csv study_status).',
+      },
+      { name: 'session_pseudo_id', type: 'string', source: 'research_pseudonyms' },
+      { name: 'session_started_at', type: 'timestamp', source: 'therapy_sessions.created_at' },
+      {
+        name: 'study_week',
+        type: 'int',
+        source: 'derived: 1 + whole weeks from enrollment (earliest qualtrics_signups.registered_at) to session start',
+        values: '1, 2, ...; empty when the participant has no enrollment record or the session precedes it',
+        notes: 'Same definition as surveys_scored.csv study_week.',
+      },
+      {
+        name: 'judge_version',
+        type: 'string',
+        source: 'session_alliance_ratings.judge_version',
+        notes: 'Rubric version; scores are comparable only within a version.',
+      },
+      {
+        name: 'status',
+        type: 'string',
+        source: 'session_alliance_ratings.status',
+        values: 'rated, too_short, errored',
+        notes:
+          'too_short: under the length floor, no judge call, nothing rateable. errored: the judge gave no answer (unknown, not a low score). Kept so coverage is auditable.',
+      },
+      { name: 'model', type: 'string', source: 'session_alliance_ratings.model' },
+      {
+        name: 'task_rateable',
+        type: 'bool',
+        source: 'session_alliance_ratings.task_rateable',
+        notes:
+          'false = the transcript holds too little evidence for Task; the score columns are then empty. Not a low score.',
+      },
+      {
+        name: 'task_p_rateable',
+        type: 'float',
+        source: 'session_alliance_ratings.task_p_rateable',
+        values: '0-1',
+        notes:
+          'Judge probability that Task can be rated; rateable when >= 0.5. Empty for too_short rows (no judge call was made) and errored rows.',
+      },
+      {
+        name: 'task_score',
+        type: 'float',
+        source: 'session_alliance_ratings.task_score',
+        values: '1-5, higher = stronger',
+        notes: 'Probability-weighted mean level. The value to correlate with weekly_alliance_task.',
+      },
+      {
+        name: 'task_level',
+        type: 'int',
+        source: 'session_alliance_ratings.task_level',
+        values: '1-5',
+        notes: 'Most probable level.',
+      },
+      {
+        name: 'task_confidence',
+        type: 'float',
+        source: 'session_alliance_ratings.task_confidence',
+        values: '0-1',
+        notes: 'Probability of the most probable level.',
+      },
+      {
+        name: 'task_distribution',
+        type: 'json',
+        source: 'session_alliance_ratings.task_distribution',
+        notes: 'JSON array: probability of each level, 1 to 5.',
+      },
+      {
+        name: 'bond_rateable',
+        type: 'bool',
+        source: 'session_alliance_ratings.bond_rateable',
+        notes:
+          'false = the transcript holds too little evidence for Bond; the score columns are then empty. Not a low score.',
+      },
+      {
+        name: 'bond_p_rateable',
+        type: 'float',
+        source: 'session_alliance_ratings.bond_p_rateable',
+        values: '0-1',
+        notes:
+          'Judge probability that Bond can be rated; rateable when >= 0.5. Empty for too_short rows (no judge call was made) and errored rows.',
+      },
+      {
+        name: 'bond_score',
+        type: 'float',
+        source: 'session_alliance_ratings.bond_score',
+        values: '1-5, higher = stronger',
+        notes: 'Probability-weighted mean level. The value to correlate with weekly_alliance_bond.',
+      },
+      {
+        name: 'bond_level',
+        type: 'int',
+        source: 'session_alliance_ratings.bond_level',
+        values: '1-5',
+        notes: 'Most probable level.',
+      },
+      {
+        name: 'bond_confidence',
+        type: 'float',
+        source: 'session_alliance_ratings.bond_confidence',
+        values: '0-1',
+        notes: 'Probability of the most probable level.',
+      },
+      {
+        name: 'bond_distribution',
+        type: 'json',
+        source: 'session_alliance_ratings.bond_distribution',
+        notes: 'JSON array: probability of each level, 1 to 5.',
+      },
+      {
+        name: 'goal_rateable',
+        type: 'bool',
+        source: 'session_alliance_ratings.goal_rateable',
+        notes:
+          'false = the transcript holds too little evidence for Goal; the score columns are then empty. Not a low score.',
+      },
+      {
+        name: 'goal_p_rateable',
+        type: 'float',
+        source: 'session_alliance_ratings.goal_p_rateable',
+        values: '0-1',
+        notes:
+          'Judge probability that Goal can be rated; rateable when >= 0.5. Empty for too_short rows (no judge call was made) and errored rows.',
+      },
+      {
+        name: 'goal_score',
+        type: 'float',
+        source: 'session_alliance_ratings.goal_score',
+        values: '1-5, higher = stronger',
+        notes: 'Probability-weighted mean level. The value to correlate with weekly_alliance_goal.',
+      },
+      {
+        name: 'goal_level',
+        type: 'int',
+        source: 'session_alliance_ratings.goal_level',
+        values: '1-5',
+        notes: 'Most probable level.',
+      },
+      {
+        name: 'goal_confidence',
+        type: 'float',
+        source: 'session_alliance_ratings.goal_confidence',
+        values: '0-1',
+        notes: 'Probability of the most probable level.',
+      },
+      {
+        name: 'goal_distribution',
+        type: 'json',
+        source: 'session_alliance_ratings.goal_distribution',
+        notes: 'JSON array: probability of each level, 1 to 5.',
+      },
+      {
+        name: 'participant_turns',
+        type: 'int',
+        source: 'session_alliance_ratings.participant_turns',
+        notes: 'Redacted participant turns the judge was given.',
+      },
+      { name: 'participant_words', type: 'int', source: 'session_alliance_ratings.participant_words' },
+      {
+        name: 'transcript_truncated',
+        type: 'bool',
+        source: 'session_alliance_ratings.transcript_truncated',
+        notes: 'true when the session exceeded the transcript budget and only its opening and close were rated.',
+      },
+      {
+        name: 'stale',
+        type: 'bool',
+        source:
+          'derived: session_alliance_ratings.transcript_fingerprint differs from the session transcript at export time',
+        notes:
+          'true when the session transcript the judge may read has changed since this rating (a late message was redacted, a message was re-redacted or corrected, a leak review released or withheld a message) and the session has not been rated again yet. Exclude stale rows, or re-run the backfill and export again.',
+      },
+      {
+        name: 'rated_at',
+        type: 'timestamp',
+        source: 'session_alliance_ratings.rated_at',
+        notes: 'Only ratings made by as_of are exported.',
+      },
     ],
   },
 ];

@@ -214,6 +214,7 @@ Rows: 11
 | participant_id | string | research_pseudonyms | P001, P002, ... |  |
 | survey_role | string | qualtrics_responses.survey_role | baseline, weekly, exit, week12 |  |
 | recorded_at | timestamp | qualtrics_responses.recorded_at |  |  |
+| study_week | int | derived: 1 + whole weeks from enrollment (earliest qualtrics_signups.registered_at) to recorded_at | 1, 2, ...; empty when the participant has no enrollment record or recorded_at precedes it | Same calendar as the in-app survey schedule (week 1 = first 7 days after enrollment). Join key to alliance_ratings.csv on (participant_id, study_week). NOT unique per participant and week: a participant can have two weekly responses in one study week (a late response and the next one on time) and several sessions in a week, so reduce each side to one row per (participant_id, study_week) before joining. Rule for this file: among survey_role = weekly rows of a study week, take the one with the latest recorded_at. |
 | completion_seconds | int | answers->>'duration' |  | Qualtrics-reported time spent in the survey. |
 | speeder | bool | derived: completion_seconds below the per-role plausibility floor |  | Flag for analysis-time exclusion decisions (baseline<120s, weekly<20s, exit<90s, week12<45s, withdrawal<10s); never auto-excluded. |
 | phq2 | int | derived: PHQ-2 item sum (raw-1 each) | 0-6; empty for weekly/unscorable |  |
@@ -243,3 +244,42 @@ Rows: 16
 | mean_adjacent_similarity | float | derived: AVG(1 - cosine distance) over consecutive embedded turns | ~0-1, higher = more topically coherent; empty when <2 embedded turns |  |
 | mean_user_adjacent_similarity | float | derived: same, user turns only |  | Participant topical coherence, ignoring assistant turns. |
 | first_last_similarity | float | derived: 1 - cosine distance between first and last embedded turn |  | Low values suggest within-session topic drift. |
+
+## alliance_ratings.csv
+
+Per-session linguistic working-alliance markers (ai-therapist-173, migration 134): an automated judge rates each finished session on Task, Bond and Goal (Bordin 1979) from the REDACTED transcript. Numbers only; the judge generates no text. A behavioural counterpart to the weekly WAI-SR subscales in surveys_scored.csv: join on (participant_id, study_week) after reducing each file to one row per participant and week (aggregate the rated, non-stale sessions of the week here; take the latest weekly response there; see study_week in surveys_scored.csv). Only ended sessions of enrolled participants are rated (not staff, sandbox or anonymous sessions, and none of a participant who had withdrawn when the job ran); a message waiting for leak review is not read. Not yet validated against the self-report (docs/alliance-markers-2026-11-26.md). Empty until system_config.alliance_markers is enabled or the backfill is run.
+
+Rows: 0 (added to the export on 2026-11-26, after this sample run; the sample directory has no alliance_ratings.csv, and its surveys_scored.csv predates the study_week column. Column definitions below are the current ones.)
+
+| column | type | source | values | notes |
+|---|---|---|---|---|
+| participant_id | string | research_pseudonyms |  | Anonymous sessions are never rated; empty only when the account was deleted after the rating. A rating made before a participant withdrew stays (see participants.csv study_status). |
+| session_pseudo_id | string | research_pseudonyms |  |  |
+| session_started_at | timestamp | therapy_sessions.created_at |  |  |
+| study_week | int | derived: 1 + whole weeks from enrollment (earliest qualtrics_signups.registered_at) to session start | 1, 2, ...; empty when the participant has no enrollment record or the session precedes it | Same definition as surveys_scored.csv study_week. |
+| judge_version | string | session_alliance_ratings.judge_version |  | Rubric version; scores are comparable only within a version. |
+| status | string | session_alliance_ratings.status | rated, too_short, errored | too_short: under the length floor, no judge call, nothing rateable. errored: the judge gave no answer (unknown, not a low score). Kept so coverage is auditable. |
+| model | string | session_alliance_ratings.model |  |  |
+| task_rateable | bool | session_alliance_ratings.task_rateable |  | false = the transcript holds too little evidence for Task; the score columns are then empty. Not a low score. |
+| task_p_rateable | float | session_alliance_ratings.task_p_rateable | 0-1 | Judge probability that Task can be rated; rateable when >= 0.5. Empty for too_short rows (no judge call was made) and errored rows. |
+| task_score | float | session_alliance_ratings.task_score | 1-5, higher = stronger | Probability-weighted mean level. The value to correlate with weekly_alliance_task. |
+| task_level | int | session_alliance_ratings.task_level | 1-5 | Most probable level. |
+| task_confidence | float | session_alliance_ratings.task_confidence | 0-1 | Probability of the most probable level. |
+| task_distribution | json | session_alliance_ratings.task_distribution |  | JSON array: probability of each level, 1 to 5. |
+| bond_rateable | bool | session_alliance_ratings.bond_rateable |  | false = the transcript holds too little evidence for Bond; the score columns are then empty. Not a low score. |
+| bond_p_rateable | float | session_alliance_ratings.bond_p_rateable | 0-1 | Judge probability that Bond can be rated; rateable when >= 0.5. Empty for too_short rows (no judge call was made) and errored rows. |
+| bond_score | float | session_alliance_ratings.bond_score | 1-5, higher = stronger | Probability-weighted mean level. The value to correlate with weekly_alliance_bond. |
+| bond_level | int | session_alliance_ratings.bond_level | 1-5 | Most probable level. |
+| bond_confidence | float | session_alliance_ratings.bond_confidence | 0-1 | Probability of the most probable level. |
+| bond_distribution | json | session_alliance_ratings.bond_distribution |  | JSON array: probability of each level, 1 to 5. |
+| goal_rateable | bool | session_alliance_ratings.goal_rateable |  | false = the transcript holds too little evidence for Goal; the score columns are then empty. Not a low score. |
+| goal_p_rateable | float | session_alliance_ratings.goal_p_rateable | 0-1 | Judge probability that Goal can be rated; rateable when >= 0.5. Empty for too_short rows (no judge call was made) and errored rows. |
+| goal_score | float | session_alliance_ratings.goal_score | 1-5, higher = stronger | Probability-weighted mean level. The value to correlate with weekly_alliance_goal. |
+| goal_level | int | session_alliance_ratings.goal_level | 1-5 | Most probable level. |
+| goal_confidence | float | session_alliance_ratings.goal_confidence | 0-1 | Probability of the most probable level. |
+| goal_distribution | json | session_alliance_ratings.goal_distribution |  | JSON array: probability of each level, 1 to 5. |
+| participant_turns | int | session_alliance_ratings.participant_turns |  | Redacted participant turns the judge was given. |
+| participant_words | int | session_alliance_ratings.participant_words |  |  |
+| transcript_truncated | bool | session_alliance_ratings.transcript_truncated |  | true when the session exceeded the transcript budget and only its opening and close were rated. |
+| stale | bool | derived: session_alliance_ratings.transcript_fingerprint differs from the session transcript at export time |  | true when the session transcript the judge may read has changed since this rating (a late message was redacted, a message was re-redacted or corrected, a leak review released or withheld a message) and the session has not been rated again yet. Exclude stale rows, or re-run the backfill and export again. |
+| rated_at | timestamp | session_alliance_ratings.rated_at |  | Only ratings made by as_of are exported. |

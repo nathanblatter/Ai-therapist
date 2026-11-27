@@ -11,6 +11,7 @@ import { orgIdFor } from '../../middleware/org.js';
 import { parsePagination } from '../../utils/pagination.js';
 import {
   getSessionEval,
+  getLatestAllianceRating,
   getSession,
   getSessionHumanRatings,
   upsertSessionHumanRating,
@@ -194,6 +195,36 @@ export default function evalsRoutes(): Router {
           error: 'Eval run failed',
           details: err instanceof Error ? err.message : String(err),
         });
+      }
+    },
+  );
+
+  // GET /admin/api/sessions/:sessionId/alliance-rating - the linguistic
+  // working-alliance markers for a session (ai-therapist-173): Task / Bond /
+  // Goal rated from the redacted transcript. A research measure, so
+  // researcher-only; org scope comes from requireSessionClientAccess. Read
+  // only: ratings are written by the post-session job or the backfill script.
+  // Numbers only; the table holds no transcript text.
+  // Blind rating applies here too: while the caller still owes a human
+  // rating for this session, another automated judge's verdict on it stays
+  // server-side, like the quality judge's scores above.
+  // rating.stale is true when the session's readable transcript has changed
+  // since the rating (a late message, a re-redaction, a leak review) and the
+  // job has not rated it again yet; the panel says so.
+  router.get(
+    '/admin/api/sessions/:sessionId/alliance-rating',
+    requireRole('researcher'),
+    requireSessionClientAccess(),
+    async (req, res) => {
+      try {
+        const { blind } = await blindStateFor(req.params.sessionId, req.session.userId!);
+        if (blind) return res.json({ rating: null, blind: true });
+        const rating = await getLatestAllianceRating(req.params.sessionId);
+        if (!rating) return res.status(404).json({ error: 'No alliance rating for this session yet' });
+        res.json({ rating, blind: false });
+      } catch (err) {
+        log.error({ err }, 'Failed to fetch alliance rating');
+        res.status(500).json({ error: 'Failed to fetch alliance rating' });
       }
     },
   );

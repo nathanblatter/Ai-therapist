@@ -83,3 +83,5 @@ export * from './qualtricsSignups.queries.js';
 export * from './qualtricsResponses.queries.js';
 // Staff email from the admin app (ai-therapist-283 phase 2).
 export * from './mail.queries.js';
+// Linguistic working-alliance ratings (ai-therapist-173, migration 134).
+export * from './allianceRatings.queries.js';
