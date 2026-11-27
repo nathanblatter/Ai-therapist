@@ -18,6 +18,7 @@ import {
 } from '../utils/openaiErrors.js';
 import { assessorIncidentOpen, noteAssessorSuccess, noteAssessorFailure } from './riskAssessorHealth.service.js';
 import { RISK_BANDS, riskSeverityForScore } from '../../shared/riskBands.js';
+import { detectNonEnglish } from './nonEnglishScreen.js';
 
 const log = createLogger('crisisDetection');
 
@@ -623,6 +624,16 @@ export function detectContextSignals(content: string): ContextSignal[] {
 // already risk-bearing, where every turn is assessed anyway.
 const SAFETY_QUESTION_TOPICS: RegExp[] = [
   /\bsuicid/,
+  // The assistant answers in the participant's language, so its safety
+  // question may be in Spanish; "si" or "no" in reply matches no screen and
+  // was skipped as a fragment (review of PR #157). Accents are optional:
+  // models and transcripts drop them.
+  /\bquitar(?:te|se|le)? la vida\b/,
+  /\b(?:matar|lastimar|herir|cortar|da[nñ]ar)(?:te|se)\b/,
+  /\bhacer(?:te|se) da[nñ]o\b/,
+  /\b(?:acabar|terminar) con (?:tu|su) vida\b/,
+  /\b(?:quieres|quiere|deseas|desea|has pensado en|ha pensado en|piensas en|ganas de) (?:morir|morirte|morirse|desaparecer|no (?:estar|seguir|vivir|despertar))\b/,
+  /\b(?:est[aá]s|est[aá]|te sientes|se siente) (?:a salvo|segur[oa]|en peligro)\b/,
   /\b(?:kill|killing|hurt|hurting|harm|harming|cut|cutting) yourself\b/,
   /\bself[- ]harm/,
   // "end things", but not the session: "would you like to end things here for
@@ -1191,6 +1202,9 @@ function applyMeansInquiryFloor(
  */
 export async function needsContextAssessment(sessionId: string, content: string): Promise<boolean> {
   if (detectContextSignals(content).length > 0) return true;
+  // A message that is not (all) English is always assessed: the keyword screen
+  // that found nothing in it only knows English (the language wake).
+  if (detectNonEnglish(content).nonEnglish) return true;
   const ctx = await getSessionRiskContext(sessionId);
   // A filler-only fragment in a session that never reached medium is not
   // assessed for the session's sake (see isLowContentFragment); it still is
@@ -2141,6 +2155,11 @@ interface RiskAnalysisResult {
    *  writes a flag event for the first such turn of each kind in a session
    *  and the page says so in words (ai-therapist-353). */
   acute?: Exclude<AcuteStage, 'none'>;
+  /** True when the turn comes straight after an assistant safety question
+   *  (repliesToSafetyQuestion), keyword or not. Read only by the shadow
+   *  scorer's hand-off, which then also asks what the reply says. Nothing in
+   *  the pipeline acts on it. */
+  followsSafetyQuestion?: boolean;
   /** Whether the session was already flagged HIGH when this turn was scored,
    *  as the session risk context read it: null when that read failed or did
    *  not answer in time. The pipeline uses it to decide whether a high turn is
@@ -2184,6 +2203,11 @@ export interface AnalyzeHooks {
  * tokens, 1 to 2 seconds) per participant turn, only in sessions that are
  * flagged or had a risk-bearing turn in the last CONTEXT_WINDOW_TURNS, plus
  * the rare signal match elsewhere. Calm sessions pay one small SELECT.
+ *
+ * A fifth case since 2026-11-26 (the language wake, ai-therapist-329): a
+ * keyword-free message that is not (all) English, which the English keyword
+ * screen could not have matched (nonEnglishScreen.ts). One assessor call per
+ * such turn, whatever the session.
  */
 export async function analyzeMessageRisk(
   message: MessageInput,
@@ -2218,10 +2242,17 @@ export async function analyzeMessageRisk(
     // context signal, or one answering a safety question (ai-therapist-373: a
     // "yes" waited one more read deadline than a keyword turn before its page).
     const contextSignals = keywordAnalysis.keywordScore === 0 ? detectContextSignals(message.content) : [];
+    // Language wake (ai-therapist-329): the keyword screen is English, so "no
+    // keyword" says nothing about a message that is partly or wholly in
+    // another language. Such a turn is always sent to the assessor. The screen
+    // is deterministic (nonEnglishScreen.ts): no vendor call stands between a
+    // Spanish disclosure and the assessor.
+    const nonEnglish = detectNonEnglish(message.content);
+    // The turn comes straight after an assistant safety question (never the
+    // check-in, which precedes any assistant turn).
+    const repliesToSafety = message.source !== 'checkin' && repliesToSafetyQuestion(conversationHistory);
     const certainToBeAssessed =
-      keywordAnalysis.keywordScore > 0 ||
-      contextSignals.length > 0 ||
-      (message.source !== 'checkin' && repliesToSafetyQuestion(conversationHistory));
+      keywordAnalysis.keywordScore > 0 || contextSignals.length > 0 || nonEnglish.nonEnglish || repliesToSafety;
     const assessorSetup = certainToBeAssessed ? prepareAssessorCall(message.session_id) : undefined;
     const [trajectory, sessionContext] = await Promise.all([
       readWithin(
@@ -2291,8 +2322,7 @@ export async function analyzeMessageRisk(
     // question, and the lyric above may flag medium again (no page). Whether
     // the assessor is TOLD the turn is an answer still follows
     // looksLikeAnAnswer, so a long change of subject is read on its own words.
-    const followsSafetyQuestion =
-      keywordFree && message.source !== 'checkin' && repliesToSafetyQuestion(conversationHistory);
+    const followsSafetyQuestion = keywordFree && repliesToSafety;
     const answersSafetyQuestion = followsSafetyQuestion && looksLikeAnAnswer(message.content);
     // A filler-only fragment ("would stop", "ok", "wait") in a session that has
     // never reached medium is not worth an assessment and has been over-read
@@ -2311,15 +2341,21 @@ export async function analyzeMessageRisk(
       !isSweep &&
       !isModerationWake &&
       (contextSignals.length > 0 || (sessionContext.elevated && !fragmentSkipped) || followsSafetyQuestion);
+    // Only when nothing else is already sending the turn to the assessor: the
+    // sweep, moderation and context labels win, and this adds no second call.
+    const isLanguageWake = keywordFree && !isSweep && !isModerationWake && !isContextWake && nonEnglish.nonEnglish;
 
-    if (keywordAnalysis.keywordScore > 0 || isSweep || isModerationWake || isContextWake) {
+    if (keywordAnalysis.keywordScore > 0 || isSweep || isModerationWake || isContextWake || isLanguageWake) {
       try {
         // A context wake's fallback (usually 0) is weaker than the assessor's
         // answer, so it gets the patient budget like every other keyword-free
         // call. Once back-to-back failures have established an outage that
         // patience has already been spent: use the short budget so each turn
         // of a flagged session does not queue another 30s of retries.
-        const callBudget = isContextWake && assessorIncidentOpen() ? 'fast' : budget;
+        // A language wake is the same kind of call (its fallback is 0), so it
+        // gets the same short budget in an outage: without it every reply to a
+        // Spanish-speaking chat participant waited out the patient budget.
+        const callBudget = (isContextWake || isLanguageWake) && assessorIncidentOpen() ? 'fast' : budget;
         llm = await assessRiskWithLLM(
           message.content,
           conversationHistory,
@@ -2329,8 +2365,9 @@ export async function analyzeMessageRisk(
           {
             sessionContext: describeSessionRiskContext(sessionContext),
             // The keyword and sweep framings are unchanged; only a context wake
-            // tells the assessor that no keyword matched.
-            keywordFree: isContextWake,
+            // (and a language wake, with the same words) tells the assessor
+            // that no keyword matched.
+            keywordFree: isContextWake || isLanguageWake,
             // Whatever woke the assessor, tell it when the turn answers a safety
             // question (a sweep or a moderation wake can land on one too).
             answersSafetyQuestion,
@@ -2367,14 +2404,18 @@ export async function analyzeMessageRisk(
             ? 'llm_moderation_wake'
             : isContextWake
               ? 'llm_context'
-              : 'llm_assessed';
+              : isLanguageWake
+                ? 'llm_language_wake'
+                : 'llm_assessed';
         const trigger = isSweep
           ? 'periodic sweep'
           : isModerationWake
             ? `moderation wake (${moderationScore}/100)`
             : isContextWake
               ? `context wake (signals [${contextSignals.map((c) => c.label).join(', ')}], session peak ${sessionContext.recentPeak}, flagged ${sessionContext.flagged}, answers safety question ${answersSafetyQuestion})`
-              : `keywords [${keywordAnalysis.keywords.join(', ')}]`;
+              : isLanguageWake
+                ? `language wake (not English: ${nonEnglish.signals.join(', ')})`
+                : `keywords [${keywordAnalysis.keywords.join(', ')}]`;
         log.info(
           `[risk] session ${message.session_id.substring(0, 12)}…: ${trigger} ` +
             `→ LLM ${llm.risk_score}/100 (${llm.context}): ${llm.reasoning}`,
@@ -2610,6 +2651,7 @@ export async function analyzeMessageRisk(
       ...(subject ? { subject } : {}),
       ...(ownRiskToo && labelled ? { alsoSubject: labelled } : {}),
       ...(acute ? { acute } : {}),
+      ...(repliesToSafety ? { followsSafetyQuestion: true } : {}),
       sessionFlaggedHigh: sessionContext.lookupFailed
         ? null
         : sessionContext.flagged && sessionContext.flaggedSeverity === 'high',
@@ -2685,6 +2727,12 @@ export async function analyzeMessageRisk(
                     ...(sessionContext.lookupFailed ? { lookup_failed: true } : {}),
                   },
                 }
+              : {}),
+            // Not (all) English: recorded whichever wake assessed the turn, and
+            // on a degraded turn too, so "the assessor never read a Spanish
+            // message" is visible in the audit trail. Signal names only.
+            ...(nonEnglish.nonEnglish
+              ? { non_english: nonEnglish.signals, ...(isLanguageWake ? { language_wake: true } : {}) }
               : {}),
             ...(message.source ? { source: message.source } : {}),
             ...(message.history_source ? { history_source: message.history_source } : {}),

@@ -45,7 +45,20 @@ export const DETECTOR_CATEGORIES = [
   'bereavement',
   'ordinary-plans',
   'ordinary-sadness',
+  // The reply to an assistant safety question (evals/goldens/safety-answer.jsonl).
+  'safety-question-answer',
 ] as const;
+
+/** What a reply to a safety question says about the risk asked about. "yes"
+ *  CONFIRMS the risk ("yeah" to thoughts of suicide, and also "no" to "are you
+ *  safe?"); "no" denies it; "unclear" is a dodge, a deflection or no answer. */
+export const SAFETY_ANSWERS = ['yes', 'no', 'unclear'] as const;
+export type SafetyAnswer = (typeof SAFETY_ANSWERS)[number];
+
+/** Whose risk a message is about. "own" is the participant's own suicide or
+ *  self-harm risk; "none" is a message in which nobody is at risk. */
+export const RISK_SUBJECTS = ['own', 'third_party', 'harm_to_others', 'none'] as const;
+export type RiskSubject = (typeof RISK_SUBJECTS)[number];
 
 export const SOURCES = ['synthetic', 'adapted-from-scenario', 'adapted-from-unit-test'] as const;
 
@@ -113,8 +126,16 @@ export const detectorRowSchema = z
       /** Should this input itself raise an on-call page? `either` only where
        *  the acceptable range spans high and something lower. */
       page: z.enum(['yes', 'no', 'either']),
+      /** safety-answer.jsonl only: what the reply says about the risk the
+       *  assistant's question asked about. */
+      answer: z.enum(SAFETY_ANSWERS).optional(),
+      /** risk-subject.jsonl only: whose risk the input is about. */
+      subject: z.enum(RISK_SUBJECTS).optional(),
     }),
     category: z.enum(DETECTOR_CATEGORIES),
+    /** detector-language.jsonl only: the language of the input. "en" rows are
+     *  the controls; "es-en" is English and Spanish in one message. */
+    language: z.enum(['en', 'es', 'es-en', 'pt', 'pt-en', 'fr', 'de']).optional(),
     ...reviewFields,
   })
   .superRefine((row, ctx) => {

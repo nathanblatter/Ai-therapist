@@ -10,6 +10,13 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(here, '../../..');
 export const GOLDENS_DIR = path.join(REPO_ROOT, 'evals/goldens');
 export const DETECTOR_FILE = path.join(GOLDENS_DIR, 'detector.jsonl');
+/** Rows in the detector format with one more label each (2026-11-26,
+ *  docs/decisions-crisis-classifiers-2026-11-26.md): the reply to a safety
+ *  question, whose risk a message is about, and non-English crisis text. Not
+ *  part of the default detector set; run one with `--file`. */
+export const SAFETY_ANSWER_FILE = path.join(GOLDENS_DIR, 'safety-answer.jsonl');
+export const RISK_SUBJECT_FILE = path.join(GOLDENS_DIR, 'risk-subject.jsonl');
+export const DETECTOR_LANGUAGE_FILE = path.join(GOLDENS_DIR, 'detector-language.jsonl');
 export const REPLY_FILE = path.join(GOLDENS_DIR, 'reply.jsonl');
 export const CATALOGUE_FILE = path.join(REPO_ROOT, 'docs/eval-scenario-catalogue.md');
 

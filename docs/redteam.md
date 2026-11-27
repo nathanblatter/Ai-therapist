@@ -3554,6 +3554,16 @@ true negatives (hyperbole, idiom, song and film talk, dark humour, clinical talk
 ordinary low mood), because a false positive pages a person. No row contains
 method detail for self-harm.
 
+**Three more files in the detector row format** (2026-11-26; not part of the default
+detector set, run one with `--file`): `safety-answer.jsonl` (49 replies to an assistant
+safety question, each with `expected.answer`: yes / no / unclear, where "yes" confirms the
+risk asked about), `risk-subject.jsonl` (40 rows with `expected.subject`: own / third_party /
+harm_to_others / none) and `detector-language.jsonl` (46 rows with `language`: Spanish,
+Portuguese, French, German, code-switched, and English controls). `language-holdout.jsonl`
+is 300 one-line sentences (text, language, crisis or benign) written blind for the
+non-English screen; it is a unit-test fixture, not a detector set. What they were built for
+and what they showed: `docs/decisions-crisis-classifiers-2026-11-26.md`.
+
 **`reply.jsonl`** (47 rows): single-turn cases for the assistant's reply: fixed
 `history` plus one `input`, a plain-language `expectedBehaviour`, deterministic
 `mustInclude` / `mustNotInclude` checks (a case-insensitive `phrase` or a
@@ -3593,6 +3603,19 @@ npm run redteam:shadow-eval -- --confirm-paid --repeat 2    # one Decisions API 
 Results of the first run: `docs/shadow-risk-scorer-eval-2026-11-26.md` and
 `evals/goldens/baselines/shadow-scorer.{md,json}`.
 
+A second opt-in runner asks the three questions added in question set v2, one per request,
+of the label sets above (and of the detector goldens as controls), and runs the free
+non-English screen beside the language question:
+
+```sh
+npm run redteam:decisions-eval -- --dry-run                 # no calls: the free screen only
+npm run redteam:decisions-eval -- --confirm-paid --repeat 2 # about 770 small requests per repeat
+npm run redteam:goldens -- --set detector --layer full --file evals/goldens/detector-language.jsonl
+```
+
+Results: `docs/decisions-crisis-classifiers-2026-11-26.md` and
+`evals/goldens/baselines/decisions-crisis-classifiers.json`.
+
 - **Detector**: each row is a fresh session. History is replayed turn by turn,
   so earlier participant turns are scored exactly as they would be live and the
   input sees the same session risk context. `rt-text` rows go through
@@ -3611,6 +3634,9 @@ Results of the first run: `docs/shadow-risk-scorer-eval-2026-11-26.md` and
   are closed in the database rather than through `/api/chat/end`, so no billed
   post-session jobs run. `/api/chat/start` allows 20 starts per 15 minutes per
   IP, so a full reply run waits out the limiter twice (about 30 minutes).
+- `--file <rows.jsonl>` (detector only) runs another file of rows in the detector format
+  instead of `detector.jsonl`. Each result row also carries `subject` (third_party /
+  harm_to_others / null), read from the turn's `score_factors`.
 - Flags: `--ids a,b`, `--category c`, `--limit n`, `--out <dir>`,
   `--baseline <summary.json>`, `--max-usd n` (stop once recorded spend reaches
   n; default 2), `--dry-run` (no OpenAI calls; reply rows get a canned reply and

@@ -13,6 +13,7 @@ import {
   _resetShadowScorerForTests,
   _settleShadowScorerForTests,
   _shadowInFlightForTests,
+  storedProbabilities,
   type ShadowTurn,
 } from './shadowRiskScorer.service.js';
 import { SHADOW_PREDICATE_NAMES, ShadowAnswerError } from './shadowRiskQuestions.js';
@@ -29,7 +30,15 @@ const TURN: ShadowTurn = {
   productionSeverity: 'low',
 };
 
-function answer(band: 'none' | 'low' | 'medium' | 'high', refuse: string[] = []) {
+const choice = (name: string, probabilities: Record<string, number>) => ({
+  type: 'choice',
+  name,
+  choice: Object.entries(probabilities).sort((a, b) => b[1] - a[1])[0][0],
+  confidence: 0.9,
+  probabilities: Object.entries(probabilities).map(([value, probability]) => ({ value, probability })),
+});
+
+function answer(band: 'none' | 'low' | 'medium' | 'high', refuse: string[] = [], withSafetyAnswer = false) {
   const p = { none: 0.01, low: 0.01, medium: 0.01, high: 0.01, [band]: 0.97 };
   return {
     model: 'gpt-6-luna',
@@ -50,6 +59,16 @@ function answer(band: 'none' | 'low' | 'medium' | 'high', refuse: string[] = [])
       ...SHADOW_PREDICATE_NAMES.map((name) =>
         refuse.includes(name) ? { type: 'refusal', name } : { type: 'predicate', name, probability: 0.02 },
       ),
+      refuse.includes('risk_subject')
+        ? { type: 'refusal', name: 'risk_subject' }
+        : choice('risk_subject', { own: 0.9, third_party: 0.04, harm_to_others: 0.03, none: 0.03 }),
+      ...(withSafetyAnswer
+        ? [
+            refuse.includes('safety_answer')
+              ? { type: 'refusal', name: 'safety_answer' }
+              : choice('safety_answer', { yes: 0.8, no: 0.05, unclear: 0.15 }),
+          ]
+        : []),
     ],
     usage: { input_tokens: 3100, output_tokens: 0 },
   };
@@ -152,12 +171,15 @@ describe('the row', () => {
       refusedQuestions: [],
       errorCode: null,
       model: 'gpt-6-luna',
-      questionSetVersion: 1,
+      questionSetVersion: 2,
       tokensIn: 3100,
       tokensOut: 0,
     });
     expect(row.severityProbabilities?.high).toBe(0.97);
-    expect(Object.keys(row.predicates ?? {})).toHaveLength(8);
+    // Nine yes/no probabilities, and the four values of "whose risk is it".
+    expect(Object.keys(row.predicates ?? {})).toHaveLength(13);
+    expect(row.predicates).toMatchObject({ non_english: 0.02, 'risk_subject.own': 0.9, 'risk_subject.none': 0.03 });
+    expect(Object.keys(row.predicates ?? {}).filter((k) => k.startsWith('safety_answer'))).toEqual([]);
     expect(typeof row.latencyMs).toBe('number');
     const stored = JSON.stringify(row);
     expect(stored).not.toContain('Jordan');
@@ -325,5 +347,78 @@ describe('sessions out of scope', () => {
     expect(create).not.toHaveBeenCalled();
     await score({ ...TURN, messageId: 99 });
     expect(create).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('question set v2: the choice questions', () => {
+  const names = (): string[] =>
+    (create.mock.calls[0][0] as { questions: Array<{ name: string }> }).questions.map((q) => q.name);
+
+  it('a turn that does not follow a safety question is not asked what the reply says', async () => {
+    await score();
+    expect(names()).toContain('risk_subject');
+    expect(names()).not.toContain('safety_answer');
+  });
+
+  it('a turn that follows a safety question is asked, and the answer is stored value by value', async () => {
+    create.mockResolvedValue(answer('medium', [], true));
+    await score({ ...TURN, followsSafetyQuestion: true });
+    expect(names().slice(-2)).toEqual(['risk_subject', 'safety_answer']);
+    const row = insert.mock.calls[0][0];
+    expect(row.status).toBe('scored');
+    expect(row.predicates).toMatchObject({
+      'safety_answer.yes': 0.8,
+      'safety_answer.no': 0.05,
+      'safety_answer.unclear': 0.15,
+    });
+  });
+
+  it('a refused choice: errored, named, and everything else that came back is kept', async () => {
+    create.mockResolvedValue(answer('high', ['risk_subject']));
+    await score();
+    const row = insert.mock.calls[0][0];
+    expect(row).toMatchObject({
+      status: 'errored',
+      errorCode: 'refused',
+      refusedQuestions: ['risk_subject'],
+      shadowSeverity: 'high',
+    });
+    expect(Object.keys(row.predicates ?? {}).filter((k) => k.startsWith('risk_subject'))).toEqual([]);
+    expect(row.predicates).toHaveProperty('non_english');
+  });
+
+  it('a refused safety answer: errored and named', async () => {
+    create.mockResolvedValue(answer('low', ['safety_answer'], true));
+    await score({ ...TURN, followsSafetyQuestion: true });
+    expect(insert.mock.calls[0][0]).toMatchObject({
+      status: 'errored',
+      errorCode: 'refused',
+      refusedQuestions: ['safety_answer'],
+    });
+  });
+
+  it('the safety answer was asked for and did not come back: malformed, not "no"', async () => {
+    create.mockResolvedValue(answer('none'));
+    await score({ ...TURN, followsSafetyQuestion: true });
+    expect(insert.mock.calls[0][0]).toMatchObject({ status: 'errored', errorCode: 'malformed', predicates: null });
+  });
+
+  it('the Decisions API down or silent on such a turn: one errored row, nothing thrown', async () => {
+    create.mockRejectedValue(Object.assign(new Error('upstream'), { status: 503 }));
+    await score({ ...TURN, followsSafetyQuestion: true });
+    expect(insert.mock.calls[0][0]).toMatchObject({ status: 'errored', errorCode: 'http_503' });
+    insert.mockClear();
+    create.mockReturnValue(new Promise(() => undefined));
+    await score({ ...TURN, followsSafetyQuestion: true });
+    expect(insert.mock.calls[0][0]).toMatchObject({ status: 'errored', errorCode: 'timeout' });
+  });
+
+  it('storedProbabilities flattens choices beside the predicates', () => {
+    expect(
+      storedProbabilities({
+        predicates: { non_english: 0.99 },
+        choices: { risk_subject: { choice: 'own', probabilities: { own: 0.7, none: 0.3 } } },
+      }),
+    ).toEqual({ non_english: 0.99, 'risk_subject.own': 0.7, 'risk_subject.none': 0.3 });
   });
 });

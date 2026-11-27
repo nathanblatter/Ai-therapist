@@ -91,7 +91,7 @@ describe('GET /admin/api/shadow-risk/report', () => {
     expect((await request(appAs(researcher())).get(PATH)).body).toMatchObject({
       enabled: false,
       model: 'gpt-6-luna',
-      question_set_version: 1,
+      question_set_version: 2,
     });
     mocks.getSystemConfigByKey.mockResolvedValue({ config_value: { enabled: 'yes' } });
     expect((await request(appAs(researcher())).get(PATH)).body.enabled).toBe(false);

@@ -403,6 +403,46 @@ elsewhere. A calm session pays one small `SELECT` per turn and nothing else.
   running in the background (it still flags and pages when it finishes), and its steer lands on
   the next turn. Calm keyword-free turns are still scored after the response, as before.
 
+**The language wake (2026-11-26, ai-therapist-329).** The keyword screen is English, so "no
+keyword" says nothing about a message written partly or wholly in another language. Before
+this wake such a turn reached the assessor only when the moderation screen happened to score
+it 40 or more: of 32 invented Spanish, Portuguese, French, German and code-switched rows that
+should score moderate or high, 6 were scored 0 without being read (among them "I have the pills on the table and
+I am going to take them all" and "my brother told me last night he wants to kill himself", in
+Spanish). Now a keyword-free turn that the screen recognises as not (all) English is sent to the assessor (the screen is word lists and a character test, not a language detector: see its limits below),
+with the same "it matched no crisis keyword" framing a context wake uses (no new wording
+reaches the model). `method` is `llm_language_wake`.
+
+- The test is deterministic (`nonEnglishScreen.ts`): a letter outside ASCII, or one crisis
+  word in Spanish, Portuguese, French, German or Italian, or one common word from those
+  languages that English does not have (three of the short ones English shares). No vendor
+  call stands between a Spanish disclosure and the assessor, so there is nothing to time out
+  or refuse. It never scores and never lowers anything.
+- It is the last wake in line: a sweep, a moderation wake or a context wake keeps its own
+  label and there is never a second assessor call.
+- *Chat*: like a context wake, the turn is assessed before the reply (`needsContextAssessment`).
+- False wakes ("my abuela died", "I got nada done", an accented word that is not a common
+  English loanword or name) are not free. The turn is read by the assessor, so in chat the
+  reply waits for that call; a successful wake resets the periodic-sweep counter; the
+  trajectory bonus applies to what the assessor returns (capped at 64 as usual); and nothing
+  stops the assessor scoring an innocent woken turn high. In the one run made, 12 benign woken
+  rows all scored none. Common English loanwords and names with accents ("café", "résumé",
+  "José", "fiancé") and symbols such as µ do not wake. The false-wake rate on real participant
+  text is not known: stage's messages are plain ASCII test typing (0 of 439 woke).
+- Not recognised: Spanish typed without accents in words outside the lists, and languages
+  written in ASCII letters that the lists do not hold at all: Tagalog, Samoan, Tongan, Dutch,
+  Haitian Creole, romanised Chinese, Arabic or Hindi. Text in a non-Latin script does wake.
+- In an assessor outage a language wake uses the short call budget, like a context wake.
+- With the assessor down the turn scores what the moderation screen reads, like any other
+  keyword-free turn, and is recorded as `assessment_degraded`: never as a clean 0.
+- `score_factors.non_english` lists which signals matched (`non_ascii_letter`, `crisis_word`,
+  `function_words`) on every non-English turn, whichever wake assessed it; `language_wake`
+  is set when this wake was the reason.
+- Not covered: a language typed in ASCII whose words are in none of the lists (Dutch,
+  Tagalog, romanised Hindi), and the assessor UNDER-scoring a mixed-language disclosure it
+  does read (the other half of ai-therapist-329, still open). Evidence, including a per-turn
+  model call that was measured and not adopted: `docs/decisions-crisis-classifiers-2026-11-26.md`.
+
 **Assessor down on a context wake.** The fallback for a keyword-free turn is 0 (plus whatever
 the moderation screen reads), with one exception that fails toward detection: a *strong*
 signal (first-person "going to do it", "tonight's the night", "this is the last time we'll
@@ -1147,6 +1187,16 @@ How it works:
   passive ideation, plan or means, self-harm without intent, means inquiry,
   harm to others, a third party's crisis, figure of speech). Why these, and
   how they did on the goldens: `docs/shadow-risk-scorer-eval-2026-11-26.md`.
+  Question set **v2** (2026-11-26, same day) adds three: a `non_english`
+  predicate; a `risk_subject` choice (own / third_party / harm_to_others /
+  none); and, only on a turn the detector says follows an assistant safety
+  question, a `safety_answer` choice (yes / no / unclear, where "yes" means
+  the reply confirms the risk asked about). The nine v1 questions are word
+  for word what they were, and gave the same answer on all 273 detector
+  goldens with the new questions beside them. A choice is stored in the same
+  `predicates` object as one probability per value (`risk_subject.own`,
+  `safety_answer.unclear`). A refused choice makes the turn `errored`, like
+  any refused question. Evidence: `docs/decisions-crisis-classifiers-2026-11-26.md`.
 - The row holds the production score and severity at that moment, the shadow
   severity with the probability of each band, the probability of each
   predicate, model, question-set version, token counts and latency. **No
@@ -1268,8 +1318,9 @@ Time-series passive log. Columns: `history_id`, `session_id`, `message_id`, `ris
 down), `calculated_at`.
 
 `method` values: `keyword_only` (no assessment was called for), `llm_assessed` (keyword hit),
-`llm_context` (context wake), `llm_sweep`, `llm_moderation_wake`, `keyword_fallback` (the
-assessor was called and failed).
+`llm_context` (context wake), `llm_sweep`, `llm_moderation_wake`, `llm_language_wake` (a
+keyword-free turn that is not all English), `keyword_fallback` (the assessor was called and
+failed). `non_english` / `language_wake` are described under "The language wake".
 
 ### `human_handoffs`
 

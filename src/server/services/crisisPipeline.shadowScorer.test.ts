@@ -82,6 +82,16 @@ const { SHADOW_PREDICATE_NAMES } = await import('./shadowRiskQuestions.js');
 
 type Band = 'none' | 'low' | 'medium' | 'high';
 
+function choiceAnswer(name: string, chosen: string, values: string[]) {
+  return {
+    type: 'choice',
+    name,
+    choice: chosen,
+    confidence: 1,
+    probabilities: values.map((value) => ({ value, probability: value === chosen ? 1 : 0 })),
+  };
+}
+
 function shadowAnswer(band: Band) {
   return {
     model: 'gpt-6-luna',
@@ -98,6 +108,9 @@ function shadowAnswer(band: Band) {
         })),
       },
       ...SHADOW_PREDICATE_NAMES.map((name) => ({ type: 'predicate', name, probability: band === 'high' ? 0.99 : 0 })),
+      choiceAnswer('risk_subject', band === 'high' ? 'own' : 'none', ['own', 'third_party', 'harm_to_others', 'none']),
+      // Present in every answer; read only when the turn asked for it.
+      choiceAnswer('safety_answer', band === 'high' ? 'yes' : 'no', ['yes', 'no', 'unclear']),
     ],
     usage: { input_tokens: 3000, output_tokens: 0 },
   };
@@ -165,7 +178,7 @@ function plain(value: unknown): unknown {
   );
 }
 
-async function run(scenario: Scenario, mode: ShadowMode) {
+async function run(scenario: Scenario, mode: ShadowMode, risk: Record<string, unknown> = {}) {
   vi.clearAllMocks();
   _resetEarlyPageStateForTests();
   const emit = vi.fn();
@@ -187,6 +200,7 @@ async function run(scenario: Scenario, mode: ShadowMode) {
     severity: scenario.severity,
     factors: ['f'],
     breakdown: {},
+    ...risk,
   });
 
   // The shadow scorer says the opposite of production wherever it answers.
@@ -305,6 +319,28 @@ describe('the shadow scorer never changes the crisis pipeline', () => {
     expect(r.insert).toHaveBeenCalledWith(
       expect.objectContaining({ productionScore: 55, productionSeverity: 'medium', messageId: 1000 + turnSeq }),
     );
+  });
+
+  it('a turn the detector says follows a safety question is also asked what the reply says; the result is unchanged', async () => {
+    turnSeq++;
+    const plainTurn = await run(SCENARIOS[2], 'opposite');
+    const questions = (r: typeof plainTurn): string[] =>
+      (r.create.mock.calls[0][0] as { questions: Array<{ name: string }> }).questions.map((q) => q.name);
+    expect(questions(plainTurn)).not.toContain('safety_answer');
+    const reply = await run(SCENARIOS[2], 'opposite', { followsSafetyQuestion: true });
+    expect(questions(reply).slice(-2)).toEqual(['risk_subject', 'safety_answer']);
+    expect(reply.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'scored',
+        predicates: expect.objectContaining({ 'safety_answer.yes': 1, 'risk_subject.own': 1 }),
+      }),
+    );
+    // What the pipeline returns and does is the same as on the plain turn.
+    expect(reply.result).toEqual(plainTurn.result);
+    expect(reply.calls).toEqual({
+      ...(plainTurn.calls as Record<string, unknown>),
+      analyzeMessageRisk: (reply.calls as Record<string, unknown>).analyzeMessageRisk,
+    });
   });
 
   it('a demo-account session is never shadow-scored', async () => {

@@ -51,7 +51,9 @@ import {
   ShadowAnswerError,
   SHADOW_MODEL,
   SHADOW_QUESTION_SET_VERSION,
+  type ShadowAnswer,
   type ShadowHistoryTurn,
+  type ShadowQuestionOptions,
 } from './shadowRiskQuestions.js';
 import type { ShadowRiskScoreInsert } from '../db/shadowRisk.queries.js';
 
@@ -84,6 +86,10 @@ export interface ShadowTurn {
   source?: 'checkin';
   /** The history the production assessor was given for this turn. */
   history: ShadowHistoryTurn[];
+  /** The pipeline treats this turn as the reply to an assistant safety
+   *  question (repliesToSafetyQuestion): the `safety_answer` question is asked
+   *  too. Absent or false: it is not asked. */
+  followsSafetyQuestion?: boolean;
   productionScore: number;
   productionSeverity: string;
 }
@@ -207,6 +213,25 @@ function storedMessageId(id: string | number | null): number | null {
   return typeof id === 'string' && /^\d{1,15}$/.test(id) ? Number(id) : null;
 }
 
+/** Which optional questions this turn gets; the request and the parser must agree. */
+function questionOptions(turn: ShadowTurn): ShadowQuestionOptions {
+  return { followsSafetyQuestion: turn.followsSafetyQuestion === true };
+}
+
+/**
+ * The stored `predicates` object: every yes/no probability, plus each choice
+ * question's probabilities under `<question>.<value>` ("risk_subject.own",
+ * "safety_answer.unclear"). One flat map of numbers, so the column, the
+ * report query and the panel needed no change for question set v2.
+ */
+export function storedProbabilities(answer: Pick<ShadowAnswer, 'predicates' | 'choices'>): Record<string, number> {
+  const out: Record<string, number> = { ...answer.predicates };
+  for (const [question, choice] of Object.entries(answer.choices)) {
+    for (const [value, p] of Object.entries(choice.probabilities)) out[`${question}.${value}`] = p;
+  }
+  return out;
+}
+
 async function ask(turn: ShadowTurn): Promise<unknown> {
   const c = await deps.getClient();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -214,7 +239,9 @@ async function ask(turn: ShadowTurn): Promise<unknown> {
     timer = setTimeout(() => reject(new ShadowTimeoutError('shadow scorer deadline')), deps.timeoutMs);
     timer.unref?.();
   });
-  const call = Promise.resolve().then(() => c.decisions.create(buildShadowBody(turn.content, turn.history)));
+  const call = Promise.resolve().then(() =>
+    c.decisions.create(buildShadowBody(turn.content, turn.history, questionOptions(turn))),
+  );
   // A call that loses the race still settles on its own; its late rejection
   // must not become an unhandled one.
   call.catch(() => undefined);
@@ -247,7 +274,7 @@ async function scoreTurn(turn: ShadowTurn): Promise<void> {
   const startedAt = deps.now();
   let row: ShadowRiskScoreInsert;
   try {
-    const answer = parseShadowResponse(await ask(turn));
+    const answer = parseShadowResponse(await ask(turn), questionOptions(turn));
     const refused = answer.refused.length > 0;
     row = {
       ...base,
@@ -256,7 +283,7 @@ async function scoreTurn(turn: ShadowTurn): Promise<void> {
       status: refused || answer.severity === null ? 'errored' : 'scored',
       shadowSeverity: answer.severity,
       severityProbabilities: answer.severityProbabilities,
-      predicates: answer.predicates,
+      predicates: storedProbabilities(answer),
       refusedQuestions: answer.refused,
       errorCode: refused || answer.severity === null ? 'refused' : null,
       tokensIn: answer.tokensIn,

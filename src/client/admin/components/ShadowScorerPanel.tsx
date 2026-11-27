@@ -52,12 +52,14 @@ const DAY_CHOICES = [7, 30, 90];
 const rank = (s: Severity): number => SEVERITIES.indexOf(s);
 const pct = (num: number, den: number): string => (den === 0 ? 'n/a' : `${((num / den) * 100).toFixed(1)}%`);
 
-/** The yes/no answers at or above one half, most likely first. */
+/** The yes/no answers at or above one half, most likely first. A choice
+ *  question is stored as one entry per value ("risk_subject.own"); "nobody is
+ *  at risk" is the usual answer and is left out. */
 function likelyPredicates(p: Record<string, number>): string {
   const hits = Object.entries(p)
-    .filter(([, v]) => v >= 0.5)
+    .filter(([k, v]) => v >= 0.5 && k !== 'risk_subject.none')
     .sort((a, b) => b[1] - a[1])
-    .map(([k, v]) => `${k.replace(/_/g, ' ')} ${v.toFixed(2)}`);
+    .map(([k, v]) => `${k.replace(/_/g, ' ').replace('.', ': ')} ${v.toFixed(2)}`);
   return hits.length > 0 ? hits.join(', ') : 'none at 0.5 or above';
 }
 
