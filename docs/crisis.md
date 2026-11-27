@@ -630,7 +630,16 @@ Responses are tiered by severity/score:
   section 7.
 - **Medium severity**: real-time dashboard alert plus a work-queue item for the study team.
   No SMS page for the flag itself; a vendor cut of a medium-risk voice session does page
-  (below).
+  (below). **In typed chat** the first medium turn of a session also opens the participant's
+  crisis resource card: `session:crisis-emergency` to the session room only (not
+  `admin-broadcast`), `severity: "medium"`, `reason: "medium_risk"`, once per session, never
+  after the high card, and not for thoughts of harming someone else (`crisisPipeline.service.ts`,
+  ai-therapist-401: at medium the crisis lines used to reach the participant only if the
+  model wrote them into its reply). The browser opens the card for any payload and reads
+  only `severity: "high"` as "this session is in crisis". The medium chat steer and the chat
+  form of the risk-ladder requirement ask for the 988 line and the Crisis Text Line in the
+  same reply as the one safety question (`buildChatSteeringGuidance`,
+  `CHAT_RISK_CHECK_REPLY_GUIDANCE`). Voice is unchanged.
 - **Whether a high-severity event becomes an SMS** is decided in one place,
   `crisisPaging.service.ts` (ai-therapist-350; before it, one person in one crisis produced
   four texts in 2.5 minutes because each recovery session is a new session id and "risk is

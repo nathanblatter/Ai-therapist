@@ -181,6 +181,70 @@ describe('crisis resources on a high turn (ai-therapist-293)', () => {
   });
 });
 
+describe('the crisis card on a medium typed-chat turn (ai-therapist-401)', () => {
+  const CHAT_TURN = { sessionId: 'chat_1', messageId: 7, content: 'a participant turn' };
+  const cards = () => participantEmit.mock.calls.filter((c) => c[0] === 'session:crisis-emergency');
+
+  it('is sent by code, before the state read and the flag write, marked medium', async () => {
+    risk(55, 'medium');
+    await runCrisisPipeline(CHAT_TURN, 'chat');
+
+    const emitted = order.indexOf('emit:session:crisis-emergency');
+    expect(emitted).toBeGreaterThan(-1);
+    for (const later of ['db:crisis-state', 'db:flag']) expect(order.indexOf(later)).toBeGreaterThan(emitted);
+    expect(participantEmit).toHaveBeenCalledWith(
+      'session:crisis-emergency',
+      expect.objectContaining({ sessionId: 'chat_1', severity: 'medium', riskScore: 55, reason: 'medium_risk' }),
+    );
+  });
+
+  it('is sent once per session: a second medium turn does not re-open a card the participant closed', async () => {
+    risk(55, 'medium');
+    await runCrisisPipeline(CHAT_TURN, 'chat');
+    await runCrisisPipeline(CHAT_TURN, 'chat');
+    expect(cards()).toHaveLength(1);
+  });
+
+  it('does not use up the high card: a later high turn still sends it, marked high', async () => {
+    risk(55, 'medium');
+    await runCrisisPipeline(CHAT_TURN, 'chat');
+    risk(90, 'high');
+    await runCrisisPipeline(CHAT_TURN, 'chat');
+    expect(cards().map((c) => (c as unknown as [string, { severity: string }])[1].severity)).toEqual([
+      'medium',
+      'high',
+    ]);
+  });
+
+  it('is not sent after the high card, for a low turn, or for thoughts of harming someone else', async () => {
+    risk(90, 'high');
+    await runCrisisPipeline(CHAT_TURN, 'chat');
+    risk(55, 'medium');
+    await runCrisisPipeline(CHAT_TURN, 'chat');
+    expect(cards()).toHaveLength(1);
+
+    clearCrisisResourceState();
+    participantEmit.mockClear();
+    risk(30, 'low');
+    await runCrisisPipeline(CHAT_TURN, 'chat');
+    analyzeMessageRiskMock.mockImplementation(async () => ({
+      riskScore: 55,
+      severity: 'medium',
+      factors: [],
+      breakdown: {},
+      subject: 'harm_to_others',
+    }));
+    await runCrisisPipeline(CHAT_TURN, 'chat');
+    expect(cards()).toHaveLength(0);
+  });
+
+  it('voice is unchanged: a medium voice turn sends no card', async () => {
+    risk(55, 'medium');
+    await runCrisisPipeline(TURN, 'realtime');
+    expect(cards()).toHaveLength(0);
+  });
+});
+
 describe('realtime under-18 safeguard (ai-therapist-296)', () => {
   const CONFIRMED = { isMinor: true, statedAge: 15, confidence: 'high', reasoning: '' };
 

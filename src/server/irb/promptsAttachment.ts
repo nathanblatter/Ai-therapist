@@ -77,6 +77,7 @@ import { SCALE_MIN_INTERVAL_DAYS } from '../utils/scales.js';
 import { DEFAULT_VENDOR_CEILING_MINUTES } from '../../shared/systemConfig.js';
 import { CHAT_OPENING_INVITATION, liveOpeningInstruction } from '../../shared/openingPrompt.js';
 import {
+  CHAT_RISK_CHECK_REPLY_GUIDANCE,
   CHAT_SAFETY_PROTOCOL_GUIDANCE,
   CHAT_THIRD_PARTY_GUIDANCE,
   CRISIS_WIND_DOWN_GUIDANCE,
@@ -148,7 +149,7 @@ import { EMBEDDING_MODEL } from '../services/embeddings.service.js';
 import { MODERATION_MODEL } from '../services/moderation.service.js';
 
 /** Date shown on the attachment. Bump when the prompts change and it is re-submitted. */
-export const PREPARED = 'November 26, 2026 (supersedes the November 19, 2026 version)';
+export const PREPARED = 'November 27, 2026 (supersedes the November 26, 2026 version)';
 
 /** Repo-relative path of the committed attachment. */
 export const ATTACHMENT_PATH = 'docs/irb-phase2-instruments/prompts.html';
@@ -932,7 +933,17 @@ function buildItems(): Item[] {
       'fit with it in one instruction, the sentence is sent on its own as:',
   );
   add('pre', VOICE_HEADS_UP_STEER);
-  add('h3', 'Typed-chat sessions');
+  add('h3', 'Typed-chat sessions — low severity');
+  add('pre', buildChatSteeringGuidance(ph('<risk score>'), 'low'));
+  add('h3', 'Typed-chat sessions — medium severity');
+  add(
+    'p',
+    'At medium severity (for example a passive wish not to be alive) the reply is asked to give the crisis lines ' +
+      'itself, alongside one safety question, rather than only if the model judges that self-harm is suggested. ' +
+      'The first time a typed-chat session scores medium, the server also opens the crisis-line resource card on ' +
+      "the participant's screen directly (once per session; not for thoughts of harming another person), as it " +
+      'does at high severity, so the crisis lines do not depend on the wording of the reply.',
+  );
   add('pre', buildChatSteeringGuidance(ph('<risk score>'), 'medium'));
 
   add('h2', 'B.2 Structured risk-assessment requirement');
@@ -945,6 +956,12 @@ function buildItems(): Item[] {
       "assessment asks about the participant's own suicidal thoughts.",
   );
   add('pre', RISK_CHECK_REQUIRED_GUIDANCE);
+  add(
+    'p',
+    'In typed-chat sessions the text above is followed by this sentence group, so that "one question" is not ' +
+      'read as "a reply that is only a question" and the crisis lines are given in the same reply:',
+  );
+  add('pre', CHAT_RISK_CHECK_REPLY_GUIDANCE);
 
   add('h2', 'B.3 High-severity safety protocol');
   add(

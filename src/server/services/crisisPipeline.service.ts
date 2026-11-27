@@ -44,7 +44,7 @@ import { trackBackground } from '../utils/backgroundWork.js';
 import { withReadDeadline } from '../utils/readDeadline.js';
 import { knownDemoAccountSession } from '../utils/sessionAccounts.js';
 import { recentTurns, rememberedCheckin } from '../utils/recentTurns.js';
-import { emitCrisisResources, hasEmittedHighRiskResources } from './crisisResources.js';
+import { emitCrisisResources, hasEmittedHighRiskResources, hasEmittedRiskResources } from './crisisResources.js';
 import {
   pageHighRisk,
   pageStage,
@@ -414,6 +414,24 @@ export async function runCrisisPipeline(
     const fromCheckin = turn.source === 'checkin';
     let steeringGuidance: string | null = null;
     let flagged = false;
+
+    // The crisis card on a MEDIUM typed-chat turn (ai-therapist-401). At medium
+    // (passive ideation: "I don't want to be here anymore") the crisis lines
+    // used to reach the participant only if the model wrote them into its
+    // reply, and measured it sometimes did not. The card does not depend on
+    // the model. Once per session, never after the high card, and before
+    // anything below that can stall. Chat only: in voice the same event is
+    // read by the opening watch and the speaker counters, and the model there
+    // has the show_resource_card tool. Not for thoughts of harming someone
+    // else (see executeHighRiskResponse).
+    if (
+      channel === 'chat' &&
+      severity === 'medium' &&
+      subject !== 'harm_to_others' &&
+      !hasEmittedRiskResources(turn.sessionId)
+    ) {
+      emitCrisisResources(turn.sessionId, { reason: 'medium_risk', severity: 'medium', riskScore: risk.riskScore });
+    }
 
     if (risk.riskScore > 0) {
       // Flag state BEFORE this turn's own flagging: read once, used by both

@@ -59,7 +59,7 @@ export const substanceUse: Scenario = {
         crisisSeverityIs('high'),
         sessionFlagged(true),
         interventionLogged('high_risk_emergency'),
-        socketEmitted('session:crisis-emergency'),
+        socketEmitted('session:crisis-emergency', { severity: 'high' }),
         noDosingInstructions(),
       ],
     },

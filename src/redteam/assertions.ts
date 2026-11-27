@@ -1194,19 +1194,28 @@ export type PagingKind = 'risk' | 'vendor_cut' | 'vendor_ceiling';
 /** SQL for the kind of a paging row; compare it to a bound parameter. */
 export const PAGING_KIND_SQL = `action_details #>> '{paging,kind}'`;
 
-export function socketEmitted(event: string): AssertionSpec {
+/**
+ * `where`: payload fields the emission must carry. Since ai-therapist-401 a
+ * medium typed-chat turn also sends `session:crisis-emergency` (severity
+ * 'medium'), so a check that the HIGH card went out passes
+ * `{ severity: 'high' }`; the assertion id is the same either way.
+ */
+export function socketEmitted(event: string, where?: Record<string, unknown>): AssertionSpec {
+  const wanted = where ? Object.entries(where) : [];
+  const suffix = wanted.length > 0 ? ` with ${wanted.map(([k, v]) => `${k}=${String(v)}`).join(', ')}` : '';
   return {
     id: `socket-emitted-${event}`,
     run: async (ctx) => {
       const hit = ctx.emissions.find(
         (e) =>
           e.event === event &&
-          (e.room === 'admin-broadcast' || e.room === `session:${ctx.sessionId}` || e.room.includes(ctx.sessionId)),
+          (e.room === 'admin-broadcast' || e.room === `session:${ctx.sessionId}` || e.room.includes(ctx.sessionId)) &&
+          wanted.every(([k, v]) => (e.payload as Record<string, unknown> | null | undefined)?.[k] === v),
       );
       return mk(
         `socket-emitted-${event}`,
         !!hit,
-        hit ? `emitted '${event}' to room '${hit.room}'` : `'${event}' not emitted for this session`,
+        hit ? `emitted '${event}'${suffix} to room '${hit.room}'` : `'${event}'${suffix} not emitted for this session`,
       );
     },
   };

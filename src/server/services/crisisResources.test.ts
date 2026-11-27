@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   emitCrisisResources,
   hasEmittedHighRiskResources,
+  hasEmittedRiskResources,
   clearCrisisResourceState,
   noteParticipantJoined,
   CRISIS_RESOURCE_DEDUPE_MS,
@@ -149,5 +150,51 @@ describe('a high flag raised before the participant has joined the room', () => 
         2_000,
       ),
     ).toBe(false);
+  });
+});
+
+// ai-therapist-401: the card on a medium typed-chat turn.
+describe('the medium card', () => {
+  it("carries severity 'medium', which the browser does not read as a crisis flag", () => {
+    expect(emitCrisisResources('chat_1', { reason: 'medium_risk', severity: 'medium', riskScore: 55 }, 1_000)).toBe(
+      true,
+    );
+    expect(emit).toHaveBeenCalledWith('session:crisis-emergency', {
+      sessionId: 'chat_1',
+      severity: 'medium',
+      riskScore: 55,
+      reason: 'medium_risk',
+    });
+    expect(hasEmittedRiskResources('chat_1')).toBe(true);
+    // The high card is still owed if the session gets worse.
+    expect(hasEmittedHighRiskResources('chat_1')).toBe(false);
+  });
+
+  it('never swallows the high card that follows it, even inside the window', () => {
+    emitCrisisResources('chat_1', { reason: 'medium_risk', severity: 'medium', riskScore: 55 }, 1_000);
+    expect(emitCrisisResources('chat_1', { reason: 'high_risk', severity: 'high', riskScore: 80 }, 1_500)).toBe(true);
+    expect(emit).toHaveBeenLastCalledWith('session:crisis-emergency', expect.objectContaining({ severity: 'high' }));
+  });
+
+  it('is reported as sent after a high card too, so it is not sent on a later medium turn', () => {
+    expect(hasEmittedRiskResources('chat_1')).toBe(false);
+    emitCrisisResources('chat_1', { reason: 'vendor_cut' }, 1_000);
+    expect(hasEmittedRiskResources('chat_1')).toBe(false);
+    emitCrisisResources('chat_1', { reason: 'high_risk', severity: 'high', riskScore: 80 }, 1_000);
+    expect(hasEmittedRiskResources('chat_1')).toBe(true);
+    clearCrisisResourceState('chat_1');
+    expect(hasEmittedRiskResources('chat_1')).toBe(false);
+  });
+
+  it('raised before the participant joined (a check-in) is held for the join, and never replaces a high one', () => {
+    const send = vi.fn();
+    emitCrisisResources('chat_a', { reason: 'medium_risk', severity: 'medium', riskScore: 55 }, 1_000);
+    expect(noteParticipantJoined('chat_a', send, 2_000)).toBe(true);
+    expect(send).toHaveBeenLastCalledWith('session:crisis-emergency', expect.objectContaining({ severity: 'medium' }));
+
+    emitCrisisResources('chat_b', { reason: 'high_risk', severity: 'high', riskScore: 85 }, 1_000);
+    emitCrisisResources('chat_b', { reason: 'medium_risk', severity: 'medium', riskScore: 55 }, 1_100);
+    expect(noteParticipantJoined('chat_b', send, 2_000)).toBe(true);
+    expect(send).toHaveBeenLastCalledWith('session:crisis-emergency', expect.objectContaining({ severity: 'high' }));
   });
 });
