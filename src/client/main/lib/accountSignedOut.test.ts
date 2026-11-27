@@ -32,7 +32,8 @@ describe('the wording', () => {
   it('names what happened for each reason, and never shows a code', () => {
     expect(accountSignedOutMessage('role_changed')).toMatch(/changed your account.*signed out.*sign in again/i);
     expect(accountSignedOutMessage('account_deleted')).toMatch(/removed this account.*signed out/i);
-    expect(accountSignedOutMessage('authenticator_reset')).toMatch(/authenticator app.*sign in again/i);
+    // An authenticator reset sends no notice; an old server's code gets the general wording.
+    expect(accountSignedOutMessage('authenticator_reset')).toBe(accountSignedOutMessage('something_new'));
     for (const reason of ['role_changed', 'account_deleted', 'authenticator_reset', 'something_new', undefined]) {
       expect(accountSignedOutMessage(reason)).not.toMatch(/_/);
     }

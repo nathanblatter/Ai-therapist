@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { ENDED_BY_OPTIONS } from '../utils/endedBy';
 
 // Filter option constants
 const VOICE_OPTIONS = [
@@ -47,12 +48,6 @@ const STATUS_OPTIONS = [
   { value: 'active', label: 'Active' },
   { value: 'ended', label: 'Ended' },
   { value: 'archived', label: 'Archived' },
-];
-
-const ENDED_BY_OPTIONS = [
-  { value: 'user', label: 'User' },
-  { value: 'admin', label: 'Admin' },
-  { value: 'system', label: 'System' },
 ];
 
 const CRISIS_SEVERITY_OPTIONS = [

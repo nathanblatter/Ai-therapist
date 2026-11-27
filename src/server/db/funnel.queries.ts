@@ -14,6 +14,10 @@
 // - ended_gracefully: session ended with an ended_by attribution and lasted
 //                     >= 60s — mirrors the abandonment definition in
 //                     analytics.queries.ts (ended within 60s == abandoned).
+//                     Every attributed end counts (user, admin, system),
+//                     except ended_by = 'account_changed': the session was cut
+//                     because staff changed or deleted the account, which is
+//                     neither graceful nor the participant's choice.
 import { pool } from '../config/db.js';
 
 export interface FunnelCounts {
@@ -49,6 +53,7 @@ export async function getFunnel(days: number): Promise<FunnelCounts> {
        )::int AS with_tool_use,
        COUNT(*) FILTER (
          WHERE s.ended_by IS NOT NULL
+           AND s.ended_by <> 'account_changed'
            AND s.ended_at IS NOT NULL
            AND EXTRACT(EPOCH FROM (s.ended_at - s.created_at)) >= 60
        )::int AS ended_gracefully

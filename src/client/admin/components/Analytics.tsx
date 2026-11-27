@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getJson } from '../../shared/http';
+import { endedByLabel } from '../utils/endedBy';
 import {
   BarChart,
   Bar,
@@ -181,12 +182,12 @@ function UsageTab({ analytics }: { analytics: AnalyticsData }) {
     .sort((a, b) => b.sessions - a.sessions);
 
   const completionPieData = (analytics.completion_patterns || []).map((item) => ({
-    name: item.ended_by.charAt(0).toUpperCase() + item.ended_by.slice(1),
+    name: endedByLabel(item.ended_by),
     value: item.session_count,
   }));
 
   const completionBarData = (analytics.completion_patterns || []).map((item) => ({
-    ended_by: item.ended_by.charAt(0).toUpperCase() + item.ended_by.slice(1),
+    ended_by: endedByLabel(item.ended_by),
     sessions: item.session_count,
     percentage: item.percentage,
   }));

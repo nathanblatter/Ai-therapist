@@ -6,7 +6,21 @@ import type { AccountSignedOutNotice } from '../lib/accountSignedOut';
  * while the page was open: the server has already signed the account out and
  * ended any session, so nothing underneath works any more. Says why, and
  * offers the way back to sign-in.
+ *
+ * It covers whatever was on the page, a crisis-resources screen included, and
+ * a session may have been cut short. So it always names 988 and 911 itself,
+ * whether or not the study has a crisis line configured.
  */
+/** The study's own line, unless it is missing or is one of the two always shown. */
+export function studyCrisisLine(
+  crisisLine: { hotline: string; phone: string } | null | undefined,
+): { hotline: string; phone: string } | null {
+  const phone = crisisLine?.phone?.trim() ?? '';
+  const digits = phone.replace(/\D/g, '');
+  if (!crisisLine || !digits || digits === '988' || digits === '911') return null;
+  return { hotline: crisisLine.hotline?.trim() ?? '', phone };
+}
+
 export default function AccountSignedOutScreen({
   notice,
   crisisLine,
@@ -15,6 +29,7 @@ export default function AccountSignedOutScreen({
   /** The study's crisis line (name and number), shown because a session may have been cut short. */
   crisisLine?: { hotline: string; phone: string } | null;
 }) {
+  const studyLine = studyCrisisLine(crisisLine);
   return (
     <div
       className="fixed inset-0 z-[1000] flex items-center justify-center bg-gray-900/80 p-4"
@@ -34,15 +49,27 @@ export default function AccountSignedOutScreen({
           {notice.message}
         </p>
         <p className="mt-2 text-sm text-gray-600">If you have questions, contact the study team.</p>
-        {crisisLine?.phone && (
-          <p className="mt-2 text-sm text-gray-600">
-            If you need support right now, call{' '}
-            <a className="font-semibold underline" href={`tel:${crisisLine.phone}`}>
-              {crisisLine.phone}
-            </a>{' '}
-            ({crisisLine.hotline}). In an emergency, call 911.
-          </p>
-        )}
+        <p className="mt-2 text-sm text-gray-600" data-testid="signed-out-crisis-help">
+          If you need support right now, call or text{' '}
+          <a className="font-semibold underline" href="tel:988">
+            988
+          </a>{' '}
+          (Suicide and Crisis Lifeline)
+          {studyLine && (
+            <>
+              , or call{' '}
+              <a className="font-semibold underline" href={`tel:${studyLine.phone}`}>
+                {studyLine.phone}
+              </a>
+              {studyLine.hotline ? ` (${studyLine.hotline})` : ''}
+            </>
+          )}
+          . In an emergency, call{' '}
+          <a className="font-semibold underline" href="tel:911">
+            911
+          </a>
+          .
+        </p>
         <a
           href="/login"
           className="mt-5 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-royal px-5 py-2 text-sm font-semibold text-white hover:opacity-90"

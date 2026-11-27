@@ -95,34 +95,59 @@ async function liveTherapySessions(userid: number | string): Promise<string[]> {
  *  released, redaction, recording, insights, and the notice to the session's
  *  own socket room). Without this the participant's sockets were closed under
  *  them and the session stayed 'active' until the abandoned-session sweep.
- *  Never throws. */
+ *  The sessions are ended side by side (each can wait seconds for its voice
+ *  connection to close), and one that fails never stops another. Never throws. */
 async function endLiveTherapySessions(sessionIds: string[], userid: number, message: string): Promise<void> {
-  for (const sessionId of sessionIds) {
-    try {
-      const ended = await serverEndSession(sessionId, {
-        endedBy: ACCOUNT_CHANGED_END_REASON,
-        reason: ACCOUNT_CHANGED_END_REASON,
-        message,
-      });
-      if (ended) log.info({ userid, sessionId }, 'therapy session ended: the account changed during it');
-    } catch (err) {
-      log.error({ err, userid, sessionId }, 'could not end a therapy session after an account change');
-    }
-  }
+  await Promise.all(
+    [...new Set(sessionIds)].map(async (sessionId) => {
+      // Two saves of the same account at once (a double click, two staff
+      // members) both read the session as open. serverEndSession checks the
+      // status and then updates it, so both would pass the check and run
+      // redaction, insights and evaluation twice: the second one stands down.
+      if (endingForAccountChange.has(sessionId)) return;
+      endingForAccountChange.add(sessionId);
+      try {
+        const ended = await serverEndSession(sessionId, {
+          endedBy: ACCOUNT_CHANGED_END_REASON,
+          reason: ACCOUNT_CHANGED_END_REASON,
+          message,
+        });
+        if (ended) log.info({ userid, sessionId }, 'therapy session ended: the account changed during it');
+      } catch (err) {
+        log.error({ err, userid, sessionId }, 'could not end a therapy session after an account change');
+      } finally {
+        endingForAccountChange.delete(sessionId);
+      }
+    }),
+  );
 }
+
+/** Therapy sessions this process is ending right now because their account
+ *  changed (see endLiveTherapySessions). In memory, so it covers this path in
+ *  this process only. */
+const endingForAccountChange = new Set<string>();
 
 /** End the app sessions an account holds. A session keeps the role it was
  *  given at sign-in for up to a day, so an account that was deleted, changed
- *  role or had its authenticator reset must not keep one. A therapy session
- *  the account is in the middle of is ended cleanly first, and the browser is
- *  told why before its sockets close. `liveSessionIds`: the open therapy
- *  sessions when they had to be read earlier (a deletion). Never throws: the
- *  account change it follows has already happened. */
+ *  role or had its authenticator reset must not keep one.
+ *
+ *  `accountChange` is given for a real role change or a deletion, and only
+ *  then: the browser is told why before its sockets close, and a therapy
+ *  session the account was in the middle of is ended cleanly afterwards
+ *  (`liveSessionIds`: the open therapy sessions when they had to be read
+ *  earlier, for a deletion). An authenticator reset gives none: it ends the
+ *  app sessions and closes the sockets, and nothing else.
+ *
+ *  The order matters. Access goes first: app sessions, then the notice, then
+ *  the sockets (a demoted researcher's socket sits in the admin broadcast
+ *  room). Ending a therapy session can wait seconds for its voice connection
+ *  to close, so it comes last and never holds a socket open. Each step runs
+ *  whatever happened to the ones before it. Never throws: the account change
+ *  it follows has already happened. */
 async function endSessions(
   userid: number | string,
   why: string,
-  reason: AccountSignedOutReason,
-  liveSessionIds?: string[],
+  accountChange?: { reason: AccountSignedOutReason; liveSessionIds?: string[] },
 ): Promise<void> {
   // The stored session holds the numeric id; a route parameter such as "05"
   // would match nothing.
@@ -134,14 +159,15 @@ async function endSessions(
   } catch (err) {
     log.error({ err, userid: id }, `could not end app sessions after: ${why}`);
   }
-  const message = accountSignedOutMessage(reason);
-  await endLiveTherapySessions(liveSessionIds ?? (await liveTherapySessions(id)), id, message);
+  const message = accountChange ? accountSignedOutMessage(accountChange.reason) : null;
   // Tell the page why, then close. The event is written to each socket before
   // the close, and the transport flushes what is queued before it shuts.
-  try {
-    globalThis.io?.in(`user:${id}`).emit(ACCOUNT_SIGNED_OUT_EVENT, { reason, message });
-  } catch (err) {
-    log.warn({ err, userid: id }, 'could not tell the sockets of an account why its sessions ended');
+  if (accountChange) {
+    try {
+      globalThis.io?.in(`user:${id}`).emit(ACCOUNT_SIGNED_OUT_EVENT, { reason: accountChange.reason, message });
+    } catch (err) {
+      log.warn({ err, userid: id }, 'could not tell the sockets of an account why its sessions ended');
+    }
   }
   // A socket copies the role at its handshake and keeps its rooms (the admin
   // broadcast room for a researcher) for as long as it lives: close them. A
@@ -152,6 +178,12 @@ async function endSessions(
     globalThis.io?.in(`user:${id}`).disconnectSockets(true);
   } catch (err) {
     log.warn({ err, userid: id }, 'could not close the sockets of an account whose sessions ended');
+  }
+  if (!accountChange || message === null) return;
+  try {
+    await endLiveTherapySessions(accountChange.liveSessionIds ?? (await liveTherapySessions(id)), id, message);
+  } catch (err) {
+    log.error({ err, userid: id }, `could not end therapy sessions after: ${why}`);
   }
 }
 
@@ -246,7 +278,7 @@ async function updateInPool(userid: number | string, updates: AccountUpdates): P
   }
   const updated = await updateUser(userid, updates as Record<string, string>);
   if (updates.role !== undefined) await clearEmailIfIneligible(userid, updates.role);
-  if (roleChanged(current, updates)) await endSessions(updated.userid, 'role change', 'role_changed');
+  if (roleChanged(current, updates)) await endSessions(updated.userid, 'role change', { reason: 'role_changed' });
   if (updates.password === undefined && updates.role === undefined) return updated;
   const username = current?.username ?? updated.username;
   try {
@@ -344,7 +376,10 @@ export async function resetAuthenticator(userid: number | string): Promise<UserR
   await cognitoAdmin
     .globalSignOut(user.username)
     .catch((err: unknown) => log.warn({ err, userid }, 'could not revoke the pool tokens of a reset account'));
-  await endSessions(user.userid, 'authenticator reset', 'authenticator_reset');
+  // App sessions and sockets only, as before #147: a reset is not an account
+  // change, and must not end a therapy session or show the "account changed"
+  // screen.
+  await endSessions(user.userid, 'authenticator reset');
   return user;
 }
 
@@ -367,7 +402,7 @@ export async function updateAccount(userid: number | string, updates: AccountUpd
   // Leaving the staff roles drops the account's email (participants are
   // anonymous; ai-therapist-283).
   if (updates.role !== undefined) await clearEmailIfIneligible(userid, updates.role);
-  if (roleChanged(current, updates)) await endSessions(updated.userid, 'role change', 'role_changed');
+  if (roleChanged(current, updates)) await endSessions(updated.userid, 'role change', { reason: 'role_changed' });
   if (!linked) return updated;
   try {
     if (updates.password !== undefined) await squawk.setPassword(linked, updates.password);
@@ -387,7 +422,7 @@ export async function updateAccount(userid: number | string, updates: AccountUpd
 async function removeFromPool(userid: number | string): Promise<UserRow> {
   const live = await liveTherapySessions(userid);
   const deleted = await deleteUser(userid);
-  await endSessions(deleted.userid ?? userid, 'account deleted', 'account_deleted', live);
+  await endSessions(deleted.userid ?? userid, 'account deleted', { reason: 'account_deleted', liveSessionIds: live });
   try {
     await cognitoAdmin.deleteUser(deleted.username);
   } catch (err) {
@@ -411,7 +446,7 @@ export async function removeAccount(userid: number | string): Promise<UserRow> {
   // Read before the row goes too: the delete unlinks the account's sessions.
   const live = await liveTherapySessions(userid);
   const deleted = await deleteUser(userid);
-  await endSessions(deleted.userid ?? userid, 'account deleted', 'account_deleted', live);
+  await endSessions(deleted.userid ?? userid, 'account deleted', { reason: 'account_deleted', liveSessionIds: live });
   if (linked) {
     try {
       await squawk.deleteUser(linked);

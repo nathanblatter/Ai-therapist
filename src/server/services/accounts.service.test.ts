@@ -525,7 +525,7 @@ describe('an account changed in the middle of a therapy session', () => {
   }
 
   it.each(modes)(
-    'a role change ends the session cleanly, says why, then closes the sockets (%s)',
+    'a role change says why, closes the sockets, then ends the session cleanly (%s)',
     async (_l, setUp) => {
       setUp();
       db.activeSessionIdsForUser.mockResolvedValue(['sess_a']);
@@ -544,13 +544,16 @@ describe('an account changed in the middle of a therapy session', () => {
         message: expect.stringContaining('sign in again'),
       });
       expect(fake.disconnectSockets).toHaveBeenCalledWith(true);
-      // Order: the session is ended (its own room is told), then the account's
-      // sockets are told, and only then closed.
-      const ended = lifecycle.serverEndSession.mock.invocationCallOrder[0];
+      // Order (review of #147): access first. The app sessions go, the
+      // account's sockets are told and closed, and only then is the therapy
+      // session ended, which can wait seconds for a voice connection.
+      const signedOut = db.deleteSessionsForUser.mock.invocationCallOrder[0];
       const told = fake.emit.mock.invocationCallOrder[0];
       const closed = fake.disconnectSockets.mock.invocationCallOrder[0];
-      expect(ended).toBeLessThan(told);
+      const ended = lifecycle.serverEndSession.mock.invocationCallOrder[0];
+      expect(signedOut).toBeLessThan(told);
       expect(told).toBeLessThan(closed);
+      expect(closed).toBeLessThan(ended);
     },
   );
 
@@ -578,8 +581,116 @@ describe('an account changed in the middle of a therapy session', () => {
         message: expect.stringContaining('removed this account'),
       });
       expect(fake.disconnectSockets).toHaveBeenCalledWith(true);
+      expect(fake.disconnectSockets.mock.invocationCallOrder[0]).toBeLessThan(
+        lifecycle.serverEndSession.mock.invocationCallOrder[0],
+      );
     },
   );
+
+  // Review of #147. Each end can wait 5 s for the voice sideband; a demoted
+  // researcher with several stale active sessions kept their admin socket for
+  // all of that.
+  it('sessions that are slow to end never hold the sockets open', async () => {
+    db.activeSessionIdsForUser.mockResolvedValue(['sess_a', 'sess_b', 'sess_c']);
+    db.updateUser.mockResolvedValue({ ...ROW, role: 'therapist' });
+    const release: Array<(ended: boolean) => void> = [];
+    lifecycle.serverEndSession.mockImplementation(() => new Promise<boolean>((resolve) => release.push(resolve)));
+    const fake = fakeIo();
+    await withIo(fake.io, async () => {
+      let saved = false;
+      const save = updateAccount(7, { role: 'therapist' }).then(() => {
+        saved = true;
+      });
+      await vi.waitFor(() => expect(release).toHaveLength(3));
+      // None of the three has ended, and the account is already out.
+      expect(db.deleteSessionsForUser).toHaveBeenCalledWith(7);
+      expect(fake.emit).toHaveBeenCalledTimes(1);
+      expect(fake.disconnectSockets).toHaveBeenCalledWith(true);
+      expect(saved).toBe(false);
+      // Side by side, not one after another: all three were started.
+      expect(lifecycle.serverEndSession.mock.calls.map((c) => c[0])).toEqual(['sess_a', 'sess_b', 'sess_c']);
+      release.forEach((resolve) => resolve(true));
+      await save;
+    });
+  });
+
+  it('a step that fails never prevents the others', async () => {
+    db.activeSessionIdsForUser.mockResolvedValue(['sess_a']);
+    db.updateUser.mockResolvedValue({ ...ROW, role: 'therapist' });
+    db.deleteSessionsForUser.mockRejectedValue(new Error('db down'));
+    const fake = fakeIo();
+    fake.emit.mockImplementation(() => {
+      throw new Error('adapter closed');
+    });
+    fake.disconnectSockets.mockImplementation(() => {
+      throw new Error('adapter closed');
+    });
+    lifecycle.serverEndSession.mockRejectedValue(new Error('db down'));
+    await expect(withIo(fake.io, () => updateAccount(7, { role: 'therapist' }))).resolves.toMatchObject({ userid: 7 });
+    expect(db.deleteSessionsForUser).toHaveBeenCalledTimes(1);
+    expect(fake.emit).toHaveBeenCalledTimes(1);
+    expect(fake.disconnectSockets).toHaveBeenCalledTimes(1);
+    expect(lifecycle.serverEndSession).toHaveBeenCalledTimes(1);
+  });
+
+  // Review of #147: serverEndSession checks the status and then updates it,
+  // so two saves at once would both end the session and run redaction,
+  // insights and evaluation twice.
+  it('two role saves at once end the session once', async () => {
+    db.activeSessionIdsForUser.mockResolvedValue(['sess_a']);
+    db.updateUser.mockResolvedValue({ ...ROW, role: 'therapist' });
+    let release: (ended: boolean) => void = () => {};
+    lifecycle.serverEndSession.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const fake = fakeIo();
+    await withIo(fake.io, async () => {
+      const first = updateAccount(7, { role: 'therapist' });
+      await vi.waitFor(() => expect(lifecycle.serverEndSession).toHaveBeenCalledTimes(1));
+      // The second save finds the same session open and leaves it to the first.
+      await updateAccount(7, { role: 'researcher' });
+      expect(lifecycle.serverEndSession).toHaveBeenCalledTimes(1);
+      // It still signed the account out and closed its sockets.
+      expect(db.deleteSessionsForUser).toHaveBeenCalledTimes(2);
+      expect(fake.disconnectSockets).toHaveBeenCalledTimes(2);
+      release(true);
+      await first;
+      // Nothing is remembered once the end is over.
+      lifecycle.serverEndSession.mockResolvedValue(false);
+      await updateAccount(7, { role: 'therapist' });
+      expect(lifecycle.serverEndSession).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('a session listed twice is ended once', async () => {
+    db.activeSessionIdsForUser.mockResolvedValue(['sess_a', 'sess_a']);
+    db.updateUser.mockResolvedValue({ ...ROW, role: 'therapist' });
+    await withIo(fakeIo().io, () => updateAccount(7, { role: 'therapist' }));
+    expect(lifecycle.serverEndSession).toHaveBeenCalledTimes(1);
+  });
+
+  // Review of #147: an authenticator reset is not an account change. It ends
+  // the app sessions and closes the sockets exactly as it did before, and it
+  // must not end a therapy session in progress or show the "account changed"
+  // screen.
+  it('an authenticator reset ends app sessions and sockets only: no therapy session ended, no notice', async () => {
+    cognito.enabled.mockReturnValue(true);
+    db.getUserById.mockResolvedValue({ userid: 7, username: 'dr_one', role: 'therapist' });
+    pool.setTotpEnabled.mockResolvedValue(undefined);
+    pool.globalSignOut.mockResolvedValue(undefined);
+    db.activeSessionIdsForUser.mockResolvedValue(['sess_a']);
+    const fake = fakeIo();
+    await withIo(fake.io, () => resetAuthenticator(7));
+    expect(db.deleteSessionsForUser).toHaveBeenCalledExactlyOnceWith(7);
+    expect(fake.inRoom).toHaveBeenCalledWith('user:7');
+    expect(fake.disconnectSockets).toHaveBeenCalledExactlyOnceWith(true);
+    expect(fake.emit).not.toHaveBeenCalled();
+    expect(db.activeSessionIdsForUser).not.toHaveBeenCalled();
+    expect(lifecycle.serverEndSession).not.toHaveBeenCalled();
+  });
 
   it('an account in no session: nothing is ended, the sockets are still told and closed', async () => {
     db.updateUser.mockResolvedValue({ ...ROW, role: 'therapist' });
