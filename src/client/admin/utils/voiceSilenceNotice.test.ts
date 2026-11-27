@@ -45,6 +45,15 @@ describe('voiceSilenceNotice', () => {
     ).toContain('(1 prompt to speak sent)');
   });
 
+  it('says when the assistant was asked to check in on a participant who went quiet', () => {
+    expect(voiceSilenceNotice('live:quiet-check-in', { sessionId: S, afterMs: 20000, sent: true })?.message).toBe(
+      'Participant has been quiet for 20 s after a safety question. The voice assistant was asked to check in.',
+    );
+    expect(voiceSilenceNotice('live:quiet-check-in', { sessionId: S, afterMs: 20000, sent: false })?.message).toBe(
+      'Participant has been quiet for 20 s after a safety question, and the check-in could not be sent.',
+    );
+  });
+
   it('does not print a bad number', () => {
     const n = voiceSilenceNotice('live:steer-silent', { sessionId: S, afterMs: 'soon', attempt: -1 });
     expect(n?.message).toBe('Voice assistant went quiet for a while after a safety steer. It was prompted to speak.');

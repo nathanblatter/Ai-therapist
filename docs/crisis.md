@@ -639,7 +639,11 @@ Responses are tiered by severity/score:
   only `severity: "high"` as "this session is in crisis". The medium chat steer and the chat
   form of the risk-ladder requirement ask for the 988 line and the Crisis Text Line in the
   same reply as the one safety question (`buildChatSteeringGuidance`,
-  `CHAT_RISK_CHECK_REPLY_GUIDANCE`). Voice is unchanged.
+  `CHAT_RISK_CHECK_REPLY_GUIDANCE`).
+  **On a voice session** the server pushes no resource card at medium (the backend may show
+  one when it answers a delegated turn); the first medium steer asks the voice model to say
+  the 988 line aloud once (`voiceCrisisLine.service.ts`, ai-therapist-406;
+  `docs/gpt-live.md`, "The crisis line is said aloud once at medium risk").
 - **Whether a high-severity event becomes an SMS** is decided in one place,
   `crisisPaging.service.ts` (ai-therapist-350; before it, one person in one crisis produced
   four texts in 2.5 minutes because each recovery session is a new session id and "risk is

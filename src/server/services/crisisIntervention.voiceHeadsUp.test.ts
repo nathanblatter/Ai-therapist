@@ -33,10 +33,13 @@ vi.mock('../db/index.js', () => ({
 
 const ci = await import('./crisisIntervention.service.js');
 const hu = await import('./voiceHeadsUp.service.js');
+const cl = await import('./voiceCrisisLine.service.js');
 
 const ON = { features: { voice_heads_up_enabled: true, chat_enabled: true } };
 let n = 0;
 const fresh = () => `live_heads_up_${++n}`;
+/** A session's first medium steer also asks for the spoken crisis line (voiceCrisisLine.service). */
+const medium = (score: number) => `${ci.steeringGuidance(score, 'medium')} ${cl.VOICE_CRISIS_LINE_GUIDANCE}`;
 const injected = () => sidebandManagerMock.injectMessage.mock.calls.map((c) => (c as unknown[])[2] as string);
 const alone = () =>
   sidebandManagerMock.tryInject.mock.calls
@@ -45,6 +48,7 @@ const alone = () =>
 
 beforeEach(() => {
   hu._resetVoiceHeadsUpForTests();
+  cl._resetVoiceCrisisLineForTests();
   poolQueryMock.mockReset();
   poolQueryMock.mockResolvedValue({ rows: [] });
   logInterventionActionMock.mockClear();
@@ -61,7 +65,7 @@ describe('maybeSteerSession with the voice heads-up', () => {
     getSystemConfigMock.mockResolvedValue({ features: { chat_enabled: true } });
     const s = fresh();
     await ci.maybeSteerSession(s, 55, 'medium');
-    expect(injected()).toEqual([ci.steeringGuidance(55, 'medium')]);
+    expect(injected()).toEqual([medium(55)]);
     expect(sidebandManagerMock.tryInject).not.toHaveBeenCalled();
     expect(sidebandManagerMock.headsUpEligible).not.toHaveBeenCalled();
   });
@@ -79,10 +83,10 @@ describe('maybeSteerSession with the voice heads-up', () => {
     await ci.maybeSteerSession(s, 55, 'medium');
     const h = fresh();
     await ci.maybeSteerSession(h, 90, 'high');
-    expect(injected()).toEqual([ci.steeringGuidance(55, 'medium'), ci.steeringGuidance(90, 'high')]);
+    expect(injected()).toEqual([medium(55), ci.steeringGuidance(90, 'high')]);
     expect(sidebandManagerMock.tryInject).not.toHaveBeenCalled();
     expect(logInterventionActionMock.mock.calls).toEqual([
-      [s, 'risk_steering', { riskScore: 55, severity: 'medium', delivered: true }],
+      [s, 'risk_steering', { riskScore: 55, severity: 'medium', delivered: true, crisisLine: 'requested' }],
       [h, 'risk_steering', { riskScore: 90, severity: 'high', delivered: true }],
     ]);
     expect(poolQueryMock).not.toHaveBeenCalled();
@@ -93,7 +97,7 @@ describe('maybeSteerSession with the voice heads-up', () => {
     getSystemConfigMock.mockRejectedValue(new Error('db down'));
     const s = fresh();
     await ci.maybeSteerSession(s, 55, 'medium');
-    expect(injected()).toEqual([ci.steeringGuidance(55, 'medium')]);
+    expect(injected()).toEqual([medium(55)]);
     expect(sidebandManagerMock.tryInject).not.toHaveBeenCalled();
   });
 
@@ -107,7 +111,7 @@ describe('maybeSteerSession with the voice heads-up', () => {
       expect(injected()).toEqual([]);
       await vi.advanceTimersByTimeAsync(1);
       await steering;
-      expect(injected()).toEqual([ci.steeringGuidance(55, 'medium')]);
+      expect(injected()).toEqual([medium(55)]);
       expect(sidebandManagerMock.tryInject).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
@@ -131,7 +135,7 @@ describe('maybeSteerSession with the voice heads-up', () => {
   it('first medium turn: attached to the risk steer, recorded on its row', async () => {
     const s = fresh();
     await ci.maybeSteerSession(s, 55, 'medium');
-    expect(injected()).toEqual([`${ci.steeringGuidance(55, 'medium')} ${hu.VOICE_HEADS_UP_GUIDANCE}`]);
+    expect(injected()).toEqual([`${medium(55)} ${hu.VOICE_HEADS_UP_GUIDANCE}`]);
     expect(logInterventionActionMock).toHaveBeenCalledWith(
       s,
       'risk_steering',
@@ -192,6 +196,8 @@ describe('maybeSteerSession with the voice heads-up', () => {
     // second instruction within milliseconds, which can interrupt the reply
     // the first one started.
     expect(ci.fitsWithHeadsUp(ci.steeringGuidance(64, 'medium'))).toBe(true);
+    // The first medium steer also carries the spoken crisis line, and the three still go as one.
+    expect(ci.fitsWithHeadsUp(medium(64))).toBe(true);
     expect(ci.fitsWithHeadsUp(ci.steeringGuidance(100, 'high'))).toBe(true);
     const s = fresh();
     await ci.maybeSteerSession(s, 90, 'high');
@@ -208,7 +214,7 @@ describe('maybeSteerSession with the voice heads-up', () => {
     sidebandManagerMock.headsUpEligible.mockReturnValue(false);
     const s = fresh();
     await ci.maybeSteerSession(s, 55, 'medium');
-    expect(injected()).toEqual([ci.steeringGuidance(55, 'medium')]);
+    expect(injected()).toEqual([medium(55)]);
   });
 
   it('a failure deciding never costs the steer', async () => {
@@ -217,7 +223,7 @@ describe('maybeSteerSession with the voice heads-up', () => {
     });
     const s = fresh();
     await ci.maybeSteerSession(s, 55, 'medium');
-    expect(injected()).toEqual([ci.steeringGuidance(55, 'medium')]);
+    expect(injected()).toEqual([medium(55)]);
     sidebandManagerMock.headsUpEligible.mockReturnValue(true);
   });
 
@@ -230,7 +236,7 @@ describe('maybeSteerSession with the voice heads-up', () => {
   });
 
   it('no forbidden promise in any text the steer can now carry', () => {
-    const texts = [`${ci.steeringGuidance(55, 'medium')} ${hu.VOICE_HEADS_UP_GUIDANCE}`, hu.VOICE_HEADS_UP_STEER];
+    const texts = [`${medium(55)} ${hu.VOICE_HEADS_UP_GUIDANCE}`, hu.VOICE_HEADS_UP_STEER];
     for (const t of texts) {
       expect(t).not.toMatch(/help is on the way|someone is coming|will (contact|call) you|reach out to you/i);
     }

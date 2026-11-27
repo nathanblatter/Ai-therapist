@@ -12,6 +12,14 @@ import {
   voiceHeadsUpDue,
   voiceHeadsUpEnabled,
 } from './voiceHeadsUp.service.js';
+import {
+  VOICE_CRISIS_LINE_GUIDANCE,
+  clearVoiceCrisisLine,
+  markVoiceCrisisLineRequested,
+  voiceCrisisLineDue,
+  voiceCrisisLineJustRequested,
+} from './voiceCrisisLine.service.js';
+import { clearQuietCheckIn } from './liveQuietCheckIn.service.js';
 
 // ============================================
 // RISK-ADAPTIVE LIVE STEERING (ai-therapist-42)
@@ -150,9 +158,20 @@ export async function maybeRequireRiskCheck(
     }
 
     let delivered = true;
+    // Voice: when the steer sent a moment ago on this turn asked for the
+    // spoken crisis line, this later instruction restates it, so the one the
+    // model reads last carries it too (voiceCrisisLine.service).
+    const restateCrisisLine = channel === 'realtime' && voiceCrisisLineJustRequested(sessionId);
     if (channel === 'realtime') {
       const { sidebandManager } = await import('./sidebandManager.service.js');
-      delivered = await sidebandManager.tryInject(sessionId, 'system', RISK_CHECK_REQUIRED_GUIDANCE, false);
+      delivered = await sidebandManager.tryInject(
+        sessionId,
+        'system',
+        restateCrisisLine
+          ? `${RISK_CHECK_REQUIRED_GUIDANCE} ${VOICE_CRISIS_LINE_GUIDANCE}`
+          : RISK_CHECK_REQUIRED_GUIDANCE,
+        false,
+      );
     }
 
     await logInterventionAction(sessionId, 'risk_steering', {
@@ -162,6 +181,7 @@ export async function maybeRequireRiskCheck(
       delivered,
       trigger: 'risk_check_required',
       threshold: minScore,
+      ...(restateCrisisLine ? { crisisLine: 'restated' } : {}),
     });
 
     if (global.io) {
@@ -243,6 +263,8 @@ export function clearSteeringState(sessionId: string): void {
   riskCheckRequiredAt.delete(sessionId);
   clearCrisisResourceState(sessionId);
   clearVoiceHeadsUp(sessionId);
+  clearVoiceCrisisLine(sessionId);
+  clearQuietCheckIn(sessionId);
 }
 
 // ============================================
@@ -421,6 +443,8 @@ interface PendingSteer {
   subject: CrisisSubject | null;
   /** 2: the high-severity protocol; 1: an ordinary steer. */
   rank: 1 | 2;
+  /** The text asks for the spoken crisis line (voiceCrisisLine.service). */
+  crisisLine?: boolean;
   at: number;
 }
 const pendingSteers = new Map<string, PendingSteer>();
@@ -460,7 +484,9 @@ export async function deliverPendingSteer(sessionId: string): Promise<boolean> {
       deliveredOn: 'socket_ready',
       heldForMs: Date.now() - held.at,
       ...(held.subject ? { subject: held.subject } : {}),
+      ...(delivered && held.crisisLine ? { crisisLine: 'requested' } : {}),
     });
+    if (delivered && held.crisisLine) markVoiceCrisisLineRequested(sessionId);
     if (delivered) steeringLastSent.set(sessionId, Date.now());
     return delivered;
   } catch (error) {
@@ -582,6 +608,14 @@ export async function maybeSteerSession(
     // Sideband gate FIRST so the shared cooldown is only consumed when there is
     // actually a live connection to inject into (preserves realtime behavior).
     const { sidebandManager } = await import('./sidebandManager.service.js');
+    // The spoken crisis line (voiceCrisisLine.service, ai-therapist-406): asked
+    // for on the first medium steer about the participant's own risk, and once
+    // more only if it was not then said.
+    const crisisLine = guidanceOverride === null && severity === 'medium' && voiceCrisisLineDue(sessionId);
+    const standardGuidance = (): string =>
+      crisisLine
+        ? `${steeringGuidance(riskScore, severity)} ${VOICE_CRISIS_LINE_GUIDANCE}`
+        : steeringGuidance(riskScore, severity);
     // isConnected(), not getActiveConnections(). The latter is map membership,
     // and a session is in the map from the moment connect() is called until the
     // socket's 'close' fires — so it reports true while the socket is still
@@ -592,11 +626,12 @@ export async function maybeSteerSession(
     if (!sidebandManager.isConnected(sessionId)) {
       // Held for the moment the socket is ready (deliverPendingSteer).
       holdSteer(sessionId, {
-        text: guidanceOverride ?? steeringGuidance(riskScore, severity),
+        text: guidanceOverride ?? standardGuidance(),
         riskScore,
         severity,
         subject: guidanceOverride ? (subject ?? 'third_party') : null,
         rank: 1,
+        crisisLine,
       });
       if (!steeringSuppressed.has(sessionId)) {
         steeringSuppressed.add(sessionId);
@@ -632,7 +667,7 @@ export async function maybeSteerSession(
       return false;
     }
 
-    const guidance = guidanceOverride ?? steeringGuidance(riskScore, severity);
+    const guidance = guidanceOverride ?? standardGuidance();
     // Attached to the steer when both fit in one append (the keep-speaking
     // line is added after it); otherwise sent straight after it on its own.
     const attach = headsUp && fitsWithHeadsUp(guidance);
@@ -643,6 +678,7 @@ export async function maybeSteerSession(
       false,
     );
     delivered = true;
+    if (crisisLine) markVoiceCrisisLineRequested(sessionId);
     if (attach) {
       markVoiceHeadsUpRequested(sessionId, {
         severity,
@@ -657,6 +693,7 @@ export async function maybeSteerSession(
       delivered: true,
       ...(guidanceOverride ? { subject: subject ?? 'third_party' } : {}),
       ...(attach ? { voiceHeadsUp: 'attached' } : {}),
+      ...(crisisLine ? { crisisLine: 'requested' } : {}),
     });
     if (headsUp && !attach) await sendVoiceHeadsUpAlone(sessionId, riskScore, severity, sidebandManager);
 

@@ -276,7 +276,7 @@ describe('what the same-sentence rule must not hold back', () => {
     ];
     verdict = (text) => (/kill myself/.test(text) ? HIGH : /hopeless/.test(text) ? MEDIUM : NONE);
     await score(2);
-    expect(appends().filter((t) => t === steeringGuidance(55, 'medium'))).toHaveLength(1);
+    expect(appends().filter((t) => t.startsWith(steeringGuidance(55, 'medium')))).toHaveLength(1);
     expect(highSteers()).toHaveLength(0);
     await score(3);
     expect(highSteers()).toHaveLength(1);

@@ -119,6 +119,12 @@ import {
 } from '../../shared/textHandoff.js';
 import { NARROW_TURN_DOCUMENTATION_PROMPT } from '../services/chatTherapy.service.js';
 import { VOICE_HEADS_UP_GUIDANCE, VOICE_HEADS_UP_STEER } from '../services/voiceHeadsUp.service.js';
+import { VOICE_CRISIS_LINE_GUIDANCE, VOICE_CRISIS_LINE_MAX_REQUESTS } from '../services/voiceCrisisLine.service.js';
+import {
+  LIVE_QUIET_CHECK_IN_AFTER_MS,
+  LIVE_QUIET_CHECK_IN_COMMENTARY,
+  LIVE_QUIET_CHECK_IN_MAX_PER_SESSION,
+} from '../services/liveQuietCheckIn.service.js';
 import {
   RECOVERY_INTERIM_SPOKEN_LINE,
   RECOVERY_INTERIM_SPOKEN_LINE_NO_VOICE,
@@ -879,6 +885,16 @@ function buildItems(): Item[] {
   add('pre', LIVE_STEER_RESUME_COMMENTARY);
   add(
     'note',
+    'When the voice model has asked the participant about suicide, self-harm or their safety and neither of them ' +
+      `has spoken for ${LIVE_QUIET_CHECK_IN_AFTER_MS / 1000} seconds, the server sends the instruction below so the ` +
+      'participant is not left in silence. It is sent once per silence (nothing more is sent until the participant ' +
+      `has spoken again), at most ${LIVE_QUIET_CHECK_IN_MAX_PER_SESSION} times in a session, and not in the ` +
+      'continuation voice session that follows a call the voice service cut off. Each time it is sent, the ' +
+      "research team's monitoring dashboard is told and it is logged with the session:",
+  );
+  add('pre', LIVE_QUIET_CHECK_IN_COMMENTARY);
+  add(
+    'note',
     'When the voice model hands a question to the reasoning model (A.9) and the reasoning model does not come ' +
       'back (no activity for 12 seconds at the reasoning setting the study runs, longer at higher settings), the ' +
       'server sends the instruction below so the participant is not left waiting. It is not sent if any guidance ' +
@@ -915,6 +931,20 @@ function buildItems(): Item[] {
   add('pre', steeringGuidance(ph('<risk score>'), 'medium'));
   add('h3', 'Voice sessions — high severity');
   add('pre', steeringGuidance(ph('<risk score>'), 'high'));
+  add('h3', 'Voice sessions — the crisis line, said aloud once at medium severity');
+  add(
+    'p',
+    "The first time a voice session scores medium on the participant's own risk (for example, saying they do not " +
+      'want to be here any more), the sentence below is added to the end of the "severity below high" guidance ' +
+      'above, asking the model to say the 988 line aloud once, inside its reply. In a voice session at medium ' +
+      'severity the server does not put the resource card on the screen (in typed chat it does), so this spoken ' +
+      'sentence is how the participant is given the number. It is asked for at most ' +
+      `${VOICE_CRISIS_LINE_MAX_REQUESTS} times in a session: the second time only on a later ` +
+      'medium-severity instruction, and only if the model did not say the number after the first; the server ' +
+      'checks what the model actually said. It is not added to guidance about someone else in crisis or about ' +
+      'thoughts of harming another person (B.3), which carry their own wording.',
+  );
+  add('pre', VOICE_CRISIS_LINE_GUIDANCE);
   add('h3', 'Voice sessions — one-time notice that the conversation continues in writing (off unless enabled)');
   add(
     'p',
@@ -962,6 +992,13 @@ function buildItems(): Item[] {
       'read as "a reply that is only a question" and the crisis lines are given in the same reply:',
   );
   add('pre', CHAT_RISK_CHECK_REPLY_GUIDANCE);
+  add(
+    'note',
+    'In a voice session, when the guidance in B.1 sent a moment earlier for the same participant message asked ' +
+      'for the crisis line to be said aloud, that same sentence (B.1, "the crisis line, said aloud once at medium ' +
+      'severity") is repeated at the end of this text, so that the instruction the model reads last also carries ' +
+      'it. It is still one request: the model is asked to say the number once.',
+  );
 
   add('h2', 'B.3 High-severity safety protocol');
   add(
