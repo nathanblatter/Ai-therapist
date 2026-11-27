@@ -46,15 +46,20 @@
 
 import WebSocket from 'ws';
 import { pool } from '../config/db.js';
-import { insertMessagesBatch } from '../db/index.js';
+import { insertMessagesBatch, markMessageUnverifiedSpeech } from '../db/index.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { emitCrisisResources, hasEmittedHighRiskResources } from './crisisResources.js';
 import type { CrisisStateSource } from './crisisPaging.service.js';
 import { isToolTimeoutError, toolTimeoutMs } from './toolTimeouts.js';
 import { clearVoiceToolOutcomes, reportVoiceToolOutcome, voiceOverlayEvent, withScreenNote } from './toolOverlays.js';
 import { buildRecoverySpeakFirstNudge, type RecoveryCrisisContact } from '../../shared/recoveryPrompt.js';
-import { rememberTurn } from '../utils/recentTurns.js';
-import { participantMicEvidence, type ParticipantMicEvidence } from './recorder.service.js';
+import { forgetTurn, rememberTurn } from '../utils/recentTurns.js';
+import {
+  participantMicEvidence,
+  watchForMutedTurn,
+  type MutedTurnResult,
+  type ParticipantMicEvidence,
+} from './recorder.service.js';
 import { noteVoiceHeadsUpSpeech, voiceHeadsUpPending } from './voiceHeadsUp.service.js';
 import {
   noteAssistantTurnForQuietCheckIn,
@@ -134,6 +139,14 @@ const STEER_REPLY_OWED_WINDOW_MS = 6_000;
 const STEER_INTERRUPT_TAIL_MS = 1_200;
 /** The participant counts as still talking if a fragment of theirs arrived this recently. */
 const STEER_PARTICIPANT_TALKING_MS = 1_500;
+/**
+ * Muted-turn check (ai-therapist-412): unmuted microphone audio arriving at
+ * any time from this long before a participant turn's first transcript
+ * fragment means the turn is real speech. Far longer than any delay between
+ * speaking and the transcript arriving; a participant who spoke and then
+ * muted within this window simply gets no verdict.
+ */
+export const MUTED_TURN_WINDOW_MS = 120_000;
 /**
  * A check that finds the participant talking waits for them instead of being
  * dropped: it looks again this often, for at most STEER_TALKING_CEILING_MS.
@@ -656,6 +669,8 @@ interface LiveSessionState {
   /** Arrival time of the newest assistant / participant transcript fragment (0 = none). */
   lastAssistantDeltaAt: number;
   lastUserDeltaAt: number;
+  /** Arrival time of the first fragment of the participant turn being assembled (0 = none). */
+  userTurnFirstDeltaAt: number;
   /** Pending "you went silent after a steer" checks. */
   steerResumeTimers: NodeJS.Timeout[];
   /**
@@ -913,6 +928,7 @@ export class SidebandManager {
       assistantSpoke: false,
       lastAssistantDeltaAt: 0,
       lastUserDeltaAt: 0,
+      userTurnFirstDeltaAt: 0,
       steerResumeTimers: [],
       openingAttach: initialAttach,
       speakFirstTimers: [],
@@ -2121,6 +2137,7 @@ export class SidebandManager {
         const state = this.sessions.get(sessionId);
         if (!state) break;
         state.lastUserDeltaAt = Date.now();
+        if (!state.userTurnFirstDeltaAt) state.userTurnFirstDeltaAt = state.lastUserDeltaAt;
         // They are speaking: no quiet check-in is due (liveQuietCheckIn.service).
         noteParticipantSpeechForQuietCheckIn(sessionId);
         // Before any assistant speech this is a barge-in before the opening:
@@ -2403,7 +2420,7 @@ export class SidebandManager {
    * response, minor safeguard) is reused unchanged.
    */
   private onUserTurn(sessionId: string, text: string, startMs: number, endMs: number): void {
-    this.emitTranscript(sessionId, { role: 'user', text, final: true });
+    const itemId = this.emitTranscript(sessionId, { role: 'user', text, final: true });
     // Kept in memory as it arrives, so the crisis pipeline has the turns
     // before this one (a split sentence, a safety question) whatever the
     // database does (ai-therapist-373).
@@ -2413,16 +2430,31 @@ export class SidebandManager {
     // The voice model has produced participant transcripts out of digital
     // silence (2 of 80 session starts measured 2026-11-25: "a purple", "the
     // text in"), and the mic track is the only thing on this server that says
-    // whether the microphone was on. It cannot gate the turn: it arrives late
-    // and can be lost (participantMicEvidence), and a real disclosure dropped
-    // is far worse than a phantom kept. So every turn is still stored and
-    // scored exactly as before; a turn recorded with `unmuted_ms: 0` is a
+    // whether the microphone was on. This snapshot cannot gate the turn: it
+    // arrives late and can be lost (participantMicEvidence), and a real
+    // disclosure dropped is far worse than a phantom kept. So every turn is
+    // still stored at once; a turn recorded with `unmuted_ms: 0` alone is a
     // candidate for review, not a verdict. Absent when there is no track.
     let micAudio: ParticipantMicEvidence | null = null;
     try {
       micAudio = participantMicEvidence(sessionId);
     } catch (err) {
       console.error(`[Live] Reading the mic evidence failed for ${sessionId.substring(0, 12)}...:`, err);
+    }
+    // The verdict (ai-therapist-412) comes from the recorder's muted-turn
+    // check, which answers `no_speech` only on complete, positive evidence
+    // that the microphone was muted from well before this turn's first
+    // fragment until after it closed (watchForMutedTurn). Null here, or any
+    // other answer later, and the turn is real speech: scored exactly as it
+    // always was. Only a `no_speech` turn is marked and left unscored.
+    const state = this.sessions.get(sessionId);
+    const firstDeltaAt = state?.userTurnFirstDeltaAt || Date.now();
+    if (state) state.userTurnFirstDeltaAt = 0;
+    let mutedWatch: Promise<MutedTurnResult> | null = null;
+    try {
+      mutedWatch = watchForMutedTurn(sessionId, firstDeltaAt - MUTED_TURN_WINDOW_MS);
+    } catch (err) {
+      console.error(`[Live] Starting the muted-turn check failed for ${sessionId.substring(0, 12)}...:`, err);
     }
 
     const work = (async () => {
@@ -2451,6 +2483,39 @@ export class SidebandManager {
         if (remembered && messageId != null) remembered.messageId = messageId;
       } catch (err) {
         console.error(`[Live] Failed to persist user turn for ${sessionId.substring(0, 12)}...:`, err);
+      }
+
+      // A turn the microphone evidence says nobody spoke: kept, marked, not
+      // scored, and not context for later turns. Reached only when the row
+      // exists AND the mark was written; a failure anywhere on the way falls
+      // through to the pipeline below (an unmarked turn is always scored).
+      if (mutedWatch && messageId != null) {
+        let unverified = false;
+        try {
+          const result = await mutedWatch;
+          if (result.verdict === 'no_speech' && result.evidence) {
+            await markMessageUnverifiedSpeech(messageId, { ...result.evidence });
+            unverified = true;
+          }
+        } catch (err) {
+          console.error(`[Live] Marking unverified speech failed for ${sessionId.substring(0, 12)}...:`, err);
+        }
+        if (unverified) {
+          forgetTurn(sessionId, remembered);
+          console.warn(
+            `[Live] Participant turn for ${sessionId.substring(0, 12)}... marked unverified speech ` +
+              `(microphone muted throughout); not risk-scored. message_id=${messageId}`,
+          );
+          if (global.io) {
+            void broadcastAdminEventForSession(
+              global.io,
+              'sideband:transcript-unverified',
+              { sessionId, itemId, messageId, reason: 'mic_muted' },
+              sessionId,
+            );
+          }
+          return;
+        }
       }
 
       // Run the safety pipeline even if persistence failed — a DB outage must
@@ -2637,8 +2702,8 @@ export class SidebandManager {
   private emitTranscript(
     sessionId: string,
     payload: { role: 'user' | 'assistant'; delta?: string; text?: string; final: boolean },
-  ): void {
-    if (!global.io) return;
+  ): string | null {
+    if (!global.io) return null;
 
     const state = this.sessions.get(sessionId);
     const counters = payload.role === 'user' ? state?.userTurnIndex : state?.assistantTurnIndex;
@@ -2674,6 +2739,7 @@ export class SidebandManager {
       },
       sessionId,
     );
+    return itemId;
   }
 
   // -------------------------------------------------------------------------

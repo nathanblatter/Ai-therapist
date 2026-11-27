@@ -188,6 +188,20 @@ export function rememberTurn(
   return turn;
 }
 
+/**
+ * Drop one remembered turn (ai-therapist-412: a voice transcript found to be
+ * the vendor's invention from a muted microphone, so it is not context for
+ * later turns). Returns whether it was held. Never throws.
+ */
+export function forgetTurn(sessionId: string, turn: RememberedTurn | null | undefined): boolean {
+  const record = turn ? sessions.get(sessionId) : undefined;
+  if (!record || !turn) return false;
+  const index = record.turns.findIndex((t) => t.seq === turn.seq);
+  if (index === -1) return false;
+  record.turns.splice(index, 1);
+  return true;
+}
+
 /** What this process holds for a session, or null when it holds nothing. */
 export function recentTurns(
   sessionId: string,

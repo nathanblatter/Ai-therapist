@@ -1,3 +1,5 @@
+import { safeMicAudio } from './unverifiedSpeech.js';
+
 // messages.metadata projection for redacted (non-owner) read paths.
 //
 // Why this exists (ai-therapist-217): the export and admin-transcript queries
@@ -27,6 +29,8 @@
 //     PHI-bearing `text` / `args`
 //   messages.queries updateMessage                            -> edited,
 //     edited_at, plus staff `edited_by`
+//   messages.queries markMessageUnverifiedSpeech              -> unverified_speech,
+//     unverified_speech_reason, mic_audio (numbers and a fixed state)
 //   logs.routes POST /logs/batch                              -> arbitrary
 //     client-supplied `extras` (the reason this is an allowlist, not a
 //     blocklist)
@@ -62,6 +66,14 @@ export const SAFE_MESSAGE_METADATA_KEYS: readonly string[] = [
   'edited',
   'edited_at',
   'sent_at',
+  // Unverified speech (ai-therapist-412): the flag and fixed-enum reason on a
+  // voice transcript the vendor produced from a muted microphone, and the
+  // microphone evidence beside every voice turn (durations, a level and a
+  // fixed state; numbers and enums only, written by the server). Redacted
+  // readers need the flag to leave such a row out of an analysis.
+  'unverified_speech',
+  'unverified_speech_reason',
+  'mic_audio',
 ];
 
 const SAFE_KEY_SET = new Set(SAFE_MESSAGE_METADATA_KEYS);
@@ -77,7 +89,17 @@ export function projectSafeMetadata(metadata: unknown): Record<string, unknown> 
 
   const safe: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(metadata as Record<string, unknown>)) {
-    if (SAFE_KEY_SET.has(key)) safe[key] = value;
+    if (!SAFE_KEY_SET.has(key)) continue;
+    // The speech keys are shaped, not passed through: a flag, a fixed reason,
+    // and numbers (ai-therapist-412).
+    if (key === 'unverified_speech') {
+      if (value === true) safe[key] = true;
+    } else if (key === 'unverified_speech_reason') {
+      if (value === 'mic_muted') safe[key] = value;
+    } else if (key === 'mic_audio') {
+      const mic = safeMicAudio(value);
+      if (mic) safe[key] = mic;
+    } else safe[key] = value;
   }
   return Object.keys(safe).length > 0 ? safe : null;
 }

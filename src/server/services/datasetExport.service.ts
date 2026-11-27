@@ -759,6 +759,13 @@ export const TRANSCRIPT_FILES: DatasetFileSpec[] = [
         notes: 'Redacted text only; empty when redaction has not run.',
       },
       { name: 'redaction_pending', type: 'bool', source: 'messages.content_redacted IS NULL' },
+      {
+        name: 'unverified_speech',
+        type: 'bool',
+        source: "messages.metadata->>'unverified_speech'",
+        notes:
+          'True for a participant voice turn the voice vendor transcribed while the microphone was muted: nobody said it. The row is kept so turn_index stays stable; leave it out of any analysis of what participants said. Only marked from 2026-11-27 on.',
+      },
       { name: 'created_at', type: 'timestamp', source: 'messages.created_at' },
     ],
   },

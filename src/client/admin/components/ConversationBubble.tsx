@@ -1,4 +1,4 @@
-import { Tool, Inbox } from 'react-feather';
+import { Tool, Inbox, MicOff } from 'react-feather';
 import { formatDateTime } from '../../shared/format';
 
 interface MessageData {
@@ -16,6 +16,8 @@ interface MessageData {
   extras?: {
     edited?: boolean;
     edited_at?: string;
+    /** The voice vendor transcribed this from a muted microphone (ai-therapist-412). */
+    unverified_speech?: boolean;
     [key: string]: unknown;
   };
 }
@@ -146,6 +148,17 @@ export default function ConversationBubble({
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Unverified speech: shown, never hidden, and labelled (ai-therapist-412) */}
+        {message.extras?.unverified_speech === true && (
+          <div className="mt-2 text-xs font-semibold bg-yellow-200 text-yellow-900 px-2 py-1 rounded flex items-start gap-1.5">
+            <MicOff size={14} aria-hidden="true" className="mt-0.5 shrink-0" />
+            <span>
+              Unverified speech: the microphone was muted, so the participant did not say this. Kept for the record; not
+              risk-scored.
+            </span>
           </div>
         )}
 

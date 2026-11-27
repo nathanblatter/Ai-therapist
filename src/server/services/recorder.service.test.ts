@@ -45,6 +45,8 @@ const {
   SIDECAR_ATTEMPTS,
   trackSampleRate,
   participantMicEvidence,
+  watchForMutedTurn,
+  MUTED_TURN_TAIL_MS,
 } = await import('./recorder.service.js');
 
 // The WAV uploads only; finalize also stores the JSON sidecar (ai-therapist-384).
@@ -946,5 +948,232 @@ describe('participantMicEvidence: what has arrived of the participant track', ()
     appendChunk(sessionId, second(), sampleRate, 'participant', { seq: 0 });
     abort(sessionId);
     expect(participantMicEvidence(sessionId)).toBeNull();
+  });
+});
+
+// ai-therapist-412. The one place allowed to say "nobody spoke". The asymmetry
+// under test: `no_speech` only on complete, positive evidence; every missing,
+// late, lost or ambiguous case must come back as real speech (null, `speech`
+// or `unknown`), because a turn judged `no_speech` is not risk-scored.
+describe('watchForMutedTurn: a verdict only on complete evidence the microphone was muted', () => {
+  const sampleRate = 48000;
+  // One-second chunks, so the tail margin is exactly one chunk.
+  const silent = () => pcmChunk(sampleRate, 0);
+  const voiced = () => pcmChunk(sampleRate, 3277);
+  let clock = 1_000_000;
+  let n = 0;
+  const newSession = (name: string) => `sess-muted-turn-${name}-${n++}`;
+
+  /** One HTTP batch of muted (or not) chunks starting at `seq`. */
+  function batch(
+    sessionId: string,
+    seq: number,
+    count: number,
+    opts: { muted?: boolean; pushed?: number | null } = {},
+  ) {
+    const muted = opts.muted ?? true;
+    for (let i = 0; i < count; i++) {
+      appendChunk(sessionId, muted ? silent() : voiced(), sampleRate, 'participant', {
+        seq: seq + i,
+        muted,
+        batchStart: i === 0,
+        ...(opts.pushed === null ? {} : { pushed: opts.pushed ?? seq + count }),
+      });
+    }
+  }
+
+  /** Resolves to the verdict, or 'pending' when the promise has not settled. */
+  async function peek(p: Promise<{ verdict: string }> | null): Promise<string | null> {
+    if (p === null) return null;
+    let verdict = 'pending';
+    void p.then((r) => {
+      verdict = r.verdict;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    return verdict;
+  }
+
+  beforeEach(() => {
+    clock = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => clock);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('the tail margin is one second of audio', () => {
+    expect(MUTED_TURN_TAIL_MS).toBe(1000);
+  });
+
+  it('muted throughout, in order, and received past the turn: no speech, with the evidence', async () => {
+    const sessionId = newSession('muted');
+    batch(sessionId, 0, 2);
+    clock += 3000;
+    const watch = watchForMutedTurn(sessionId, clock - 120_000, 60_000);
+    expect(watch).not.toBeNull();
+    // First batch after the check began: may have been sent before it.
+    batch(sessionId, 2, 1);
+    expect(await peek(watch)).toBe('pending');
+    // Second batch: sent after the first was answered, so after the check
+    // began. It names the index to reach (pushed 4, plus the tail chunk).
+    batch(sessionId, 3, 1, { pushed: 4 });
+    expect(await peek(watch)).toBe('pending');
+    batch(sessionId, 4, 1, { pushed: 5 });
+    expect(await watch).toEqual({
+      verdict: 'no_speech',
+      evidence: { received_ms: 5000, muted_ms: 5000, unmuted_ms: 0, unmuted_rms_dbfs: null },
+    });
+    abort(sessionId);
+  });
+
+  it('waits for the chunks the browser had captured but not yet sent (pushed ahead of what arrived)', async () => {
+    const sessionId = newSession('behind');
+    batch(sessionId, 0, 1);
+    const watch = watchForMutedTurn(sessionId, clock - 120_000, 60_000);
+    batch(sessionId, 1, 1);
+    // The uploader is three chunks behind the microphone: target is 5 + 1.
+    batch(sessionId, 2, 1, { pushed: 5 });
+    batch(sessionId, 3, 2, { pushed: 6 });
+    expect(await peek(watch)).toBe('pending');
+    batch(sessionId, 5, 1, { pushed: 7 });
+    expect((await watch)!.verdict).toBe('no_speech');
+    abort(sessionId);
+  });
+
+  it('unmuted audio arriving late, after the turn closed, means speech at once', async () => {
+    const sessionId = newSession('late-speech');
+    batch(sessionId, 0, 2);
+    const watch = watchForMutedTurn(sessionId, clock - 120_000, 60_000);
+    clock += 400;
+    batch(sessionId, 2, 1);
+    clock += 400;
+    // The participant had unmuted and spoken; the audio only lands now.
+    batch(sessionId, 3, 1, { muted: false });
+    expect((await watch)!.verdict).toBe('speech');
+    abort(sessionId);
+  });
+
+  it('unmuted audio already inside the window: not a candidate at all', () => {
+    const sessionId = newSession('recent-speech');
+    batch(sessionId, 0, 1, { muted: false });
+    clock += 30_000;
+    batch(sessionId, 1, 1);
+    expect(watchForMutedTurn(sessionId, clock - 120_000)).toBeNull();
+    abort(sessionId);
+  });
+
+  it('unmuted audio from before the window does not stand in the way of a later muted turn', async () => {
+    const sessionId = newSession('old-speech');
+    batch(sessionId, 0, 1, { muted: false });
+    clock += 300_000;
+    batch(sessionId, 1, 1);
+    const watch = watchForMutedTurn(sessionId, clock - 120_000, 60_000);
+    batch(sessionId, 2, 1);
+    batch(sessionId, 3, 1);
+    batch(sessionId, 4, 1);
+    expect((await watch)!.verdict).toBe('no_speech');
+    abort(sessionId);
+  });
+
+  it('no participant track (recording off, not consented, nothing uploaded): not a candidate', () => {
+    const sessionId = newSession('none');
+    expect(watchForMutedTurn(sessionId, clock - 120_000)).toBeNull();
+    appendChunk(sessionId, silent(), sampleRate, 'mixed', { seq: 0 });
+    expect(watchForMutedTurn(sessionId, clock - 120_000)).toBeNull();
+    abort(sessionId);
+  });
+
+  it('a track without sequence numbers (an older client): not a candidate', () => {
+    const sessionId = newSession('legacy');
+    appendChunk(sessionId, silent(), sampleRate, 'participant', { muted: true });
+    expect(watchForMutedTurn(sessionId, clock - 120_000)).toBeNull();
+    abort(sessionId);
+  });
+
+  it('a gap while waiting (lost chunks may have been speech): unknown, and no verdict ever again', async () => {
+    const sessionId = newSession('gap');
+    batch(sessionId, 0, 2);
+    const watch = watchForMutedTurn(sessionId, clock - 120_000, 60_000);
+    batch(sessionId, 2, 1);
+    batch(sessionId, 5, 1); // chunks 3 and 4 never arrived
+    expect((await watch)!.verdict).toBe('unknown');
+    batch(sessionId, 6, 3);
+    expect(watchForMutedTurn(sessionId, clock - 120_000)).toBeNull();
+    abort(sessionId);
+  });
+
+  it('a gap earlier in the session: not a candidate', () => {
+    const sessionId = newSession('early-gap');
+    batch(sessionId, 1, 2); // chunk 0 never arrived
+    expect(watchForMutedTurn(sessionId, clock - 120_000)).toBeNull();
+    abort(sessionId);
+  });
+
+  it('a repeated (retried) batch while waiting: unknown', async () => {
+    const sessionId = newSession('stale');
+    batch(sessionId, 0, 2);
+    const watch = watchForMutedTurn(sessionId, clock - 120_000, 60_000);
+    batch(sessionId, 2, 1);
+    batch(sessionId, 2, 1); // the same batch again
+    expect((await watch)!.verdict).toBe('unknown');
+    abort(sessionId);
+  });
+
+  it('one batch after the check is not enough, however much audio it carries', async () => {
+    const sessionId = newSession('one-batch');
+    batch(sessionId, 0, 2);
+    const watch = watchForMutedTurn(sessionId, clock - 120_000, 20);
+    batch(sessionId, 2, 30);
+    expect(await peek(watch)).toBe('pending');
+    // Nothing more arrives: the timeout answers unknown.
+    expect((await watch)!.verdict).toBe('unknown');
+    abort(sessionId);
+  });
+
+  it('a second batch that does not say how much the browser had captured: unknown', async () => {
+    const sessionId = newSession('no-pushed');
+    batch(sessionId, 0, 2);
+    const watch = watchForMutedTurn(sessionId, clock - 120_000, 60_000);
+    batch(sessionId, 2, 1);
+    batch(sessionId, 3, 1, { pushed: null });
+    expect((await watch)!.verdict).toBe('unknown');
+    abort(sessionId);
+  });
+
+  it('no further audio at all (a stalled upload): unknown at the timeout', async () => {
+    const sessionId = newSession('stalled');
+    batch(sessionId, 0, 2);
+    const watch = watchForMutedTurn(sessionId, clock - 120_000, 20);
+    expect((await watch)!.verdict).toBe('unknown');
+    abort(sessionId);
+  });
+
+  it('the recording closing while waiting: unknown, with no evidence', async () => {
+    const sessionId = newSession('closed');
+    batch(sessionId, 0, 2);
+    const aborted = watchForMutedTurn(sessionId, clock - 120_000, 60_000);
+    abort(sessionId);
+    expect(await aborted).toEqual({ verdict: 'unknown', evidence: null });
+
+    const other = newSession('finalized');
+    batch(other, 0, 2);
+    const finalized = watchForMutedTurn(other, clock - 120_000, 60_000);
+    await finalize(other);
+    expect(await finalized).toEqual({ verdict: 'unknown', evidence: null });
+  });
+
+  it('several turns waiting on one track are each answered', async () => {
+    const sessionId = newSession('two');
+    batch(sessionId, 0, 2);
+    const first = watchForMutedTurn(sessionId, clock - 120_000, 60_000);
+    batch(sessionId, 2, 1);
+    const second = watchForMutedTurn(sessionId, clock - 120_000, 60_000);
+    batch(sessionId, 3, 1);
+    batch(sessionId, 4, 1);
+    expect((await first)!.verdict).toBe('no_speech');
+    expect(await peek(second)).toBe('pending');
+    batch(sessionId, 5, 1);
+    expect((await second)!.verdict).toBe('no_speech');
+    abort(sessionId);
   });
 });

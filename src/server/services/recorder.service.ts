@@ -66,6 +66,13 @@ interface ActiveRecording {
   timelineIntact: boolean;
   muted: SampleRange[];
   mutedTruncated: boolean;
+  // Muted-turn check (ai-therapist-412). When the last chunk NOT marked muted
+  // arrived (wall clock), null when none has; whether anything about the
+  // track's delivery was ever out of the ordinary (a gap, a stale chunk, a
+  // batch without `seq`, a write error); and the turns waiting for a verdict.
+  lastUnmutedAt: number | null;
+  irregular: boolean;
+  waiters: Set<MutedTurnWaiter>;
 }
 
 /** Per-chunk metadata from the client (ai-therapist-372, -384); all optional. */
@@ -76,6 +83,8 @@ export interface ChunkMeta {
   muted?: boolean;
   /** Chunks the client had captured on this track when it sent the batch (ai-therapist-384). */
   pushed?: number;
+  /** This chunk is the first of its HTTP batch (ai-therapist-412). */
+  batchStart?: boolean;
 }
 
 /**
@@ -184,6 +193,9 @@ export function appendChunk(
       timelineIntact: true,
       muted: [],
       mutedTruncated: false,
+      lastUnmutedAt: null,
+      irregular: false,
+      waiters: new Set(),
     };
     // A WriteStream with no 'error' listener throws (and can crash the process)
     // on a write failure. Capture it instead so we stop counting bytes that
@@ -191,6 +203,8 @@ export function appendChunk(
     // would over-report the real audio.
     stream.on('error', (err) => {
       rec!.errored = true;
+      rec!.irregular = true;
+      settleWaiters(rec!);
       log.error({ err }, `[rec] write stream error for ${key}`);
     });
     recordings.set(key, rec);
@@ -200,6 +214,12 @@ export function appendChunk(
     rec.clientPushed = meta.pushed;
   }
   const missing = acceptSeq(sessionId, track, rec, meta.seq);
+  // Anything but an in-order, sequenced chunk ends the muted-turn check for
+  // this track for good: the account of the microphone is no longer complete.
+  if (missing !== 0 || meta.seq === undefined || rec.errored) {
+    rec.irregular = true;
+    settleWaiters(rec);
+  }
   if (missing === null) return;
   if (rec.errored) return; // stream is dead; don't count bytes we can't persist
   const buf = Buffer.from(base64Pcm16, 'base64');
@@ -224,6 +244,11 @@ export function appendChunk(
   else if (track === 'participant') {
     rec.unmutedSamples += samples;
     rec.unmutedSumSquares += pcm16SumSquares(buf);
+    rec.lastUnmutedAt = now;
+  }
+  if (rec.waiters.size > 0) {
+    if (meta.batchStart) noteBatchForWaiters(rec, meta.pushed);
+    settleWaiters(rec);
   }
 }
 
@@ -355,8 +380,9 @@ export interface ParticipantMicEvidence {
  * the microphone (400 ms batches, coalesced and retried for many seconds on a
  * poor connection, sometimes lost), and it is the browser's own account. So
  * `unmuted_ms: 0` means "no unmuted audio had REACHED the server yet", which
- * is also true for a moment after a participant unmutes and speaks. It must
- * never be used to drop or down-weight a participant turn.
+ * is also true for a moment after a participant unmutes and speaks. On its own
+ * it must never be used to drop or down-weight a participant turn; the only
+ * verdict is watchForMutedTurn's, which waits for the track to catch up.
  */
 export function participantMicEvidence(sessionId: string): ParticipantMicEvidence | null {
   const rec = recordings.get(recKey(sessionId, 'participant'));
@@ -369,6 +395,143 @@ export function participantMicEvidence(sessionId: string): ParticipantMicEvidenc
     unmuted_ms: toMs(rec.unmutedSamples),
     unmuted_rms_dbfs: Number.isFinite(level) ? Math.round(level * 10) / 10 : null,
   };
+}
+
+/**
+ * MUTED-TURN CHECK (ai-therapist-412). The voice vendor sometimes produces a
+ * participant transcript out of a muted microphone (exact zeros). This is the
+ * one place that may say so, and it says so only on positive, complete
+ * evidence; every other outcome means "treat the turn as real speech".
+ *
+ * `no_speech` requires ALL of:
+ *
+ * 1. A participant track is open, every chunk of it so far arrived in order
+ *    with a sequence index, and nothing was lost, repeated or failed to write
+ *    (`irregular` is false). One gap or one retried batch, ever, and the
+ *    session gets no verdict again: lost chunks may have been speech.
+ * 2. No chunk the browser did NOT mark muted has arrived since `since` (the
+ *    caller passes a time well before the turn's first transcript fragment).
+ *    Arrival is never earlier than capture, so unmuted audio captured in that
+ *    window cannot have arrived before it.
+ * 3. The track has been received past the moment the check started, proven
+ *    without comparing clocks: the uploader keeps one request in flight and
+ *    cuts the next batch only after the previous one is answered, and the
+ *    server answers after appending. So the SECOND batch appended after the
+ *    check started was sent after it started, and its `pushed` (chunks
+ *    captured when it was sent) covers everything captured up to then. The
+ *    verdict waits until every chunk up to that index, plus
+ *    MUTED_TURN_TAIL_MS more, has arrived, all of it marked muted.
+ *
+ * If that has not happened within the timeout, or the recording closes, the
+ * answer is `unknown`. Unmuted audio arriving at any point answers `speech`
+ * at once, so a real turn whose audio was merely late is held only until its
+ * first unmuted chunk lands.
+ *
+ * Known limit: a batch the browser gave up on (its last attempt aborted) that
+ * still reaches the server later breaks the causal chain in (3) without a
+ * stale chunk to show for it. The tail margin and the window in (2) are there
+ * for that; it would additionally need the whole utterance to fall after the
+ * covered index.
+ */
+export type MutedTurnVerdict = 'no_speech' | 'speech' | 'unknown';
+
+export interface MutedTurnResult {
+  verdict: MutedTurnVerdict;
+  /** The track as received when the verdict was reached; null when it had closed. */
+  evidence: ParticipantMicEvidence | null;
+}
+
+/** How long a turn waits for its verdict before it is treated as real speech. */
+export const MUTED_TURN_TIMEOUT_MS = 5_000;
+/** Audio that must arrive, all muted, beyond the index proven to be after the check began. */
+export const MUTED_TURN_TAIL_MS = 1_000;
+
+interface MutedTurnWaiter {
+  sessionId: string;
+  since: number;
+  /** Batches appended in order since the check began. */
+  batches: number;
+  /** Chunk index the track must reach; null until the second batch names it. */
+  target: number | null;
+  timer: ReturnType<typeof setTimeout>;
+  resolve: (result: MutedTurnResult) => void;
+}
+
+function finishWaiter(rec: ActiveRecording, waiter: MutedTurnWaiter, verdict: MutedTurnVerdict, open = true): void {
+  if (!rec.waiters.delete(waiter)) return;
+  clearTimeout(waiter.timer);
+  let evidence: ParticipantMicEvidence | null = null;
+  try {
+    evidence = open ? participantMicEvidence(waiter.sessionId) : null;
+  } catch {
+    evidence = null;
+  }
+  waiter.resolve({ verdict, evidence });
+}
+
+/** A batch's first chunk was appended in order: count it for every waiting turn. */
+function noteBatchForWaiters(rec: ActiveRecording, pushed: number | undefined): void {
+  for (const waiter of [...rec.waiters]) {
+    waiter.batches += 1;
+    if (waiter.batches !== 2 || waiter.target !== null) continue;
+    const chunkSamples = rec.chunkSamples ?? 0;
+    if (pushed === undefined || !Number.isInteger(pushed) || pushed < 0 || chunkSamples <= 0) {
+      finishWaiter(rec, waiter, 'unknown');
+      continue;
+    }
+    const tailChunks = Math.ceil((MUTED_TURN_TAIL_MS / 1000) * (rec.sampleRate / chunkSamples));
+    waiter.target = Math.max(pushed, rec.nextSeq ?? 0) + Math.max(1, tailChunks);
+  }
+}
+
+/** Answer every waiting turn that can be answered now. */
+function settleWaiters(rec: ActiveRecording): void {
+  for (const waiter of [...rec.waiters]) {
+    if (rec.irregular || rec.errored) finishWaiter(rec, waiter, 'unknown');
+    else if (rec.lastUnmutedAt !== null && rec.lastUnmutedAt >= waiter.since) finishWaiter(rec, waiter, 'speech');
+    else if (waiter.target !== null && rec.nextSeq !== null && rec.nextSeq >= waiter.target) {
+      finishWaiter(rec, waiter, 'no_speech');
+    }
+  }
+}
+
+/** The recording is closing: every waiting turn is treated as real speech. */
+function closeWaiters(rec: ActiveRecording): void {
+  for (const waiter of [...rec.waiters]) finishWaiter(rec, waiter, 'unknown', false);
+}
+
+/**
+ * Start a muted-turn check for a participant turn that has just closed.
+ * `since` is the wall-clock time from which any unmuted audio means speech.
+ *
+ * Returns null when the turn cannot be a muted-microphone phantom on what is
+ * known right now (no participant track, an irregular one, unmuted audio
+ * inside the window): the caller carries on exactly as it would without this
+ * check. Otherwise a promise that never rejects (see MUTED-TURN CHECK above).
+ */
+export function watchForMutedTurn(
+  sessionId: string,
+  since: number,
+  timeoutMs: number = MUTED_TURN_TIMEOUT_MS,
+): Promise<MutedTurnResult> | null {
+  const rec = recordings.get(recKey(sessionId, 'participant'));
+  if (!rec || rec.irregular || rec.errored) return null;
+  if (!rec.sequenced || rec.unsequenced || rec.nextSeq === null) return null;
+  if (!Number.isFinite(rec.sampleRate) || rec.sampleRate <= 0) return null;
+  if (!Number.isFinite(since)) return null;
+  if (rec.lastUnmutedAt !== null && rec.lastUnmutedAt >= since) return null;
+  return new Promise<MutedTurnResult>((resolve) => {
+    const waiter: MutedTurnWaiter = {
+      sessionId,
+      since,
+      batches: 0,
+      target: null,
+      timer: setTimeout(() => finishWaiter(rec, waiter, 'unknown'), Math.max(0, timeoutMs)),
+      resolve,
+    };
+    waiter.timer.unref?.();
+    rec.waiters.add(waiter);
+  });
 }
 
 /** Whether a session currently has buffered audio on any track. */
@@ -393,7 +556,10 @@ export async function finalize(sessionId: string): Promise<void> {
   // finalize.
   markFinalized(sessionId);
   if (tracks.length === 0) return;
-  for (const { track } of tracks) recordings.delete(recKey(sessionId, track));
+  for (const { track, rec } of tracks) {
+    recordings.delete(recKey(sessionId, track));
+    closeWaiters(rec);
+  }
 
   const window = arrivals.get(sessionId);
   arrivals.delete(sessionId);
@@ -727,6 +893,7 @@ export function abort(sessionId: string): void {
   if (tracks.length === 0) return;
   for (const track of TRACKS) recordings.delete(recKey(sessionId, track));
   for (const rec of tracks) {
+    closeWaiters(rec);
     rec.stream.destroy();
     void cleanupTemp(rec.filePath);
   }

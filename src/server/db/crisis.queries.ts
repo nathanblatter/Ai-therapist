@@ -1,5 +1,6 @@
 // Data-access for crisis-management views and session crisis flags.
 import { pool } from '../config/db.js';
+import { notUnverifiedSpeechSql } from './unverifiedSpeech.js';
 import { ownerOrgScopeSql } from './organizations.queries.js';
 import { CRISIS_EVENT_ADJUDICATIONS_SQL } from './crisisAdjudications.queries.js';
 import { getIncidentChainSessionIds, INCIDENT_CHAIN_BACKSTOP_MS } from './paging.queries.js';
@@ -128,6 +129,10 @@ const BOOKKEEPING_MESSAGE_TYPES = [
  * Participant-authored worksheet rows (thought_record, values_sort,
  * fear_ladder) are written with role 'user' and stay in the window; the
  * server-side tool_event_* echoes of them are role 'system' and do not.
+ *
+ * A voice turn marked unverified speech (ai-therapist-412: a transcript the
+ * vendor produced from a muted microphone) is left out: nobody said it, so it
+ * must not be read as context for what the participant says next.
  */
 export async function getRecentSessionMessages(sessionId: string, limit = 10): Promise<RecentSessionMessage[]> {
   const result = await pool.query<RecentSessionMessage>(
@@ -135,6 +140,7 @@ export async function getRecentSessionMessages(sessionId: string, limit = 10): P
      WHERE session_id = $1
        AND role IN ('user', 'assistant')
        AND message_type <> ALL($3::text[])
+       AND ${notUnverifiedSpeechSql()}
      ORDER BY created_at DESC
      LIMIT $2`,
     [sessionId, limit, BOOKKEEPING_MESSAGE_TYPES],
