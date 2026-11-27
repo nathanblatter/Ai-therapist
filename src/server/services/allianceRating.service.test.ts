@@ -3,8 +3,15 @@ import type { AllianceTurn } from './allianceMarkers.js';
 
 const db = vi.hoisted(() => ({
   eligible: true,
-  existing: null as { status: string } | null,
+  existing: null as { status: string; transcript_fingerprint?: string } | null,
   turns: [] as AllianceTurn[],
+  fingerprint: 'fp-now',
+  claimFree: true,
+  claims: 0,
+  claimsHeld: 0,
+  mostClaimsAtOnce: 0,
+  claimOrder: [] as string[],
+  review: null as { sessionId: string; awaitingReview: number } | null,
   config: { config_value: { enabled: false } } as { config_value: unknown } | null,
   configThrows: false,
   upserts: [] as Array<Record<string, unknown>>,
@@ -14,14 +21,30 @@ const db = vi.hoisted(() => ({
 vi.mock('../db/index.js', () => ({
   isSessionAllianceEligible: vi.fn(async () => db.eligible),
   getAllianceRating: vi.fn(async () => db.existing),
-  getRedactedTurnsForAlliance: vi.fn(async () => db.turns),
+  getTranscriptForAlliance: vi.fn(async () => ({ turns: db.turns, fingerprint: db.fingerprint })),
+  getLeakReviewStateForMessage: vi.fn(async () => db.review),
+  withAllianceRatingClaim: vi.fn(async (sessionId: string, _v: string, fn: () => Promise<unknown>) => {
+    if (!db.claimFree) return { acquired: false };
+    db.claims++;
+    db.claimOrder.push(sessionId);
+    db.claimsHeld++;
+    db.mostClaimsAtOnce = Math.max(db.mostClaimsAtOnce, db.claimsHeld);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      return { acquired: true, result: await fn() };
+    } finally {
+      db.claimsHeld--;
+    }
+  }),
   getSessionsNeedingAllianceRating: vi.fn(async () => db.waiting),
   getSystemConfigByKey: vi.fn(async () => {
     if (db.configThrows) throw new Error('db down');
     return db.config;
   }),
+  // Like the SQL: an errored result is refused (null) when an answer is stored.
   upsertAllianceRating: vi.fn(async (r: Record<string, unknown>) => {
     db.upserts.push(r);
+    if (r.status === 'errored' && db.existing && db.existing.status !== 'errored') return null;
     return { ...r, status: r.status };
   }),
 }));
@@ -39,6 +62,7 @@ const {
   DEFAULT_ALLIANCE_MARKERS_CONFIG,
   backfillAllianceRatings,
   getAllianceMarkersConfig,
+  maybeRateAllianceAfterLeakReview,
   maybeRateAllianceForSession,
   rateSessionAlliance,
 } = await import('./allianceRating.service.js');
@@ -73,6 +97,13 @@ beforeEach(() => {
   db.eligible = true;
   db.existing = null;
   db.turns = LONG_TURNS;
+  db.fingerprint = 'fp-now';
+  db.claimFree = true;
+  db.claims = 0;
+  db.claimsHeld = 0;
+  db.mostClaimsAtOnce = 0;
+  db.claimOrder = [];
+  db.review = null;
   db.config = { config_value: { enabled: false } };
   db.configThrows = false;
   db.upserts = [];
@@ -107,15 +138,45 @@ describe('the on/off switch', () => {
   });
 
   it('the post-session hook does nothing while the switch is off', async () => {
-    maybeRateAllianceForSession('s1');
+    await maybeRateAllianceForSession('s1');
     await flush();
     expect(db.upserts).toEqual([]);
+    expect(db.claims).toBe(0);
+  });
+
+  it('the leak-review hook does nothing while the switch is off', async () => {
+    db.review = { sessionId: 's1', awaitingReview: 0 };
+    await maybeRateAllianceAfterLeakReview(7);
+    expect(db.upserts).toEqual([]);
+    expect(db.claims).toBe(0);
+  });
+
+  it('the leak-review hook rates once the last message of the session is reviewed, not before', async () => {
+    db.config = { config_value: { enabled: true } };
+    db.review = { sessionId: 's1', awaitingReview: 2 };
+    await maybeRateAllianceAfterLeakReview(7);
+    expect(db.upserts).toEqual([]);
+
+    db.review = { sessionId: 's1', awaitingReview: 0 };
+    await maybeRateAllianceAfterLeakReview(7);
+    expect(db.upserts).toHaveLength(1);
+
+    db.review = null; // message gone
+    await expect(maybeRateAllianceAfterLeakReview(8)).resolves.toBeUndefined();
+    expect(db.upserts).toHaveLength(1);
+  });
+
+  it('the post-session hook rates one session at a time, in order', async () => {
+    db.config = { config_value: { enabled: true } };
+    await Promise.all(['a', 'b', 'c'].map((id) => maybeRateAllianceForSession(id)));
+    expect(db.claimOrder).toEqual(['a', 'b', 'c']);
+    expect(db.mostClaimsAtOnce).toBe(1);
   });
 
   it('the post-session hook skips a harness session that did not opt in, even when on', async () => {
     db.config = { config_value: { enabled: true } };
     harness.skip = true;
-    maybeRateAllianceForSession('s1');
+    await maybeRateAllianceForSession('s1');
     await flush();
     expect(db.upserts).toEqual([]);
   });
@@ -136,11 +197,48 @@ describe('rateSessionAlliance', () => {
     expect(db.upserts).toEqual([]);
   });
 
-  it('does not rate twice under the same judge version', async () => {
-    db.existing = { status: 'rated' };
+  it('does not rate twice when the transcript has not changed', async () => {
+    db.existing = { status: 'rated', transcript_fingerprint: 'fp-now' };
     const { client, create } = fakeClient();
     expect(await rateSessionAlliance('s1', { client })).toEqual({ outcome: 'skipped', reason: 'already_rated' });
     expect(create).not.toHaveBeenCalled();
+    expect(db.upserts).toEqual([]);
+  });
+
+  it('rates a stale session again: the transcript changed since the stored rating', async () => {
+    db.existing = { status: 'rated', transcript_fingerprint: 'fp-before-the-late-turn' };
+    const { client, create } = fakeClient();
+    const result = await rateSessionAlliance('s1', { client });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(result.outcome).toBe('stored');
+    expect(db.upserts[0]).toMatchObject({ status: 'rated', transcriptFingerprint: 'fp-now', transcriptMessages: 6 });
+  });
+
+  it('a too-short answer is stale too once the transcript has grown', async () => {
+    db.existing = { status: 'too_short', transcript_fingerprint: 'fp-short' };
+    const { client, create } = fakeClient();
+    await rateSessionAlliance('s1', { client });
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('does nothing while another run holds the claim for the session', async () => {
+    db.claimFree = false;
+    const { client, create } = fakeClient();
+    expect(await rateSessionAlliance('s1', { client, force: true })).toEqual({
+      outcome: 'skipped',
+      reason: 'in_progress',
+    });
+    expect(create).not.toHaveBeenCalled();
+    expect(db.upserts).toEqual([]);
+  });
+
+  it('a failed re-rating reports that the stored answer was kept', async () => {
+    db.existing = { status: 'rated', transcript_fingerprint: 'fp-now' };
+    const { client } = fakeClient(async () => Promise.reject(new Error('503 upstream')));
+    expect(await rateSessionAlliance('s1', { client, force: true })).toEqual({
+      outcome: 'skipped',
+      reason: 'kept_existing',
+    });
   });
 
   it('rates again after an errored attempt, and under force', async () => {
@@ -149,7 +247,7 @@ describe('rateSessionAlliance', () => {
     await rateSessionAlliance('s1', { client: a.client });
     expect(a.create).toHaveBeenCalledTimes(1);
 
-    db.existing = { status: 'rated' };
+    db.existing = { status: 'rated', transcript_fingerprint: 'fp-now' };
     const b = fakeClient();
     await rateSessionAlliance('s1', { client: b.client, force: true });
     expect(b.create).toHaveBeenCalledTimes(1);
@@ -164,11 +262,16 @@ describe('rateSessionAlliance', () => {
     const result = await rateSessionAlliance('s1', { client });
     expect(create).not.toHaveBeenCalled();
     expect(result.outcome).toBe('stored');
-    const stored = db.upserts[0] as { status: string; subscales: Record<string, { rateable: boolean; score: null }> };
+    const stored = db.upserts[0] as {
+      status: string;
+      subscales: Record<string, { rateable: boolean; score: null; pRateable: null }>;
+    };
     expect(stored.status).toBe('too_short');
     for (const s of ['task', 'bond', 'goal']) {
       expect(stored.subscales[s].rateable).toBe(false);
       expect(stored.subscales[s].score).toBeNull();
+      // No judge call, so no probability: NULL, never an invented 0.
+      expect(stored.subscales[s].pRateable).toBeNull();
     }
     expect(stored).toMatchObject({ model: null, tokensIn: null, participantTurns: 1 });
   });

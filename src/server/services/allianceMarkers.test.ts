@@ -119,6 +119,18 @@ describe('alliance judge response', () => {
     expect(parseAllianceResponse(response({ task_score: shifted })).subscales.task.level).toBe(5);
   });
 
+  it('a tie for the most probable level reports the lower level; the mean score is unaffected', () => {
+    const two = parseAllianceResponse(response({ task_score: score('task_score', [0, 0, 0.5, 0.5, 0]) })).subscales
+      .task;
+    expect(two).toMatchObject({ level: 3, confidence: 0.5, score: 3.5 });
+    // Three-way tie, and a tie that is not between neighbours: still the lowest.
+    const three = parseAllianceResponse(response({ task_score: score('task_score', [0.1, 0.3, 0.3, 0, 0.3]) }));
+    expect(three.subscales.task.level).toBe(2);
+    // No tie: the single highest level wins wherever it sits.
+    const none = parseAllianceResponse(response({ task_score: score('task_score', [0.2, 0.2, 0.25, 0.35, 0]) }));
+    expect(none.subscales.task.level).toBe(4);
+  });
+
   it('accepts answers in any order when they carry names', () => {
     const r = response();
     r.answers.reverse();

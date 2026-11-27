@@ -46,6 +46,7 @@ const RATING = {
   task_score: 4.2,
   goal_rateable: false,
   goal_score: null,
+  stale: false,
 };
 const URL_ = '/admin/api/sessions/sess_1/alliance-rating';
 
@@ -66,6 +67,13 @@ describe('alliance rating read', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ rating: RATING, blind: false });
     expect(dbMocks.getLatestAllianceRating).toHaveBeenCalledWith('sess_1');
+  });
+
+  it('passes the stale flag through, so the panel can say the rating is out of date', async () => {
+    dbMocks.getLatestAllianceRating.mockResolvedValue({ ...RATING, stale: true });
+    const res = await request(appAs('researcher')).get(URL_);
+    expect(res.status).toBe(200);
+    expect(res.body.rating.stale).toBe(true);
   });
 
   it('withholds the rating while the caller still owes a blind human rating for the session', async () => {

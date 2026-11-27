@@ -352,6 +352,13 @@ export function parseAllianceResponse(raw: unknown): AllianceAnswer {
       };
       return;
     }
+    // The most probable level. Tie-break: when two or more levels share the
+    // highest probability, the LOWEST of them is reported (strict `>` keeps
+    // the first maximum). Deliberate: an exact tie is the judge not telling
+    // the levels apart, and the rating should not claim the stronger
+    // alliance on no evidence. `score` (the probability-weighted mean) is
+    // unaffected by the tie and is the value to analyse; `confidence` shows
+    // the tie (at most 0.5).
     const top = distribution.reduce((best, p, idx) => (p > distribution[best] ? idx : best), 0);
     subscales[subscale] = {
       rateable: true,

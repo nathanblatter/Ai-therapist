@@ -9,7 +9,7 @@ import { ChevronDown, ChevronRight, AlertTriangle } from 'react-feather';
 import { getJson, HttpError } from '../../shared/http';
 // Canonical row shape lives in the server data layer (type-only import,
 // erased at build time).
-import type { AllianceRatingRow } from '../../../server/db/allianceRatings.queries';
+import type { AllianceRatingRead, AllianceRatingRow } from '../../../server/db/allianceRatings.queries';
 
 const SUBSCALES = [
   ['task', 'Task', 'Agreement on what to do in the session, and that it is useful'],
@@ -32,12 +32,12 @@ export function describeSubscale(row: AllianceRatingRow, subscale: 'task' | 'bon
 
 export default function SessionAlliancePanel({ sessionId }: { sessionId: string }) {
   const [expanded, setExpanded] = useState(false);
-  const [rating, setRating] = useState<AllianceRatingRow | null>(null);
+  const [rating, setRating] = useState<AllianceRatingRead | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setRating(null);
-    getJson<{ rating: AllianceRatingRow | null }>(`/admin/api/sessions/${sessionId}/alliance-rating`)
+    getJson<{ rating: AllianceRatingRead | null }>(`/admin/api/sessions/${sessionId}/alliance-rating`)
       .then((data) => {
         if (!cancelled) setRating(data.rating);
       })
@@ -66,6 +66,7 @@ export default function SessionAlliancePanel({ sessionId }: { sessionId: string 
           Working-alliance markers
         </span>
         <span className="text-xs text-gray-500">
+          {rating.stale ? 'Out of date · ' : ''}
           {rating.status === 'rated'
             ? SUBSCALES.map(
                 ([key, label]) => `${label} ${rating[`${key}_rateable`] ? rating[`${key}_level`] : 'n/r'}`,
@@ -81,6 +82,13 @@ export default function SessionAlliancePanel({ sessionId }: { sessionId: string 
             <p className="flex items-center gap-2 text-amber-700 mb-2">
               <AlertTriangle size={14} />
               The judge call failed, so this session has no rating. It is not a low score.
+            </p>
+          )}
+          {rating.stale && (
+            <p className="flex items-center gap-2 text-amber-700 mb-2">
+              <AlertTriangle size={14} />
+              Out of date: the transcript has changed since this rating (a late message, a corrected redaction or a leak
+              review). It will be rated again; do not use these numbers until then.
             </p>
           )}
           <dl className="grid grid-cols-1 gap-2">

@@ -1,6 +1,6 @@
 // Linguistic working-alliance markers (ai-therapist-173): list, and
-// optionally rate, the eligible sessions that have no rating under the
-// current judge version.
+// optionally rate, the eligible sessions that have no current rating under
+// the current judge version.
 //
 // Usage:
 //   npx tsx src/database/scripts/rateAllianceMarkers.ts [--limit <n>]
@@ -8,24 +8,35 @@
 //   npx tsx src/database/scripts/rateAllianceMarkers.ts --rate --session <id> [--force]
 //
 // Default is LIST ONLY: no OpenAI call and no write. It prints how many
-// eligible sessions are waiting (ended, not demo / harness / sandbox,
-// redaction complete, no answer for the current judge version; a session
-// whose earlier attempt errored counts as waiting). It never prints message
-// text.
+// eligible sessions are waiting. Eligible: an ended session of an enrolled
+// study participant (a participant account that is not sandbox and has not
+// withdrawn; never a staff, demo, harness or anonymous session) whose
+// redaction is complete. Waiting: no answer for the current judge version,
+// an earlier attempt that errored, or a STALE answer (the transcript the
+// judge may read has changed since: a late message, a re-redaction, a leak
+// review). It never prints message text.
 //
 // --rate calls the judge: one OpenAI Decisions API call per session (input
 // tokens only; none for a session under the length floor) and one row written
 // to session_alliance_ratings per session. Only messages.content_redacted is
-// read. Running this script is the opt-in: it does not consult
+// read, and a message waiting for leak review is not read at all. Running
+// this script is the opt-in: it does not consult
 // system_config.alliance_markers, which gates only the automatic post-session
-// job. --force re-rates a session that already has an answer (with --session).
+// job. --force re-rates a session that already has a current answer (with
+// --session). A session another run is rating at that moment is skipped
+// (in_progress), so this script and the automatic job never both pay for it;
+// a failed re-rating never replaces a stored answer (kept_existing).
 //
 // Reads DATABASE_URL and OPENAI_API_KEY like the app. Not run by CI. Do not
 // leave a long run going across the mini's Friday-night restart.
 import { pool } from '../../server/config/db.js';
 import { getSessionsNeedingAllianceRating } from '../../server/db/index.js';
 import { ALLIANCE_JUDGE_VERSION } from '../../server/services/allianceMarkers.js';
-import { backfillAllianceRatings, rateSessionAlliance } from '../../server/services/allianceRating.service.js';
+import {
+  backfillAllianceRatings,
+  rateSessionAlliance,
+  type RateOutcome,
+} from '../../server/services/allianceRating.service.js';
 
 function getArg(flag: string): string | undefined {
   const idx = process.argv.indexOf(flag);
@@ -54,7 +65,7 @@ async function main() {
       console.log('[AllianceBackfill] list only: nothing was sent or written. Add --rate to rate this session.');
       return;
     }
-    const result = await rateSessionAlliance(sessionId, { force });
+    const result: RateOutcome = await rateSessionAlliance(sessionId, { force });
     if (result.outcome === 'skipped') {
       console.log(`[AllianceBackfill] ${sessionId}: skipped (${result.reason})`);
     } else {
@@ -73,7 +84,7 @@ async function main() {
 
   const waiting = await getSessionsNeedingAllianceRating(ALLIANCE_JUDGE_VERSION, { limit });
   console.log(
-    `[AllianceBackfill] ${waiting.length} eligible session(s) with no ${ALLIANCE_JUDGE_VERSION} rating` +
+    `[AllianceBackfill] ${waiting.length} eligible session(s) with no current ${ALLIANCE_JUDGE_VERSION} rating (none, errored or stale)` +
       (limit !== null ? ` (limited to ${limit})` : ''),
   );
   if (!rate) {

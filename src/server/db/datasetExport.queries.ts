@@ -12,6 +12,7 @@
 import { pool } from '../config/db.js';
 import { notUnverifiedSpeechSql } from './unverifiedSpeech.js';
 import { studyWeekSql } from './qualtricsResponses.queries.js';
+import { allianceRatingStaleSql } from './allianceRatings.queries.js';
 
 // Every export row is a flat string/number/bool/null map keyed by column name.
 export type DatasetRow = Record<string, unknown>;
@@ -686,6 +687,16 @@ export async function getCrisisAdjudicationsExport(asOf: string): Promise<Datase
  * coverage is auditable; a subscale that could not be rated has
  * <subscale>_rateable = false and empty score columns.
  *
+ * As-of: the session must have started, and the rating must have been made,
+ * by `asOf` (like human_ratings.csv and crisis_adjudications.csv, which
+ * bound their own timestamps). A session rated again after `asOf` therefore
+ * has no row in an export as of the earlier date: the earlier answer was
+ * replaced, not kept.
+ *
+ * stale: the session's readable transcript has changed since the rating (a
+ * late message, a re-redaction, a leak review) and the job has not rated it
+ * again yet. Computed against the transcript at export time.
+ *
  * participant_id + study_week (or session_started_at) are the join to the
  * weekly WAI-SR subscales in surveys_scored.csv.
  */
@@ -712,12 +723,13 @@ export async function getAllianceRatingsExport(asOf: string): Promise<DatasetRow
             ar.participant_turns,
             ar.participant_words,
             ar.transcript_truncated,
+            ${allianceRatingStaleSql('ar')} AS stale,
             ${tsUtc('ar.rated_at')} AS rated_at
      FROM session_alliance_ratings ar
      JOIN therapy_sessions ts ON ts.session_id = ar.session_id
      JOIN research_pseudonyms sp ON sp.entity_type = 'session' AND sp.entity_key = ar.session_id
      LEFT JOIN research_pseudonyms pp ON pp.entity_type = 'participant' AND pp.entity_key = ts.user_id::text
-     WHERE ts.is_demo IS NOT TRUE AND ts.created_at <= $1
+     WHERE ts.is_demo IS NOT TRUE AND ts.created_at <= $1 AND ar.rated_at <= $1
      ORDER BY sp.pseudonym, ar.judge_version`,
     [asOf],
   );

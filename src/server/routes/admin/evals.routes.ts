@@ -208,6 +208,9 @@ export default function evalsRoutes(): Router {
   // Blind rating applies here too: while the caller still owes a human
   // rating for this session, another automated judge's verdict on it stays
   // server-side, like the quality judge's scores above.
+  // rating.stale is true when the session's readable transcript has changed
+  // since the rating (a late message, a re-redaction, a leak review) and the
+  // job has not rated it again yet; the panel says so.
   router.get(
     '/admin/api/sessions/:sessionId/alliance-rating',
     requireRole('researcher'),

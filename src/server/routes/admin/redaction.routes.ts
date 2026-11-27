@@ -27,6 +27,20 @@ async function callerOrgId(req: Request): Promise<number> {
   return orgId;
 }
 
+/**
+ * A correction or an approval changes what the working-alliance judge may
+ * read of the session (ai-therapist-173): the corrected text, or a message
+ * the leak check had withheld and the reviewer has now released. Tell the
+ * rating job, fire-and-forget. It does nothing unless
+ * system_config.alliance_markers is enabled, and it can never fail the
+ * review request.
+ */
+function notifyAllianceRatingOfReview(messageId: string): void {
+  import('../../services/allianceRating.service.js')
+    .then((m) => m.maybeRateAllianceAfterLeakReview(messageId))
+    .catch((err) => log.error({ err }, 'alliance rating after review could not start (non-fatal)'));
+}
+
 export default function redactionRoutes(): Router {
   const router = Router();
 
@@ -69,6 +83,7 @@ export default function redactionRoutes(): Router {
           return res.status(404).json({ error: 'Message not found' });
         }
         res.json({ success: true });
+        notifyAllianceRatingOfReview(id);
       } catch (err) {
         log.error({ err }, 'Failed to update redacted content');
         res.status(500).json({ error: 'Failed to update message' });
@@ -90,6 +105,7 @@ export default function redactionRoutes(): Router {
           return res.status(404).json({ error: 'Message not found' });
         }
         res.json({ success: true });
+        notifyAllianceRatingOfReview(id);
       } catch (err) {
         log.error({ err }, 'Failed to record redaction approval');
         res.status(500).json({ error: 'Failed to record approval' });
